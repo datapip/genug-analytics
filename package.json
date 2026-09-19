@@ -1,0 +1,31 @@
+{
+  "name": "genug",
+  "description": "Self-hosted, AI-native web analytics queried through an AI agent instead of a dashboard.",
+  "version": "0.5.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@genug/schema-registry && npm run build --workspace=@genug/client && npm run build --workspace=@genug/server",
+    "test": "npm test --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.4.1",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@genug/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('fs').rmSync(p, { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -b",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@genug/schema-registry": "*",
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.2.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6"
+  }
+}

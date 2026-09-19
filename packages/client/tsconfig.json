@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "rootDir": "src",
+    "outDir": "dist",
+    // Force syntax-only module detection: this package's "type": "module"
+    // + the base config's NodeNext would otherwise make TS treat this
+    // import-free file as an ES module anyway, appending a synthetic
+    // `export {}` that breaks a plain (non-module) <script src> tag.
+    "moduleDetection": "legacy",
+    // This file is served as-is at /client.js — every comment in src/,
+    // including internal reasoning and references to server-side files,
+    // would otherwise ship to every visitor's browser verbatim. Scoped to
+    // this package only: server and schema-registry dist output is never
+    // served to a browser, so their comments stay for anyone reading the
+    // build output while debugging.
+    "removeComments": true
+  },
+  "include": ["src"]
+}

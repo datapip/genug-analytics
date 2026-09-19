@@ -1,0 +1,16 @@
+{
+  "name": "@genug/schema-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('fs').rmSync(p, { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -b",
+    "test": "npm run build && node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  }
+}

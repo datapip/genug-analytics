@@ -1,0 +1,13 @@
+{
+  "_description": "Fired when a visitor views a page",
+  "_pageView": true,
+  "_note": "The bare-minimum event. `url` and `referrer` are already envelope fields, so they aren't repeated here. Everything below is only readable client-side — anything derivable from HTTP headers (User-Agent, Accept-Language) lives on the envelope instead.",
+
+  "page_title": "string",
+  "page_title_description": "The document's title",
+  "page_title_example": "Pricing — Genug",
+
+  "document_language": "string",
+  "document_language_description": "The page's own declared language (document.documentElement.lang), distinct from the visitor's browser locale",
+  "document_language_example": "en"
+}

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # The same command the docs tell a contributor to run, so CI can't
+      # pass a suite that `npm test` locally doesn't actually cover.
+      - run: npm test
+
+      - run: npm run lint
+
+      - run: npm run format:check
+
+  # Only runs for the tag push docs/releasing.md's `git push --follow-tags`
+  # produces — an ordinary push to main builds and tests above but
+  # publishes nothing. Gated on build-and-test via `needs`, so a tag that
+  # doesn't build or pass its tests can never reach ghcr.io.
+  publish-image:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Only this job needs it, so it's scoped here rather than for the
+      # whole workflow — build-and-test has no business pushing anything.
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      # GITHUB_TOKEN needed the repo added explicitly under the
+      # package's own Manage Actions access, with Write — neither
+      # connecting the package to the repo nor "Inherit access from
+      # source repository" was that grant. Package → Manage Actions
+      # access → Add Repository, in case this ever needs redoing
+      # (a deleted-and-recreated package won't carry it over).
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          # Matches the Dockerfile's `ARG GENUG_VERSION` — the same tag
+          # both names the image and is what the running server reports.
+          build-args: GENUG_VERSION=${{ github.ref_name }}
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}

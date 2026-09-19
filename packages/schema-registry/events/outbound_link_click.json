@@ -1,0 +1,17 @@
+{
+  "_description": "Fired when a visitor clicks a link pointing at a different site",
+  "_automaticOutboundClick": true,
+  "_note": "Fired automatically by the client script when enableAutoLinkTracking is on. The _outboundClick tag is what the client resolves this name through, so renaming this event keeps auto-tracking working instead of silently sending a name the registry no longer has.",
+
+  "target_url": "string.long",
+  "target_url_description": "Full URL the link points to",
+  "target_url_example": "https://partner.example.com/pricing",
+
+  "target_host": "string",
+  "target_host_description": "Hostname the link points to — group by this rather than target_url, which fragments one destination into one row per page linked to",
+  "target_host_example": "partner.example.com",
+
+  "link_text": "string",
+  "link_text_description": "Visible text of the clicked link, whitespace-collapsed and truncated. Empty string for a link containing only an image or icon",
+  "link_text_example": "See our partner"
+}

@@ -1,0 +1,1697 @@
+/* Deliberately no webfont: system-ui only. A privacy-focused,
+   self-hosted analytics tool shouldn't make its own cockpit
+   phone home to a font CDN, and self-hosting a font file would
+   add weight for a page only the site owner ever looks at. */
+
+:root {
+  color-scheme: light;
+  --page-bg: #f2f2f4;
+  --surface: #fbfbfc;
+  --surface-subtle: #ececee;
+  --header-bg: rgba(242, 242, 244, 0.82);
+  --ink: #18181b;
+  --ink-secondary: #52525b;
+  --ink-muted: #6b6b76;
+  --border: #e7e7ea;
+  --border-strong: #d6d6db;
+  --accent: #4f46e5;
+  --accent-soft: #eeecfd;
+  /* Only the sign-in page uses these three: a field border that reads
+     as a field on its own (3.4:1 here, where --border is 1.1:1), and a
+     filled primary button. */
+  --field-border: #8b8b95;
+  --accent-strong: #4338ca;
+  --accent-ink: #ffffff;
+  --logo-bg: #ffffff;
+  --logo-ink: #000000;
+  --critical: #b91c1c;
+  --critical-soft: #fdecec;
+  --series-sessions: #4f46e5;
+  --series-events: #0d9488;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page-bg: #0b0b0d;
+    --surface: #131316;
+    --surface-subtle: #1a1a1e;
+    --header-bg: rgba(11, 11, 13, 0.82);
+    --ink: #fafafa;
+    --ink-secondary: #a1a1ad;
+    --ink-muted: #8a8a97;
+    --border: #26262b;
+    --border-strong: #35353c;
+    --accent: #8b85f5;
+    --accent-soft: rgba(139, 133, 245, 0.16);
+    --field-border: #6f6f7a;
+    --accent-strong: #a5a0f8;
+    /* Dark ink on the lighter accent: white on it would be ~3:1, under
+       the 4.5:1 a button's label needs. */
+    --accent-ink: #0b0b0d;
+    --logo-bg: #000000;
+    --logo-ink: #ffffff;
+    --critical: #f87171;
+    --critical-soft: rgba(248, 113, 113, 0.15);
+    --series-sessions: #8b85f5;
+    --series-events: #2dd4bf;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: #0b0b0d;
+  --surface: #131316;
+  --surface-subtle: #1a1a1e;
+  --header-bg: rgba(11, 11, 13, 0.82);
+  --ink: #fafafa;
+  --ink-secondary: #a1a1ad;
+  --ink-muted: #8a8a97;
+  --border: #26262b;
+  --border-strong: #35353c;
+  --accent: #8b85f5;
+  --accent-soft: rgba(139, 133, 245, 0.16);
+  --field-border: #6f6f7a;
+  --accent-strong: #a5a0f8;
+  --accent-ink: #0b0b0d;
+  --logo-bg: #000000;
+  --logo-ink: #ffffff;
+  --critical: #f87171;
+  --critical-soft: rgba(248, 113, 113, 0.15);
+  --series-sessions: #8b85f5;
+  --series-events: #2dd4bf;
+}
+
+/* Available to assistive tech and to text search, painted nowhere.
+   Used for the trend chart's data table, since the chart itself
+   carries its values only in hover handlers. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  /* `width: 1px` alone doesn't shrink the trend chart's data table:
+     min-width beats width, and the table rule below sets 460px. The
+     box then stays 460px wide, and being absolutely positioned it
+     stretches the page's scroll width without ever being painted —
+     a phone scrolls sideways into blank space. */
+  min-width: 0;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+/* Every number on this page is meant to be compared against the
+   number above or below it, so they all get fixed-width digits —
+   otherwise columns of figures visibly wobble. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- header ---------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--header-bg);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1rem 2rem;
+}
+/* Top-aligned, not centred: the text beside the mark is three lines
+   now, and centring drifted the mark down to sit against the product
+   name rather than the title it belongs to. */
+.brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+/* Monochrome and inverted per theme: black on white in light mode,
+   white on black in dark. The tile itself sits close to the page
+   background in both, so what actually reads is the glyph — the
+   border is what keeps it a defined mark rather than a floating
+   icon. */
+.brand-mark {
+  /* Matched to the h1's line box beside it (1.05rem × 1.5 ≈ 25px), so
+     the mark and the title occupy exactly the same band instead of the
+     mark hanging 5px below the word. */
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--logo-bg);
+  color: var(--logo-ink);
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.brand-mark svg {
+  width: 15px;
+  height: 15px;
+}
+h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.brand-sub {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+/* Under the product name rather than beside it: it is looked up when
+   filing a bug, not read every time, so it gets the quietest line in
+   the header and never competes with the name for the same row. */
+.brand-version {
+  margin: 0.1rem 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+/* Both of these are block captions under the control row, not members
+   of it — kept out of .header-actions entirely (rather than stacked
+   with the Refresh button in a column) so whether they are empty or
+   filled never changes the height .header-actions centers against,
+   which previously shifted the button up once it had real text.
+
+   The range sits under the picker that produces it: 24h/7d/30d names a
+   length, and these are the two dates it actually resolved to, so the
+   answer belongs beneath the question rather than across the header
+   under the page title. */
+.period,
+.updated {
+  display: block;
+  text-align: right;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  margin: 0.15rem 0 0;
+}
+.period {
+  margin-top: 0.5rem;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* The segmented control's own buttons use smaller padding/font-size
+   than the plain header buttons, so without a shared height they'd
+   sit at different heights despite being centered on the same row.
+   The segmented control's buttons fill this via the default flex
+   stretch behavior, no extra rule needed for them.
+
+   Direct children only (`>`): a descendant selector here also hit
+   the buttons *inside* the segmented control, giving each pill the
+   same 32px as its own track — which after the track's border and
+   padding leaves 26px of content box, so the selected pill visibly
+   overflowed the control it sits in. */
+.header-actions > button,
+.header-actions > .icon-button,
+.header-actions > .segmented {
+  height: 32px;
+}
+
+/* ---------- controls ---------- */
+
+button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.icon-button {
+  padding: 0 0.5rem;
+}
+button:hover:not(:disabled),
+.icon-button:hover {
+  background: var(--surface-subtle);
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+button:focus-visible,
+.icon-button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+button svg,
+.icon-button svg {
+  width: 15px;
+  height: 15px;
+}
+/* The button rule above sets `display`, and any author rule beats the
+   UA stylesheet's [hidden] — so a button set hidden from script
+   (Register new event when the schema is not editable, and every
+   write control in read-only mode) stayed on the page. This restores
+   what the attribute promises, for every element, over any display
+   rule of ours.
+
+   It fixed two silent ones as well: `.edit-migrate` and `.edit-adopt`
+   in the event form both set `display`, so the rows the form hides by
+   setting `hidden` were being laid out anyway — the "nothing to move"
+   checkbox on every open edit form, and an empty paragraph under the
+   name field of every create form.
+
+   Because of this rule, a new style may set `display` freely without
+   also having to remember that some script toggles `hidden` on it. */
+[hidden] {
+  display: none !important;
+}
+/* Kept for the elements that carry it, though the rule above now wins
+   for them too: a class under our control is still the clearer signal
+   at the call site than relying on an attribute another rule fought
+   over for years.
+
+   The original reason: plain `hidden` isn't reliable on <svg> — some browsers' UA
+   stylesheet gives svg:not(:root) a `display` rule that outranks
+   [hidden]'s by specificity, so it can silently lose. A class
+   under our control always wins. */
+.icon-hidden {
+  display: none;
+}
+button.is-loading svg {
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A small pill-group of buttons acting as one control (period
+   window, trend granularity) — one visual control, several
+   mutually-exclusive choices, unlike the standalone buttons above. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  padding: 2px;
+  gap: 2px;
+  flex: none;
+}
+.segmented button {
+  border: none;
+  border-radius: 5px;
+  /* The header's control is sized by .header-actions; this one had
+     nothing setting its height and landed at ~25px, barely over the
+     WCAG 2.5.8 target floor. Harmless to the header instance, whose
+     buttons stretch past this anyway. */
+  min-height: 28px;
+  padding: 0 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.segmented button:hover:not(.active) {
+  background: var(--surface);
+  color: var(--ink);
+}
+/* The ring, not the fill, is what makes the selection visible: against
+   its own track the fill is near-identical in light mode and actually
+   darker in dark mode, where the shadow below disappears entirely.
+   This is state rather than decoration, so it earns the colour. */
+.segmented button.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow:
+    0 0 0 1px var(--ink-muted),
+    0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* ---------- layout ---------- */
+
+.content {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 3rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+}
+.card-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.card-note {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+.card-body {
+  padding: 1.15rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+/* Without this the tables take the whole page hostage on a phone.
+   A flex item won't shrink below its own min-content width, and a
+   card holding a table inherits that table's `min-width: 460px` —
+   so the card grows past the viewport, .table-wrap never becomes
+   narrower than its table, and its overflow-x has nothing to clip.
+   The page scrolls sideways instead of the table doing it. */
+.stack > * {
+  min-width: 0;
+}
+/* No align-items: start — the three breakdown cards are read as one
+   row, and letting each shrink to its own content length left the
+   row visibly ragged along the bottom. */
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 980px) {
+  .grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- stat strip ---------- */
+
+/* One bordered strip split by hairlines rather than four floating
+   cards: these four numbers are read together as a single health
+   line, and four separate boxes made them look like four unrelated
+   widgets. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+@media (max-width: 780px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.stat {
+  padding: 1.1rem 1.25rem;
+}
+.stats > .stat + .stat {
+  border-left: 1px solid var(--border);
+}
+@media (max-width: 780px) {
+  .stats > .stat:nth-child(odd) {
+    border-left: none;
+  }
+  .stats > .stat:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+}
+.stat-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 0 0 0.5rem;
+}
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+/* Colour is used only when it means something: the rejected/bot
+   numbers turn red only once they're actually nonzero, so a glance
+   at the strip shows whether anything needs attention rather than
+   painting every card a decorative colour. */
+.stat-value.attention {
+  color: var(--critical);
+}
+.stat-hint {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  margin: 0.35rem 0 0;
+}
+
+/* Deployment context for the strip above rather than a metric of its
+   own — the role the retention footnote plays for the page as a whole. */
+.strip-note {
+  margin: -0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+/* ---------- chart ---------- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+#trend-caption {
+  margin-left: auto;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.chart-wrap {
+  position: relative;
+}
+.trend-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.trend-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.trend-line {
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.trend-area {
+  stroke: none;
+  opacity: 0.09;
+}
+.trend-bar {
+  rx: 2.5;
+}
+.trend-label {
+  font-size: 11px;
+  fill: var(--ink-muted);
+}
+.trend-label-y {
+  font-size: 11px;
+  fill: var(--ink-muted);
+}
+.trend-hit {
+  fill: transparent;
+}
+.trend-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Sits on top of its hit rect in paint order (an adjacent-sibling
+   selector needs that order), so it has to opt out of pointer
+   events or it would swallow the hover it exists to react to —
+   an opacity: 0 element is still a pointer-event target. */
+.trend-hit-bg {
+  fill: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+}
+.trend-hit:hover + .trend-hit-bg,
+.trend-slot.is-active .trend-hit-bg {
+  opacity: 0.035;
+}
+.trend-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  display: none;
+  z-index: 2;
+}
+.trend-tooltip.visible {
+  display: block;
+}
+.tooltip-label {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ink-secondary);
+}
+.tooltip-row b {
+  margin-left: auto;
+  padding-left: 0.75rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- bar lists (top pages / referrers / devices) ---------- */
+
+/* One component for all three ranked breakdowns. A bare count in a
+   table cell makes the reader compare numbers; a proportional bar
+   behind the row makes the comparison visual and instant. */
+.bar-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.bar-row + .bar-row {
+  margin-top: 2px;
+}
+.bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+.bar-label {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-sub {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  text-transform: capitalize;
+}
+.bar-value {
+  position: relative;
+  flex: none;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- tables ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 460px;
+}
+th {
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 0.55rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  text-align: left;
+  padding: 0.6rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  vertical-align: top;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr:hover td {
+  background: var(--surface-subtle);
+}
+.ts {
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.url-cell {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-secondary);
+}
+/* Unlike .url-cell, this wraps instead of truncating: a validation
+   message is a sentence meant to be read to the end, and the end
+   ("expected string, received number") is the half that says what to
+   fix. A URL truncates because its start is the identifying part. */
+.detail-cell {
+  max-width: 420px;
+  color: var(--ink-secondary);
+}
+
+.event-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  color: var(--ink-muted);
+}
+/* The props JSON wraps, so without a floor on the column width the
+   table hands it whatever is left over — on a phone that was 75px,
+   which wrapped one short object across fifteen lines and made every
+   row 200px tall. The table already scrolls inside .table-wrap, so
+   claiming a readable width here costs nothing but sideways scroll. */
+.props-cell {
+  min-width: 220px;
+}
+
+/* Stands in for an event name, so it lines up with one — .empty, the
+   obvious class to reuse here, carries padding meant for a whole cell
+   and pushed this out of the column. */
+.unnamed {
+  color: var(--ink-muted);
+}
+
+/* The timestamp under a rejection's detail: same line height, quieter,
+   and on its own line so the detail above it stays the thing you read
+   first. */
+.detail-when {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.prop-code {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+/* ---------- reference area ---------- */
+
+/* A labelled rule separating "what's happening right now" from
+   "how this deployment is configured" — the two halves of the page
+   answer different questions and previously ran together as one
+   undifferentiated stack of sections. */
+.area-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 2.25rem 0 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+/* The top margin exists to separate one section from the previous
+   one; the first has nothing above it but the header, and inherits the
+   gap from .content's own padding. */
+.content > .area-label:first-of-type {
+  margin-top: 0;
+}
+.area-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Jump links, not tabs. Tabs were considered and rejected: the page
+   answers "is this healthy" on its first screen, and a tab would put
+   the trend chart behind a click and hide the two warnings (rejected
+   events, schema errors) that sit further down on purpose. What a
+   phone actually suffers from is length — five or six screens with
+   Configuration at the bottom — and one row of links fixes that with
+   no state and nothing hidden. Deliberately not inside the sticky
+   header: once that wraps on a phone, every sticky pixel is lost
+   viewport. */
+.section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1.25rem;
+}
+.section-nav a {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.section-nav a:hover {
+  background: var(--surface-subtle);
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.section-nav a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Where a jump link lands. The header is sticky, so without this the
+   label scrolls up underneath it. Sized for the header at its tallest
+   in each range, not its usual height: the control row wraps under
+   the brand from just under 1000px down (two rows, ~112px), and below
+   780px the captions drop to a third (~160px). A static value rather
+   than the measured one showError computes, because a link runs no
+   script; the price is some spare air on a wide screen, which is
+   cheaper than a label parked under the header on a narrow one. */
+.area-label {
+  scroll-margin-top: 8.5rem;
+}
+@media (max-width: 780px) {
+  .area-label {
+    scroll-margin-top: 11.5rem;
+  }
+}
+
+/* Collapsed by default: the registry and tool list are reference
+   material, read occasionally, and expanded they're several times
+   taller than everything above them combined — which pushed the
+   actual health information into a minority of the page. */
+details.card > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.15rem;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 10px;
+}
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+details.card[open] > summary {
+  border-bottom: 1px solid var(--border);
+  border-radius: 10px 10px 0 0;
+}
+details.card > summary:hover {
+  background: var(--surface-subtle);
+}
+.summary-chevron {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--ink-muted);
+  transition: transform 0.15s ease;
+}
+details.card[open] .summary-chevron {
+  transform: rotate(90deg);
+}
+.summary-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+/* The card is closed by default, so this line is the only thing on
+   screen saying the registry has a problem that makes the numbers
+   above it wrong. Red and no longer muted, for the same reason the
+   rejected-events count is. */
+.summary-count.is-critical {
+  color: var(--critical);
+  font-weight: 600;
+}
+
+/* Schema files the server refused to load. Red for the same reason the
+   rejected-events number is: it means something is wrong right now and
+   is losing data, not that the section is important. Sits above the
+   registry it failed to join. */
+.schema-errors {
+  border-bottom: 1px solid var(--border);
+  color: var(--critical);
+}
+.schema-errors p {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.schema-errors p:last-child {
+  margin-bottom: 0;
+}
+.schema-errors-title {
+  font-weight: 600;
+}
+.schema-errors code {
+  background: var(--critical-soft);
+  color: var(--critical);
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+}
+
+.schema-reload {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.schema-reload button {
+  height: 30px;
+  flex: none;
+}
+.schema-reload-note {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+/* The one outcome worth colouring: a reload that changed nothing
+   because the build failed, leaving the previous registry serving. */
+.schema-reload-note.is-critical {
+  color: var(--critical);
+}
+/* A hint attached to a control is muted; a statement standing on its
+   own is not. In read-only mode this band holds only the sentence, so
+   at --ink-muted it read as a caption for the event list below it. */
+.schema-reload-note.is-note {
+  color: var(--ink-secondary);
+  margin: 0;
+}
+
+/* ---------- schema editing ---------- */
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0 0.2rem;
+  height: auto;
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-button:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+}
+.schema-title .link-button {
+  margin-left: auto;
+  font-weight: 400;
+}
+/* The inline Delete trigger inside a schema-actions row — same control
+   as Edit and Add a prop, coloured to match the danger-zone buttons so
+   a destructive action reads as one before it is even clicked. */
+.link-button.is-critical {
+  color: var(--critical);
+}
+.link-button.is-critical:disabled {
+  color: var(--ink-muted);
+  text-decoration: none;
+  cursor: not-allowed;
+}
+.schema-item-editing {
+  background: var(--surface-subtle);
+  margin-inline: -0.6rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+}
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+}
+.edit-field label,
+.edit-field .edit-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.edit-field .edit-label {
+  margin: 0;
+}
+.edit-input {
+  font: inherit;
+  font-size: 0.8rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.edit-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.edit-input-short {
+  max-width: 16rem;
+}
+/* The consequence of renaming, stated where the rename happens rather
+   than in the orphaned-events panel afterwards. */
+.edit-migrate {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: -0.2rem 0 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-secondary);
+}
+.edit-adopt {
+  display: block;
+  color: var(--ink-muted);
+}
+.edit-migrate input {
+  margin-top: 0.15rem;
+  flex: none;
+}
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+.edit-message:empty {
+  display: none;
+}
+.edit-message {
+  margin: 0.7rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+.edit-message.is-critical {
+  color: var(--critical);
+}
+
+/* Both lists are a column of closed accordions; the tile styling below
+   carries the separation, so no extra rule between them. */
+#schema-registry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.schema-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-subtle);
+}
+details.schema-item > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 0;
+}
+details.schema-item > summary::-webkit-details-marker {
+  display: none;
+}
+details.schema-item[open] > summary {
+  margin-bottom: 0.5rem;
+}
+details.schema-item[open] .summary-chevron {
+  transform: rotate(90deg);
+}
+/* Pushed to the far end of the row and never shrunk: it is the part
+   worth reading on a row you haven't opened. */
+.schema-meta {
+  margin-left: auto;
+  flex: none;
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+/* Names the event every page-scoped number on the page is counted
+   from — a deployment can rename it, so nothing else says which. Said
+   in words at the weight the header's version line uses: it is a fact
+   about the row, not a second label competing with the name. */
+.schema-badge {
+  flex: none;
+  font-weight: 400;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+}
+.schema-actions {
+  margin-top: 0.5rem;
+}
+.schema-title,
+.tool-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  flex-wrap: wrap;
+}
+/* The name is the row, in both lists — a filled pill rather than the
+   bordered chip .prop-code gives a value mentioned inside a sentence. */
+.schema-title code,
+.tool-title code {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.schema-desc,
+.tool-desc {
+  color: var(--ink-secondary);
+  font-size: 0.82rem;
+  margin: 0;
+}
+/* Unlike the full-bleed tables above, this one sits inside body
+   padding alongside its own description text, so it keeps its own
+   border rather than running to the card's edges. */
+.subtable-wrap {
+  margin-top: 0.7rem;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.subtable-wrap table {
+  min-width: 520px;
+}
+.subtable-wrap th,
+.subtable-wrap td {
+  padding: 0.45rem 0.75rem;
+}
+/* One per row rather than a grid of tiles: every tool is a closed
+   accordion now, so the card is a scannable list of names and a
+   multi-column layout would only make that list harder to read down. */
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* Each tool is its own bordered tile, so the single-column separator
+   the schema items use would read as a stray second line. */
+.tool-list .tool-item + .tool-item {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.tool-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-subtle);
+}
+details.tool-item > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 0;
+}
+details.tool-item > summary::-webkit-details-marker {
+  display: none;
+}
+details.tool-item[open] > summary {
+  margin-bottom: 0.4rem;
+}
+details.tool-item[open] .summary-chevron {
+  transform: rotate(90deg);
+}
+
+/* ---------- states ---------- */
+
+.empty {
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+}
+td.empty {
+  text-align: center;
+  padding: 0.6rem 1.15rem;
+}
+
+/* Shown at the top of the page, above every section, whenever a
+   data load fails — not tucked into one specific card, so it's
+   visible immediately no matter how long the page is, and can't
+   be misread as "this one section is broken" when really nothing
+   on the page updated. */
+.error-banner {
+  display: none;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--critical);
+  border-radius: 8px;
+  background: var(--critical-soft);
+  color: var(--critical);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.error-banner.visible {
+  display: flex;
+}
+.error-banner svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.footnote {
+  margin: 2rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 780px) {
+  .topbar-inner,
+  .content {
+    padding-left: 1.1rem;
+    padding-right: 1.1rem;
+  }
+
+  /* Once the header wraps, the control row drops to its own line and
+     starts at the left margin — so captions that stay right-aligned
+     detach from it and float in the middle of the screen. Narrow, the
+     header is one left-aligned column read top to bottom. */
+  .header-actions {
+    justify-content: flex-start;
+  }
+  /* Room to spare in a wrapped header, and these are thumb targets
+     here rather than cursor targets. */
+  .header-actions > button,
+  .header-actions > .icon-button,
+  .header-actions > .segmented {
+    height: 40px;
+  }
+  .period,
+  .updated {
+    text-align: left;
+  }
+
+  /* The header is sticky, so on a phone every line it occupies is a
+     line of data permanently off screen — stacked, these two captions
+     cost a fifth of the viewport between them and the brand. Side by
+     side they read as the one thing they are ("this window, read at
+     this time") and give back a row. Still wraps if the dates are long
+     enough to need it. */
+  .header-captions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.45rem;
+  }
+  .header-captions .updated {
+    margin-top: 0;
+  }
+  /* Only between them, and only when there is something on both sides:
+     both captions are empty until the first fetch resolves, and a lone
+     middot floating under the controls is a worse first impression than
+     a blank line — worse still beside an error banner, where it reads
+     as a signal of its own. */
+  .header-captions .updated::before {
+    content: "·";
+    margin-right: 0.45rem;
+  }
+  .header-captions .updated:empty::before {
+    content: none;
+  }
+
+  /* Same treatment as the captions below, for the same reason: the
+     header is sticky, so a line it spends here is a line of data
+     permanently off screen. The version sits beside the product name
+     rather than under it. */
+  .brand-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.45rem;
+  }
+  .brand-meta .brand-version {
+    margin-top: 0;
+  }
+  .brand-meta .brand-version::before {
+    content: "·";
+    margin-right: 0.45rem;
+  }
+  /* Nothing to separate until the first fetch lands. */
+  .brand-meta .brand-version:empty::before {
+    content: none;
+  }
+
+  /* Everywhere else a table wider than the screen scrolls inside its
+     wrapper, which is a fair trade for secondary columns. Not here: the
+     detail column is the whole reason this card exists, and the global
+     `table { min-width: 460px }` pushed it off the right edge behind a
+     scroll with no visible affordance. Four columns don't fit a phone
+     at any width that leaves the detail readable, so each rejection
+     stops being a row and becomes a block — at most five of them, so
+     the height is affordable and nothing is hidden. */
+  #rejected-card table,
+  #rejected-card tbody,
+  #rejected-card tr,
+  #rejected-card td {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+  /* Column headers describe nothing once the cells are stacked. */
+  #rejected-card thead {
+    display: none;
+  }
+  #rejected-card tr {
+    padding: 0.8rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+  }
+  #rejected-card tbody tr:last-child {
+    border-bottom: none;
+  }
+  #rejected-card td {
+    padding: 0;
+    border: none;
+  }
+  #rejected-card .detail-cell {
+    max-width: none;
+    margin-top: 0.3rem;
+  }
+  /* The one cell that stops describing itself once the header row is
+     hidden: the other three are a phrase, a monospace name and a
+     sentence, but a bare "3" could be anything. */
+  #rejected-card .count-cell::before {
+    content: "Count: ";
+    color: var(--ink-muted);
+  }
+  /* A long snake_case name is one unbreakable word to the layout. */
+  #rejected-card .event-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* Same problem, same cure: the URL was cut mid-string and the props
+     column sat entirely off-screen behind a scroll nothing hinted at,
+     which reads as a broken table rather than a scrollable one. */
+  #recent-card table,
+  #recent-card tbody,
+  #recent-card tr,
+  #recent-card td {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+  #recent-card thead {
+    display: none;
+  }
+  #recent-card tr {
+    padding: 0.8rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+  }
+  #recent-card tbody tr:last-child {
+    border-bottom: none;
+  }
+  #recent-card td {
+    padding: 0;
+    border: none;
+  }
+  #recent-card .url-cell {
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    margin-top: 0.3rem;
+  }
+  #recent-card .props-cell pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin-top: 0.3rem;
+  }
+
+  /* Five columns in ~300px showed two of them, with the description
+     and the example — the parts worth reading — off the right edge
+     behind a scroll. Same treatment as the rejected card: each prop
+     stops being a row and becomes a block. */
+  #schema-registry table,
+  #schema-registry tbody,
+  #schema-registry tr,
+  #schema-registry td {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+  #schema-registry thead {
+    display: none;
+  }
+  #schema-registry .subtable-wrap {
+    overflow-x: visible;
+  }
+  #schema-registry tbody tr {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  #schema-registry tbody tr:last-child {
+    border-bottom: none;
+  }
+  #schema-registry td {
+    padding: 0;
+    border: none;
+  }
+  #schema-registry .prop-desc-cell {
+    margin: 0.25rem 0;
+  }
+  /* Type and required are two halves of one fact, so they share a
+     line rather than taking one each. Scoped through the id because
+     the block rule above is, and would otherwise outrank a bare
+     class. */
+  #schema-registry .prop-type-cell,
+  #schema-registry .prop-required-cell {
+    display: inline-block;
+  }
+  #schema-registry .prop-required-cell::before {
+    content: " · ";
+    color: var(--ink-muted);
+  }
+  /* The only cell whose meaning isn't obvious once its column header
+     is gone — a bare quoted string could be anything. */
+  #schema-registry .prop-example-cell::before {
+    content: "e.g. ";
+    color: var(--ink-muted);
+  }
+}
+
+/* ---------- new event form ---------- */
+
+.create-prop {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.create-prop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.create-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--ink-secondary);
+}
+.create-checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.create-example-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+.create-empty {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
+/* ---------- danger zone ---------- */
+
+/* A dedicated card rather than reusing .schema-reload's layout: this is
+   the one destructive action the cockpit offers, and it should not read
+   as just another settings row. Bordered in --critical year-round
+   (not only on hover/open) so it stands out even collapsed. */
+.danger-zone {
+  border-color: var(--critical);
+}
+.danger-zone > summary .card-title {
+  color: var(--critical);
+}
+.danger-zone-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+/* Two irreversible actions now share this card, so each is a block of
+   its own — a single run of prose and two buttons would make it too
+   easy to read one warning and press the other button. */
+.danger-action + .danger-action {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.danger-action-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.danger-zone-instance {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.danger-zone-instance:empty {
+  display: none;
+}
+.danger-zone-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+.danger-zone-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.danger-zone-form input {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  min-width: 12rem;
+  flex: 1 1 12rem;
+}
+.danger-zone-form input:focus-visible {
+  outline: 2px solid var(--critical);
+  outline-offset: -1px;
+}
+.danger-button {
+  height: 32px;
+  flex: none;
+  border-color: var(--critical);
+  color: var(--critical);
+}
+.danger-button:hover:not(:disabled) {
+  background: var(--critical-soft);
+  border-color: var(--critical);
+  color: var(--critical);
+}
+.danger-zone-message {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+.danger-zone-message.is-critical {
+  color: var(--critical);
+}
+.danger-zone-message.is-success {
+  color: var(--ink);
+}
+
+/* The sign-in page (login.html). Shares this stylesheet rather than
+   having its own: it is one card, and a second file would be a second
+   place for the tokens above to drift out of. */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  /* 100vh alone leaves the card under a phone's address bar when it
+     expands; dvh follows the visible area. */
+  min-height: 100dvh;
+  padding: 1.5rem 16px;
+  box-sizing: border-box;
+}
+.login-card {
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  /* Lifted off the centre line: a dialog sitting exactly halfway reads
+     as slightly low, and this leaves room for the message below it to
+     appear without the card jumping. */
+  margin-bottom: 4vh;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.login-form label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+.login-form input {
+  font: inherit;
+  /* 16px exactly, not the 0.85rem the cockpit's own inputs use. Below
+     16px, iOS Safari zooms the whole viewport in when the field takes
+     focus — on a page that is one centred card, that reads as the page
+     breaking. */
+  font-size: 16px;
+  padding: 0.5rem 0.6rem;
+  /* Stronger than --border, which is 1.14:1 against the card and fails
+     WCAG's 3:1 for a control's boundary. It passes unnoticed inside the
+     cockpit, where every field sits in a labelled card; here it is the
+     only field on the page, and iOS ignores autofocus, so an iPhone
+     arrives showing an almost invisible box under a label. */
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.login-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+.login-hint code {
+  font-size: 0.95em;
+}
+.login-form input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+/* The one page in the product with a single action on it, so it is
+   also the one place a primary button is unambiguously right — the
+   shared button style would leave the only thing to do looking like the
+   cockpit's tertiary Refresh. */
+.login-form button {
+  height: 36px;
+  margin-top: 0.25rem;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.login-form button:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-ink);
+}
+.login-message {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+.login-message.is-critical {
+  color: var(--critical);
+}
+
+/* The optional "why?" box in the rename and delete forms. The class is
+   on the field wrapper, so the hint under the input is styled through
+   it rather than needing a second class of its own. */
+.edit-reason p {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}

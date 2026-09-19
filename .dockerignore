@@ -1,0 +1,13 @@
+node_modules
+**/dist
+**/*.tsbuildinfo
+*.db
+*.db-*
+.git
+.env
+.env.*
+# A local playground for trying the stack out by hand, kept out of the
+# repo via .git/info/exclude — so this line does nothing in a fresh
+# clone, and keeps the folder out of the build context on a machine
+# that has it. Docker reads only this file, never .gitignore.
+local-demo

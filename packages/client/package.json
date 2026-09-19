@@ -1,0 +1,15 @@
+{
+  "name": "@genug/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('fs').rmSync(p, { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -b",
+    "test": "npm run build && node --test \"dist/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "jsdom": "^30.0.1"
+  }
+}

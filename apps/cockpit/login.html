@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Genug Analytics — Sign in</title>
+    <!-- Blocking, same as the cockpit page: it sets the theme attribute
+         before the first paint, so the page doesn't flash the wrong
+         theme. -->
+    <script src="theme.js"></script>
+    <link rel="stylesheet" href="cockpit.css" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <script src="login.js" defer></script>
+  </head>
+  <body class="login-body">
+    <main class="login-card">
+      <div class="brand">
+        <span class="brand-mark">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M3 3v18h18"></path>
+            <path d="m7 14 4-5 3 3 5-7"></path>
+          </svg>
+        </span>
+        <div>
+          <h1>Cockpit</h1>
+          <p class="brand-sub">Genug Analytics</p>
+        </div>
+      </div>
+
+      <!-- A real form with a real password input, even though the submit
+           is intercepted and sent with fetch(): password managers look
+           for exactly this shape, and the cockpit's CSP sets
+           form-action 'none', so a native submit would be blocked. -->
+      <form id="login-form" class="login-form">
+        <!-- There is no username here, but a password field on its own
+             is a shape browsers and password managers handle badly:
+             Chrome warns about it, and a manager has nothing to file the
+             saved password under. A fixed, hidden one gives it a name to
+             use and is never sent anywhere. -->
+        <input
+          type="text"
+          name="username"
+          value="cockpit"
+          autocomplete="username"
+          readonly
+          hidden
+        />
+        <label for="password">Cockpit password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          autocomplete="current-password"
+          autofocus
+          required
+          aria-describedby="password-hint message"
+        />
+        <p class="login-hint" id="password-hint">
+          The <code>COCKPIT_PASSWORD</code> set in this deployment's
+          environment.
+        </p>
+        <button id="submit" type="submit">Sign in</button>
+      </form>
+
+      <!-- Always rendered, never `hidden`: a live region a screen reader
+           only meets once it is unhidden may announce nothing, and the
+           message that greets someone on load would never fire at all.
+           Empty text is how it says nothing, and it is named by the
+           password field's aria-describedby — so after a failure, where
+           focus is put back in the field, the reason is read out with
+           it. -->
+      <p class="login-message" id="message" role="status"></p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Genug Analytics — Cockpit</title>
+    <!-- Blocking, not deferred: this has to set the theme attribute
+         before the first paint, or the page flashes the wrong theme
+         on load. Same-origin and tiny, so the extra request costs
+         nothing meaningful. It lives in its own file rather than
+         inline so the page needs no inline <script> at all, which is
+         what lets the CSP drop 'unsafe-inline' from script-src. -->
+    <script src="theme.js"></script>
+    <link rel="stylesheet" href="cockpit.css" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div>
+          <div class="brand">
+            <span class="brand-mark">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 3v18h18"></path>
+                <path d="m7 14 4-5 3 3 5-7"></path>
+              </svg>
+            </span>
+            <div>
+              <h1>Cockpit</h1>
+              <div class="brand-meta">
+                <p class="brand-sub">Genug Analytics</p>
+                <p class="brand-version num" id="version"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="header-side">
+          <div class="header-actions">
+            <div
+              class="segmented"
+              id="window-picker"
+              role="group"
+              aria-label="Time period"
+            >
+              <button type="button" data-days="1" aria-pressed="false">
+                24h
+              </button>
+              <button
+                type="button"
+                data-days="7"
+                class="active"
+                aria-pressed="true"
+              >
+                7d
+              </button>
+              <button type="button" data-days="30" aria-pressed="false">
+                30d
+              </button>
+            </div>
+            <button
+              id="theme-toggle"
+              class="icon-button"
+              type="button"
+              title="Toggle dark mode"
+              aria-label="Toggle dark mode"
+            >
+              <svg
+                id="theme-icon-sun"
+                class="icon-hidden"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="4"></circle>
+                <path
+                  d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                ></path>
+              </svg>
+              <svg
+                id="theme-icon-moon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"
+                ></path>
+              </svg>
+            </button>
+            <button id="refresh" type="button">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path
+                  d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                ></path>
+              </svg>
+              Refresh
+            </button>
+            <button id="logout" type="button" title="Sign out of the cockpit">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              Log out
+            </button>
+          </div>
+          <div class="header-captions">
+            <p class="period num" id="period"></p>
+            <p class="updated num" id="updated-at"></p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="error-banner" id="error-banner" role="alert">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
+          ></path>
+          <path d="M12 9v4"></path>
+          <path d="M12 17h.01"></path>
+        </svg>
+        <span id="error-banner-text"></span>
+      </div>
+
+      <nav class="section-nav" aria-label="Page sections">
+        <a href="#traffic">Traffic</a>
+        <a href="#events">Events</a>
+        <a href="#configuration">Configuration</a>
+      </nav>
+
+      <h2 class="area-label">Overview</h2>
+
+      <div class="stack">
+        <div class="card stats">
+          <div class="stat">
+            <p class="stat-label">Sessions</p>
+            <div class="stat-value num" id="stat-sessions">—</div>
+          </div>
+          <div class="stat">
+            <p class="stat-label">Events</p>
+            <div class="stat-value num" id="stat-events">—</div>
+            <p class="stat-hint" id="stat-events-hint"></p>
+          </div>
+          <div class="stat">
+            <p class="stat-label">Rejected</p>
+            <div class="stat-value num" id="stat-rejected">—</div>
+            <p class="stat-hint" id="stat-rejected-hint">Failed validation</p>
+          </div>
+          <div class="stat">
+            <p class="stat-label">Bots filtered</p>
+            <div class="stat-value num" id="stat-bots">—</div>
+            <p class="stat-hint">Dropped before storage</p>
+          </div>
+        </div>
+
+        <p class="strip-note" id="consent-note" hidden></p>
+        <!-- Read-only is the only deployment state that removes a whole
+             card further down the page (the danger zone). Said here, on
+             the first screen, because the operator who set READ_ONLY by
+             accident goes looking for the button that vanished, not for
+             the explanation inside a collapsed card. -->
+        <p class="strip-note" id="read-only-note" hidden>
+          Read-only deployment: nothing can be changed from this cockpit. No
+          editing, creating, reloading or resetting events, and no resetting the
+          database. Collection is unaffected. Set by
+          <code>READ_ONLY=true</code> on the server.
+        </p>
+      </div>
+
+      <h2 class="area-label" id="traffic">Traffic</h2>
+
+      <div class="stack">
+        <section class="card">
+          <div class="card-head">
+            <h3 class="card-title">Traffic trend</h3>
+            <div
+              class="segmented"
+              id="trend-granularity"
+              role="group"
+              aria-label="Trend granularity"
+            >
+              <button
+                type="button"
+                data-mode="day"
+                class="active"
+                aria-pressed="true"
+              >
+                Daily
+              </button>
+              <button type="button" data-mode="weekday" aria-pressed="false">
+                Weekday
+              </button>
+              <button type="button" data-mode="hour" aria-pressed="false">
+                Hour
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="legend">
+              <span class="legend-item">
+                <span
+                  class="dot"
+                  style="background: var(--series-sessions)"
+                ></span>
+                Sessions
+              </span>
+              <span class="legend-item">
+                <span
+                  class="dot"
+                  style="background: var(--series-events)"
+                ></span>
+                Events
+              </span>
+              <!-- Buckets are UTC. Hidden in the table caption alone,
+                   a German reader takes a peak at "14" for 14:00 local
+                   when it is 16:00 — plausible while wrong. -->
+              <span class="card-note" id="trend-caption"></span>
+            </div>
+            <div class="chart-wrap">
+              <div id="trend-chart"></div>
+              <div class="trend-tooltip" id="trend-tooltip"></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="grid-3">
+          <section class="card">
+            <div class="card-head">
+              <h3 class="card-title">Top pages</h3>
+              <span class="card-note">by page views</span>
+            </div>
+            <div class="card-body" id="top-pages"></div>
+          </section>
+          <section class="card">
+            <div class="card-head">
+              <h3 class="card-title">Top referrers</h3>
+              <span class="card-note">by sessions</span>
+            </div>
+            <div class="card-body" id="top-referrers"></div>
+          </section>
+          <section class="card">
+            <div class="card-head">
+              <h3 class="card-title">Devices</h3>
+              <span class="card-note">by sessions</span>
+            </div>
+            <div class="card-body" id="device-breakdown"></div>
+          </section>
+        </div>
+      </div>
+
+      <h2 class="area-label" id="events">Events</h2>
+
+      <div class="stack">
+        <!-- Present only when something was actually rejected. A card
+             reading "nothing was rejected" every day is noise that
+             trains the eye to skip the spot where the real warning
+             will one day appear. -->
+        <section class="card" id="rejected-card" hidden>
+          <div class="card-head">
+            <h3 class="card-title">Rejected events</h3>
+            <span class="card-note"
+              >Top 5 by count — grouped by reason and event name</span
+            >
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reason</th>
+                  <th>Event</th>
+                  <th>Count</th>
+                  <th>Latest detail</th>
+                </tr>
+              </thead>
+              <tbody id="rejected-events"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" id="recent-card">
+          <div class="card-head">
+            <h3 class="card-title">Recent events</h3>
+            <!-- Says "latest overall" because this card deliberately
+                 ignores the period picker: it answers "is data arriving
+                 right now", which a window filter would defeat (pick
+                 24h on a quiet site and the card empties, implying
+                 breakage). Every other card on the page does follow the
+                 picker, so the exception has to be stated. -->
+            <span class="card-note"
+              >Latest 5 overall — not filtered by the selected period</span
+            >
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Event</th>
+                  <th>URL</th>
+                  <th>Props</th>
+                </tr>
+              </thead>
+              <tbody id="recent-events">
+                <tr>
+                  <td class="empty" colspan="4">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <h2 class="area-label" id="configuration">Configuration</h2>
+
+      <div class="stack">
+        <details class="card" id="schema-card">
+          <summary>
+            <svg
+              class="summary-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h3 class="card-title">Schema registry</h3>
+            <span class="summary-count" id="schema-count-note"></span>
+          </summary>
+          <div class="card-body schema-errors" id="schema-errors" hidden></div>
+          <div
+            class="card-body schema-errors"
+            id="orphaned-events"
+            hidden
+          ></div>
+          <div class="card-body schema-reload">
+            <button id="reload-schemas" type="button">
+              Reload events into system
+            </button>
+            <button id="new-event" type="button" hidden>
+              Register new event
+            </button>
+            <span class="schema-reload-note" id="reload-note" role="status"
+              >Re-reads the event files from disk. No restart, and no events are
+              lost.</span
+            >
+            <p
+              class="schema-reload-note is-note"
+              id="schema-read-only-note"
+              hidden
+            >
+              Read-only: events cannot be edited, created or reloaded here. The
+              event files on the server can still be changed directly, and a
+              restart picks them up.
+            </p>
+          </div>
+          <div class="card-body" id="schema-registry"></div>
+        </details>
+
+        <details class="card">
+          <summary>
+            <svg
+              class="summary-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h3 class="card-title">MCP tools</h3>
+            <span class="summary-count" id="tool-count-note"></span>
+          </summary>
+          <div class="card-body">
+            <p
+              class="schema-reload-note is-note"
+              id="tools-read-only-note"
+              hidden
+            >
+              One tool is missing by design: this deployment is read-only, so
+              the tool that erases a visitor's data is not registered.
+            </p>
+            <div class="tool-list" id="mcp-tools"></div>
+          </div>
+        </details>
+
+        <details class="card danger-zone" id="danger-zone">
+          <summary>
+            <svg
+              class="summary-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h3 class="card-title">Danger zone</h3>
+          </summary>
+          <div class="card-body danger-zone-body">
+            <p class="danger-zone-instance" id="danger-zone-instance"></p>
+            <div class="danger-action">
+              <h4 class="danger-action-title">Reset database</h4>
+              <p class="danger-zone-note">
+                Permanently deletes every stored event, rejected event and
+                bot-activity row. The event schema itself is untouched. This is
+                meant for clearing out test traffic before going live — it
+                cannot be undone.
+              </p>
+              <form id="reset-form" class="danger-zone-form">
+                <label for="reset-password" class="visually-hidden"
+                  >Password to reset the database</label
+                >
+                <input
+                  type="password"
+                  id="reset-password"
+                  placeholder="Cockpit password"
+                  autocomplete="current-password"
+                  required
+                />
+                <button id="reset-database" type="submit" class="danger-button">
+                  Reset database
+                </button>
+              </form>
+              <p
+                class="danger-zone-message"
+                id="reset-message"
+                role="status"
+                hidden
+              ></p>
+            </div>
+
+            <div class="danger-action">
+              <h4 class="danger-action-title">Reset events</h4>
+              <p class="danger-zone-note">
+                Discards every event file on the volume and copies the image's
+                built-in events back — so events you registered are gone, and
+                edits to the built-ins are undone. Stored data is
+                <strong>not</strong> deleted: rows collected under a removed
+                event name stay in the database, still counting toward totals
+                while no longer matching any question asked by name. Those are
+                reported afterwards, and in the Schema registry card. It cannot
+                be undone.
+              </p>
+              <form id="reset-events-form" class="danger-zone-form">
+                <label for="reset-events-password" class="visually-hidden"
+                  >Password to reset events</label
+                >
+                <input
+                  type="password"
+                  id="reset-events-password"
+                  placeholder="Cockpit password"
+                  autocomplete="current-password"
+                  required
+                />
+                <button id="reset-events" type="submit" class="danger-button">
+                  Reset events
+                </button>
+              </form>
+              <p
+                class="danger-zone-message"
+                id="reset-events-message"
+                role="status"
+                hidden
+              ></p>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <p class="footnote" id="retention-note"></p>
+    </div>
+
+    <script src="cockpit.js"></script>
+  </body>
+</html>

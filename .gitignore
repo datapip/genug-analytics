@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# LOCAL_BACKUPS defaults to on and writes beside the database, so
+# running from a clone (see README.test.md) drops one of these in the
+# repo root. The .db copy is already covered above; the event schemas
+# copied beside it are not, and they are a deployment's own files.
+backups/
+
+.env
+.env.*
+!.env.example
+
+# Personal, machine-local Claude Code instructions (see docs/developing.md)
+CLAUDE.local.md

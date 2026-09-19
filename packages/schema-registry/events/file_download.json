@@ -1,0 +1,17 @@
+{
+  "_description": "Fired when a visitor clicks a link to a downloadable file",
+  "_automaticFileDownload": true,
+  "_note": "Fired automatically by the client script when enableAutoLinkTracking is on, and takes precedence over outbound_link_click when a link is both — a link to another site's PDF is recorded as a download, since downloading the file is what the visitor actually did.",
+
+  "file_url": "string.long",
+  "file_url_description": "Full URL of the file",
+  "file_url_example": "https://example.com/docs/price-list.pdf",
+
+  "file_extension": "string",
+  "file_extension_description": "Lowercase extension without the dot. Empty string when the link carries a download attribute but the URL has no extension to read",
+  "file_extension_example": "pdf",
+
+  "link_text": "string",
+  "link_text_description": "Visible text of the clicked link, whitespace-collapsed and truncated. Empty string for a link containing only an image or icon",
+  "link_text_example": "Download the price list"
+}
