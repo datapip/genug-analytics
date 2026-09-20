@@ -7,6 +7,45 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## 0.6.0 — 2026-09-20
+
+**Added**
+
+- The cockpit can now edit ground rules and add business context
+  ("About this site") for the AI agent, and add dated history notes —
+  completing the deployment-context feature. Both prose fields are
+  capped at 32KB and show a live byte counter; history notes stay
+  append-only from the cockpit (editing or removing one is still a
+  file edit on the volume). All three writes are disabled under
+  `READ_ONLY`, but ground rules and business context stay readable
+  even then.
+
+**Changed**
+
+- On a deployment that isn't `READ_ONLY`, holding just
+  `COCKPIT_PASSWORD` is now enough to read ground rules and the full
+  history log through the cockpit — previously that needed
+  `MCP_API_KEY` or shell access to the volume. If you've handed the
+  cockpit password to someone without the MCP key, they can now read
+  (and, unless `READ_ONLY`, write) what your AI agent is told. See the
+  `COCKPIT_PASSWORD` row in [docs/deploying.md](docs/deploying.md).
+- `READ_ONLY=true` now also unregisters `get_recent_events`, the one
+  MCP tool that returns raw event rows (URLs, props, referrer) instead
+  of an aggregate. It writes nothing, so this wasn't covered by the
+  existing "closes every write" behaviour — but a deployment whose key
+  is meant to be public, which is what `READ_ONLY` is for, shouldn't
+  hand out raw visitor rows through it either. If you rely on this
+  tool from a `READ_ONLY` deployment, it's gone; every other
+  diagnostic tool (`get_schema_errors`, `get_bot_activity`, etc.) is
+  unaffected.
+
+**Fixed**
+
+- Saving ground rules or business context text right at the 32KB cap
+  could push the request body past the router's old 64KB limit once
+  JSON-escaping was counted, surfacing a raw parser error instead of
+  the friendly one. Both routes now get 128KB of body headroom.
+
 ## 0.5.0 — 2026-09-19
 
 **Breaking**

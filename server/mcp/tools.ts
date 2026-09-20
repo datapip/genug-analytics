@@ -7,7 +7,10 @@ import { registerTrafficTools } from "./traffic.js";
 import { registerContentTools } from "./content.js";
 import { registerEventTools } from "./events.js";
 import { registerAudienceTools } from "./audience.js";
-import { registerDiagnosticTools } from "./diagnostics.js";
+import {
+  registerDiagnosticTools,
+  registerRecentEventsTool,
+} from "./diagnostics.js";
 import { registerAdminTools } from "./admin.js";
 import { VERSION } from "../lib/version.js";
 
@@ -39,6 +42,13 @@ const toolModules: ToolRegistrar[] = [
 const writingToolModules: ToolRegistrar[] = [
   registerAdminTools, // the one tool that writes
 ];
+
+// Same treatment, different reason: get_recent_events doesn't write,
+// but it is the one tool that hands the agent raw, unaggregated visitor
+// data (see diagnostics.ts and docs/decisions.md, "the agent reads
+// attacker-controlled text"). A public MCP key shouldn't double as a
+// raw event export any more than it should double as a write key.
+const rawDataToolModules: ToolRegistrar[] = [registerRecentEventsTool];
 
 export interface McpServerOptions {
   // Skips every tool that writes. The routes read it from the
@@ -129,7 +139,7 @@ export function createMcpServer(
 
   const modules = readOnly
     ? toolModules
-    : [...toolModules, ...writingToolModules];
+    : [...toolModules, ...writingToolModules, ...rawDataToolModules];
   for (const registerTools of modules) {
     registerTools(server, db);
   }

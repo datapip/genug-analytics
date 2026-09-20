@@ -1693,6 +1693,8 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   const names = listed.result.tools.map((tool) => tool.name);
   assert.ok(names.includes("get_traffic_summary"));
   assert.ok(!names.includes("delete_visitor_data"));
+  // Writes nothing, but returns raw rows instead of an aggregate.
+  assert.ok(!names.includes("get_recent_events"));
 
   // Every write route, with the CSRF header and the password a real
   // page would send, so the refusal can only be the mode.

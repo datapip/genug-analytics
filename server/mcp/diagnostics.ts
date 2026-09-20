@@ -16,10 +16,14 @@ import {
   VISITOR_TEXT_CAVEAT,
 } from "./shared.js";
 
-// "Is tracking actually working" — quality-assurance signals rather
-// than analytics. None of these describe visitor behaviour; they
-// describe the health of the pipeline itself.
-export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
+// Kept apart from registerDiagnosticTools below, and from
+// mcp/tools.ts's toolModules, the same way registerAdminTools is: this
+// is the only diagnostic tool that hands back raw rows (url, props,
+// referrer verbatim) rather than an aggregate, so it is the one
+// docs/decisions.md already named as "the one a cautious deployment can
+// unregister" — READ_ONLY now does that for it, on the same reasoning
+// as a write: a public MCP key should not double as a raw event export.
+export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_recent_events",
     {
@@ -32,7 +36,14 @@ export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
       return jsonContent(getRecentEvents(db, limit));
     },
   );
+};
 
+// "Is tracking actually working" — quality-assurance signals rather
+// than analytics. None of these describe visitor behaviour; they
+// describe the health of the pipeline itself. Unlike get_recent_events
+// above, none returns a raw row, so all four stay registered under
+// READ_ONLY — a demo deployment still needs to see that tracking works.
+export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_orphaned_events",
     {

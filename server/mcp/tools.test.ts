@@ -179,16 +179,21 @@ test("a read-only server registers no writing tool, and its manifest says so", a
   // session to act on, so it is at least as public-key-sensitive as the
   // delete above.
   assert.ok(!names.includes("add_history_note"));
+  // Writes nothing, but hands back raw rows instead of an aggregate —
+  // a public key shouldn't double as a raw event export either.
+  assert.ok(!names.includes("get_recent_events"));
   assert.ok(names.includes("get_traffic_summary"), "reads are still there");
+  // The other diagnostics stay: they answer "is tracking working",
+  // which a read-only demo deployment still needs.
+  assert.ok(names.includes("get_schema_errors"));
+  assert.ok(names.includes("get_bot_activity"));
 
   const manifest = getToolManifest(db, { readOnly: true }).map((t) => t.name);
   assert.deepEqual([...manifest].sort(), [...names].sort());
   // And the writable manifest is a different list, not the same cache.
-  assert.ok(
-    getToolManifest(db)
-      .map((t) => t.name)
-      .includes("delete_visitor_data"),
-  );
+  const writableNames = getToolManifest(db).map((t) => t.name);
+  assert.ok(writableNames.includes("delete_visitor_data"));
+  assert.ok(writableNames.includes("get_recent_events"));
   await client.close();
 });
 

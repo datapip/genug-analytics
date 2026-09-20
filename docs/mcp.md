@@ -149,11 +149,15 @@ Most tools return aggregates — counts, rankings, breakdowns.
 URLs and whatever your events put in `props`. Query strings are already
 filtered down to campaign parameters before anything is stored (see
 [privacy.md](privacy.md)), so the usual accidents are covered, but your
-own event props are yours to keep clean. If your deployment holds data you would not hand to a third
-party, that is the tool to think about. There is no setting that turns
-it off: dropping its registration from `server/mcp/diagnostics.ts` takes
-a build of your own, which is a fork of one line rather than a fork of
-the project.
+own event props are yours to keep clean. If your deployment holds data
+you would not hand to a third party, that is the tool to think about.
+`READ_ONLY=true` unregisters it along with every writing tool, so a
+deployment whose key is meant to be public — a demo, for instance —
+never hands out raw rows through it. On a deployment that isn't
+`READ_ONLY`, there is no separate setting that turns just this one
+tool off: keeping the writing tools while dropping only this one takes
+a build of your own, a fork of `server/mcp/diagnostics.ts` rather than
+of the project.
 
 For a client's deployment in the EU this is a processor relationship
 with the model vendor, not a technicality: you need a data-processing

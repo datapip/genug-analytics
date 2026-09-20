@@ -3522,6 +3522,23 @@ immediately and binds from the first real deployment onward.)
   agent can actually call. Logged once at startup, the same way an
   unset `RETENTION_DAYS` is: the log is where an operator confirms the
   mode they configured is the mode that is running.
+- ~~`get_recent_events` stays live under `READ_ONLY`~~ Done,
+  2026-09-20: it is now unregistered the same way `mcp/admin.ts` is,
+  via a second array (`rawDataToolModules` in `mcp/tools.ts`) rather
+  than folded into `writingToolModules` — it writes nothing, so calling
+  it a writing tool would be the wrong reason for the right outcome.
+  The reason is the one `docs/mcp.md`'s "What leaves your server when
+  you ask" already named: it is the only tool returning raw rows
+  (`url`, `props`, `referrer`) rather than an aggregate, and `READ_ONLY`
+  exists precisely for a deployment whose MCP key is meant to be
+  public — a public key handing out raw visitor rows is the same shape
+  of problem as a public key that can call `delete_visitor_data`, even
+  though nothing is deleted. `docs/mcp.md` used to say there was no
+  setting that turned this tool off short of forking
+  `mcp/diagnostics.ts`; now `READ_ONLY` does, at the cost of also
+  closing every write — a deployment that wants to keep writes while
+  dropping only this one tool still has no setting for that and still
+  needs the fork.
 - ~~The container runs as root~~ Done: the Dockerfile now declares
   `USER node`, the unprivileged uid/gid 1000 the official Node images
   already ship. Nothing in this server needs root — it binds port 3000

@@ -174,7 +174,10 @@ visibly broken, which is the failure mode this project cares most about.
   writing tool put anywhere else stays live on a deployment whose key
   is public. The cockpit side of the same promise is a router-level
   refusal of every non-GET request, so a cockpit write must not be a
-  GET.
+  GET. `get_recent_events` gets the same treatment
+  (`rawDataToolModules`) though it writes nothing — it is the one tool
+  that returns raw rows instead of an aggregate, so a public key
+  shouldn't double as a raw event export either.
 - A query about **who was visiting** counts sessions or visitors, not
   events — referrers, devices, languages. Counting events there lets
   one busy visitor outweigh many quiet ones, so the number measures

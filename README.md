@@ -64,7 +64,7 @@ The full walk-through with a screenshot is
      -e MCP_API_KEY=<openssl rand -hex 32> \
      -e COCKPIT_PASSWORD=<openssl rand -hex 32> \
      -v genug-data:/data \
-     ghcr.io/datapip/genug-analytics:v0.5.0
+     ghcr.io/datapip/genug-analytics:v0.6.0
    ```
 
    `/data` must be a persistent volume, or every redeploy starts from
