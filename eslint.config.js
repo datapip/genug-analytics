@@ -36,6 +36,7 @@ export default tseslint.config(
         fetch: "readonly",
         Node: "readonly",
         ResizeObserver: "readonly",
+        TextEncoder: "readonly",
       },
     },
   },

@@ -3931,7 +3931,7 @@ immediately and binds from the first real deployment onward.)
   excluded — see "role tags never reach the agent" in
   `mcp/tools.test.ts`), and as a cockpit badge next to the role-tag ones.
   No query branches on it yet, same as drafted.
-- **Open, 2026-09-18 · S remaining (slices 1 and 2 of 3 done) · next:**
+- **Done, 2026-09-18 → 2026-09-20.**
   Deployment context for the agent — three
   related pieces, scoped as one feature rather than three, since a
   small project doesn't need three overlapping config surfaces:
@@ -4105,8 +4105,129 @@ immediately and binds from the first real deployment onward.)
     arguments was cheaper than teaching either to make an exception, and
     a test now pins that no writing tool declares a period.
 
-  Left for later: a cockpit surface, if one is wanted at all — see the
-  security boundary above.
+  **Slice 4, a read/write cockpit surface, done 2026-09-20**
+  (`lib/writeGroundRules.ts`, plus two new routes in `routes/cockpit.ts`).
+  Left for later above as "if one is wanted at all" — it was wanted, with
+  the security boundary explicitly accepted rather than rediscovered:
+  the cockpit is one shared password, and this hands whoever holds it a
+  second way to steer what the agent is told to do, on top of
+  `mcp/admin.ts`'s existing tools on any non-`READ_ONLY` deployment. What
+  the slice did and did not do:
+
+  - **Ground rules: a whole-file overwrite, not a diff or a merge.**
+    Same reasoning as the file's own shape — free prose has nothing to
+    merge against. Refused over `MAX_GROUND_RULES_BYTES` rather than
+    truncated: a save from a browser has someone right there to shorten
+    it, unlike a file that merely grew stale on disk. Checked in UTF-8
+    bytes (`Buffer.byteLength`), not JS string length — a `.length`
+    check would have let a multi-byte-heavy save through that render
+    time then truncates mid-character.
+  - **History stays add-only from the cockpit**, reusing
+    `appendHistoryEntry` unchanged — the same function
+    `add_history_note` already called. Edit and delete of an entry are
+    still a file edit on the volume, exactly as before this slice:
+    giving the cockpit full CRUD over records the agent reads as
+    instructions would be a bigger promotion than the ground-rules write
+    itself, for a case (fixing a bad entry) that already has a working
+    path.
+  - **No new CSRF or read-only mechanism.** Both routes are POST/PUT, so
+    the router-level gate that already 403s every write under
+    `READ_ONLY=true` covers them for free, and both reuse
+    `refusesCockpitOrigin` — the same header check every other cockpit
+    write passes. Read-only was the one hard requirement carried over
+    from the earlier discussion, and it cost no new code.
+  - **Read-only degrades the ground-rules box to a read-only view, not a
+    hidden one** — unlike a pure write control (the Save button, the
+    history add-form), the textarea also carries content someone came
+    here to read. Hiding the whole form the way the danger zone
+    disappears would have taken the text with it; only the control that
+    writes is a write control, so it alone is what read-only hides.
+  - **No sanitisation added to the ground-rules text.** The injection
+    concern the history note's `oneLine()` fix (above) defends against
+    is visitor-adjacent text escaping into a fake heading. Ground rules
+    are the owner's own words, already rendered unescaped today by a
+    shell edit; moving the edit surface into a browser textarea changes
+    who is typing least of all, not what the text is allowed to say.
+  - **`GET /cockpit/data` now reads both files too, not just the two
+    write routes** — caught by a `security-expert` pass, not designed
+    in up front. On a non-`READ_ONLY` deployment this is new: before
+    this slice, reaching the deployment-context text needed
+    `MCP_API_KEY` or shell access to the volume; now `COCKPIT_PASSWORD`
+    alone reads it. The two secrets were already documented as
+    separate (`docs/deploying.md`), so a deployment that hands the
+    cockpit password to someone without the MCP key — an assistant with
+    dashboard access but not agent-config access, say — now has that
+    person reading ground rules and the full history log too. Consistent
+    with, not beyond, the trust equivalence already accepted for the
+    *write* side above; said explicitly in `docs/deploying.md`'s
+    `COCKPIT_PASSWORD` row rather than left implicit.
+  - **`parseEditBody`'s 64kb body limit and the 32kb ground-rules cap
+    are only 2x apart**, and every other write on this router sends a
+    few hundred bytes — never close enough for that gap to matter until
+    now. JSON-escapes its content (a `"`, `\` or newline in ordinary
+    prose costs 2 bytes instead of 1), so text sitting right at
+    `MAX_GROUND_RULES_BYTES` can push the *request body*, not the text,
+    past 64kb — and body-parser rejects it before `writeGroundRules`'s
+    own friendly error ever runs. Caught by `testing-specialist`, not
+    exercised by any test until then, since every existing writer's test
+    calls its function directly rather than through the route. Fixed by
+    giving this one route its own parser at 128kb — comfortably over
+    double the content cap even under pessimistic escaping — rather
+    than testing around the collision, plus a test that saves content
+    made entirely of quote characters right at the cap.
+
+  **Slice 5, business context — the one piece left over from the
+  original scope, done 2026-09-20.** The tracking line above sat at
+  "slices 1 and 2 of 3 done" for two days; slice 3 was never built,
+  including through the cockpit-surface work in slice 4, until the
+  user noticed the cockpit was missing something they remembered being
+  planned. Same shape as ground rules — free prose, owner-authored,
+  rendered into one section of the same document, whole-file overwrite
+  from the cockpit — with two real differences from copying it outright:
+
+  - **No seeding, and no built-in default.** Ground rules seeds via
+    `COPYFILE_EXCL` because there's a universal default worth shipping.
+    History seeds an empty array because its reader needs well-formed
+    JSON to append to. Business context is markdown with no parser and
+    no universal answer to "what is this site for" — there is nothing
+    to seed. `about.md` (`BUSINESS_CONTEXT_FILE`) simply doesn't exist
+    until the owner's first save creates it.
+  - **"Absent" and "empty" collapse into one wording, and it isn't
+    ground rules' wording.** An empty ground-rules file is a deliberate
+    opt-out, honoured as "no rules of my own." Business context has no
+    opt-out concept — nobody unsets a purpose, they just haven't
+    written it down yet — so both states read as "not yet configured,"
+    explicit that this is not evidence the site has no purpose, only
+    that nobody has said. Getting this the ground-rules way would read
+    as false information about the site; getting it silent would let
+    the agent invent a purpose. Oversized and unreadable stay separate,
+    real failure states, worded the same way ground rules' are.
+  - **The byte cap is shared, not duplicated under the wrong name.**
+    `MAX_GROUND_RULES_BYTES` became `MAX_PROSE_FIELD_BYTES` — same 32KB
+    number, but naming a cap shared by two fields after only one of
+    them is the forced-symmetry-with-a-lie this project's own
+    conventions warn against elsewhere. `writeGroundRules.ts` and the
+    new `writeBusinessContext.ts` both import it.
+  - **The writer is duplicated, not extracted into a shared helper.**
+    `writeBusinessContext.ts` is a near-line-for-line copy of
+    `writeGroundRules.ts` (mkdir, byte-cap check, write, error shape).
+    Two call sites is rule-of-three's "not yet," and the ground-rules
+    writer had just shipped and been reviewed — extracting a shared
+    `writeContextFile` would touch tested, working code for a
+    generalization with no third user yet. Revisit if a third prose
+    field ever shows up.
+  - **The cockpit's byte counter *was* worth generalizing**, unlike the
+    writers: `updateGroundRulesCount` became `updateByteCount(textareaId,
+    counterId)`, called for both fields. No domain logic, two real and
+    immediate call sites, zero risk — the opposite trade-off from the
+    writers above for a reason, not an inconsistency: a five-line
+    rendering utility with no state of its own is cheap to generalize
+    the moment a second caller exists; a tested server-side writer with
+    its own error shape is not.
+  - **Order was already decided.** Ground rules, About this site,
+    History — settled when the feature was first scoped as one
+    document, so this slice only had to place a new heading in the
+    middle rather than choose where it goes.
 
   `VISITOR_TEXT_CAVEAT` stays per-tool regardless of what this file
   says. An owner can delete the default, and the invariant in

@@ -427,6 +427,153 @@
           </div>
         </details>
 
+        <details class="card" id="context-card">
+          <summary>
+            <svg
+              class="summary-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h3 class="card-title">Deployment context</h3>
+            <span class="summary-count" id="context-count-note"></span>
+          </summary>
+          <div class="card-body">
+            <p class="schema-reload-note">
+              What your AI agent reads before answering: the ground rules below
+              tell it how to answer, the site context tells it what the site or
+              business is for, and the history log gives it a recorded cause for
+              a change in the numbers instead of a guess. All three are part of
+              the
+              <code>genug://deployment-context</code> MCP resource.
+            </p>
+            <p
+              class="schema-reload-note is-note"
+              id="context-read-only-note"
+              hidden
+            >
+              Read-only: ground rules and the site context cannot be saved, and
+              no history note can be added here. All three files can still be
+              edited directly on the server.
+            </p>
+
+            <h4 class="danger-action-title">Ground rules</h4>
+            <p class="schema-reload-note">
+              Free text, read by the agent as instructions — not by visitors to
+              the tracked site.
+            </p>
+            <form id="ground-rules-form" class="ground-rules-form">
+              <label for="ground-rules-text" class="visually-hidden"
+                >Ground rules</label
+              >
+              <textarea
+                id="ground-rules-text"
+                class="edit-input"
+                rows="8"
+                spellcheck="true"
+              ></textarea>
+              <div class="ground-rules-footer">
+                <span class="ground-rules-count" id="ground-rules-count"></span>
+                <button id="save-ground-rules" type="submit">Save</button>
+              </div>
+              <p
+                class="edit-message"
+                id="ground-rules-message"
+                role="status"
+                hidden
+              ></p>
+            </form>
+
+            <h4 class="danger-action-title">About this site</h4>
+            <p class="schema-reload-note">
+              What the site or business is for, in your own words — there is no
+              built-in default, since only you know that.
+            </p>
+            <form id="business-context-form" class="ground-rules-form">
+              <label for="business-context-text" class="visually-hidden"
+                >About this site</label
+              >
+              <textarea
+                id="business-context-text"
+                class="edit-input"
+                rows="5"
+                spellcheck="true"
+                placeholder="What does this site or business do, sell, or exist for?"
+              ></textarea>
+              <div class="ground-rules-footer">
+                <span
+                  class="ground-rules-count"
+                  id="business-context-count"
+                ></span>
+                <button id="save-business-context" type="submit">Save</button>
+              </div>
+              <p
+                class="edit-message"
+                id="business-context-message"
+                role="status"
+                hidden
+              ></p>
+            </form>
+
+            <h4 class="danger-action-title">History</h4>
+            <p class="schema-reload-note">
+              Dated notes the agent checks before attributing a change in the
+              numbers to a cause — an outage, a campaign, a redesign. Newest
+              first. A note added here cannot be edited or removed from the
+              cockpit; that stays a file edit on the server.
+            </p>
+            <ul class="history-list" id="history-list"></ul>
+            <p class="schema-reload-note" id="history-empty-note" hidden>
+              Nothing written down yet.
+            </p>
+            <form id="history-form" class="history-form">
+              <div class="history-form-dates">
+                <div class="edit-field">
+                  <label for="history-from">From</label>
+                  <input
+                    type="date"
+                    id="history-from"
+                    class="edit-input edit-input-short"
+                    required
+                  />
+                </div>
+                <div class="edit-field">
+                  <label for="history-to">To (optional)</label>
+                  <input
+                    type="date"
+                    id="history-to"
+                    class="edit-input edit-input-short"
+                  />
+                </div>
+              </div>
+              <label for="history-note" class="visually-hidden"
+                >What happened</label
+              >
+              <textarea
+                id="history-note"
+                class="edit-input"
+                rows="2"
+                placeholder="What happened?"
+                required
+              ></textarea>
+              <div class="ground-rules-footer">
+                <button id="add-history-note" type="submit">Add note</button>
+              </div>
+              <p
+                class="edit-message"
+                id="history-message"
+                role="status"
+                hidden
+              ></p>
+            </form>
+          </div>
+        </details>
+
         <details class="card danger-zone" id="danger-zone">
           <summary>
             <svg

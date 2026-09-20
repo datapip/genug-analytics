@@ -1591,6 +1591,66 @@ td.empty {
   color: var(--ink);
 }
 
+/* ---------- deployment context ---------- */
+
+.ground-rules-form textarea.edit-input,
+.history-form textarea.edit-input {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.ground-rules-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+.ground-rules-count {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  margin-right: auto;
+}
+.ground-rules-count.is-critical {
+  color: var(--critical);
+}
+.history-list {
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.history-item {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+.history-item time {
+  font-weight: 600;
+  color: var(--ink);
+  margin-right: 0.4rem;
+}
+.history-item.is-note {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+.history-form {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+.history-form-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+.history-form-dates .edit-field {
+  flex: 1 1 10rem;
+}
+
 /* The sign-in page (login.html). Shares this stylesheet rather than
    having its own: it is one card, and a second file would be a second
    place for the tokens above to drift out of. */

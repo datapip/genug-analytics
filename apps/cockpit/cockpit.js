@@ -94,6 +94,35 @@
     }
   }
 
+  // The same shape as submitEventWrite above, but for the deployment
+  // context card: the success text lands in this call's own `message`
+  // rather than in the schema card's #reload-note, which is what
+  // submitEventWrite always writes to — this card has nothing
+  // module-level to close on success, so there is no onSuccess step
+  // either.
+  async function submitContextWrite(button, message, pending, url, init) {
+    button.disabled = true;
+    message.hidden = false;
+    message.classList.remove("is-critical");
+    message.textContent = pending;
+    try {
+      const res = await cockpitFetch(url, init);
+      const result = await res.json();
+      if (!result.ok) {
+        failWith(message, result.error || "HTTP " + res.status);
+        return null;
+      }
+      await load();
+      message.classList.remove("is-critical");
+      return result;
+    } catch (err) {
+      failWith(message, err.message);
+      return null;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   // Disabling the button that triggered the request drops focus to
   // <body> in Chrome and Firefox, so without this an error is silent to
   // a keyboard or screen-reader user: nothing is announced, and nothing
@@ -225,6 +254,18 @@
     document.getElementById("danger-zone").hidden = readOnly;
     // Its subject is the button above it, which is gone.
     document.getElementById("reload-note").hidden = readOnly;
+    document.getElementById("context-read-only-note").hidden = !readOnly;
+    // Unlike every other write control this toggles, the two prose
+    // textareas also carry content someone came here to read — hiding
+    // the whole form the way the danger zone or the history add-form
+    // disappear would take the text with it. Only the control that
+    // writes (Save) is a write control; the box holding what was
+    // written is not, so it stays, marked non-editable instead.
+    document.getElementById("ground-rules-text").readOnly = readOnly;
+    document.getElementById("save-ground-rules").hidden = readOnly;
+    document.getElementById("business-context-text").readOnly = readOnly;
+    document.getElementById("save-business-context").hidden = readOnly;
+    document.getElementById("history-form").hidden = readOnly;
   }
 
   function renderRetentionNote(retentionDays) {
@@ -809,6 +850,94 @@
           ]),
         ]),
       );
+    }
+  }
+
+  // Populates the two prose textareas (ground rules, business context)
+  // and their byte counters. Reset on every load(), same as the
+  // schema-registry forms — typed-but-unsaved text lost to an unrelated
+  // refresh is an existing trade-off of this page's one-shot render, not
+  // one this card invents.
+  let proseFieldMaxBytes = 0;
+  function renderContext(groundRules, businessContext, maxBytes, history) {
+    proseFieldMaxBytes = maxBytes;
+    document.getElementById("ground-rules-text").value = groundRules.text || "";
+    updateByteCount("ground-rules-text", "ground-rules-count");
+    document.getElementById("business-context-text").value =
+      businessContext.text || "";
+    updateByteCount("business-context-text", "business-context-count");
+    renderHistoryList(history);
+    document.getElementById("context-count-note").textContent =
+      history.entries.length +
+      (history.entries.length === 1 ? " history entry" : " history entries");
+  }
+
+  // Measured the same way the server does — UTF-8 bytes, not JS string
+  // length — so the count shown here agrees with the limit the save
+  // will actually be checked against. Shared by both prose fields: same
+  // cap, same rendering, only the element ids differ.
+  function updateByteCount(textareaId, counterId) {
+    const bytes = new TextEncoder().encode(
+      document.getElementById(textareaId).value,
+    ).length;
+    const counter = document.getElementById(counterId);
+    counter.textContent =
+      fullNumber.format(bytes) +
+      " / " +
+      fullNumber.format(proseFieldMaxBytes) +
+      " bytes";
+    counter.classList.toggle("is-critical", bytes > proseFieldMaxBytes);
+  }
+
+  // Newest first, as the server already sorted them. A note the reader
+  // could not trust is named rather than silently missing — the same
+  // "say why, don't go quiet" rule the schema errors panel follows.
+  function renderHistoryList(history) {
+    const list = document.getElementById("history-list");
+    const emptyNote = document.getElementById("history-empty-note");
+    clear(list);
+
+    if (!history.error && history.entries.length === 0) {
+      emptyNote.hidden = false;
+      emptyNote.textContent = "Nothing written down yet.";
+    } else if (history.error) {
+      emptyNote.hidden = false;
+      emptyNote.textContent =
+        "The history file could not be read: " + history.error;
+    } else {
+      emptyNote.hidden = true;
+    }
+
+    for (const entry of history.entries) {
+      const when = entry.to ? entry.from + " – " + entry.to : entry.from;
+      list.append(
+        el("li", { className: "history-item" }, [
+          el("time", { dateTime: entry.from }, [when]),
+          entry.note,
+        ]),
+      );
+    }
+
+    const notes = [];
+    if (history.skipped && history.skipped.length > 0) {
+      notes.push(
+        history.skipped.length +
+          (history.skipped.length === 1
+            ? " entry could not be read: "
+            : " entries could not be read: ") +
+          history.skipped.join(" / "),
+      );
+    }
+    if (history.dropped > 0) {
+      notes.push(
+        history.dropped +
+          " older " +
+          (history.dropped === 1 ? "entry" : "entries") +
+          " omitted, over the log's limit.",
+      );
+    }
+    for (const note of notes) {
+      list.append(el("li", { className: "history-item is-note" }, [note]));
     }
   }
 
@@ -2030,6 +2159,12 @@
     flagSchemaProblems(data.schemaErrors, data.orphanedEvents);
     renderMcpTools(data.toolManifest);
     renderRecentEvents(data.recentEvents);
+    renderContext(
+      data.groundRules || { text: "", error: null },
+      data.businessContext || { text: "", error: null },
+      data.proseFieldMaxBytes || 0,
+      data.history || { entries: [], skipped: [], dropped: 0, error: null },
+    );
     document.getElementById("updated-at").textContent =
       "Updated " + new Date().toLocaleTimeString();
   }
@@ -2283,6 +2418,103 @@
         message.textContent = err.message;
       } finally {
         button.disabled = false;
+      }
+    });
+
+  document
+    .getElementById("ground-rules-text")
+    .addEventListener("input", () =>
+      updateByteCount("ground-rules-text", "ground-rules-count"),
+    );
+
+  document
+    .getElementById("ground-rules-form")
+    .addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("save-ground-rules");
+      const message = document.getElementById("ground-rules-message");
+      const textarea = document.getElementById("ground-rules-text");
+
+      const result = await submitContextWrite(
+        button,
+        message,
+        "Saving…",
+        "/cockpit/context/ground-rules",
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            "X-Genug-Cockpit": "1",
+          },
+          body: JSON.stringify({ text: textarea.value }),
+        },
+      );
+      if (result) message.textContent = "Saved.";
+    });
+
+  document
+    .getElementById("business-context-text")
+    .addEventListener("input", () =>
+      updateByteCount("business-context-text", "business-context-count"),
+    );
+
+  document
+    .getElementById("business-context-form")
+    .addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("save-business-context");
+      const message = document.getElementById("business-context-message");
+      const textarea = document.getElementById("business-context-text");
+
+      const result = await submitContextWrite(
+        button,
+        message,
+        "Saving…",
+        "/cockpit/context/about",
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            "X-Genug-Cockpit": "1",
+          },
+          body: JSON.stringify({ text: textarea.value }),
+        },
+      );
+      if (result) message.textContent = "Saved.";
+    });
+
+  document
+    .getElementById("history-form")
+    .addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = document.getElementById("add-history-note");
+      const message = document.getElementById("history-message");
+      const from = document.getElementById("history-from");
+      const to = document.getElementById("history-to");
+      const note = document.getElementById("history-note");
+
+      const result = await submitContextWrite(
+        button,
+        message,
+        "Adding…",
+        "/cockpit/context/history",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Genug-Cockpit": "1",
+          },
+          body: JSON.stringify({
+            from: from.value,
+            to: to.value || undefined,
+            note: note.value.trim(),
+          }),
+        },
+      );
+      if (result) {
+        message.textContent = "Added.";
+        form.reset();
       }
     });
 

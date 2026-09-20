@@ -58,11 +58,16 @@ that will silently break these, with no visible error:
   differently, and a write route needs the header regardless.
   `/cockpit/reload`,
   `POST /cockpit/events` and `PUT /cockpit/events/:name` are the
-  existing examples; the two that write a file share one guard
+  existing examples; the ones that write an _event_ file share one guard
   (`refusesWrite`), which also refuses when the events directory is not
-  one the server can write. A router-level check ahead of all of them
-  refuses every non-GET request when `READ_ONLY=true`, so a new write
-  route is covered without doing anything — as long as it is not a GET.
+  one the server can write. A write with nothing analogous to check —
+  `PUT /cockpit/context/ground-rules`, `PUT /cockpit/context/about` and
+  `POST /cockpit/context/history` just save a file with no "is this the
+  right source" question — uses the CSRF half alone
+  (`refusesCockpitOrigin`). A router-level check
+  ahead of all of them refuses every non-GET request when
+  `READ_ONLY=true`, so a new write route is covered without doing
+  anything — as long as it is not a GET.
 
 - **A wrong _confirmation_ password answers 403, never 401.** The two
   danger-zone actions ask for the cockpit password again before they

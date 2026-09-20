@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { seedContextFiles, readDeploymentContext } from "./context.js";
+import {
+  seedContextFiles,
+  readDeploymentContext,
+  readGroundRulesRaw,
+  readBusinessContextRaw,
+  MAX_PROSE_FIELD_BYTES,
+} from "./context.js";
 
 // Real directories rather than a mocked filesystem: what is under test
 // is largely "what happens to a file on a volume", and both functions
@@ -108,12 +114,12 @@ test("a missing file is reported as such, not as an error", () => {
 
 test("an oversized file is cut, and the cut is named", () => {
   const dir = seeded();
-  // 8 KB over the 32 KB cap, so the arithmetic in the message is
-  // checkable rather than merely present — "smaller than the input"
-  // would hold just as well if one byte survived, or if the cap were
-  // off by a factor.
+  // 8 KB over the cap, so the arithmetic in the message is checkable
+  // rather than merely present — "smaller than the input" would hold
+  // just as well if one byte survived, or if the cap were off by a
+  // factor.
   const overBy = 8 * 1024;
-  const body = `KEEP THIS FIRST LINE\n${"x".repeat(32 * 1024 + overBy)}`;
+  const body = `KEEP THIS FIRST LINE\n${"x".repeat(MAX_PROSE_FIELD_BYTES + overBy)}`;
   writeFileSync(join(dir, "ground-rules.md"), body);
 
   const document = readDeploymentContext(dir);
@@ -126,4 +132,110 @@ test("an oversized file is cut, and the cut is named", () => {
   );
   // What survives is the start of the file, not an arbitrary slice.
   assert.match(document, /KEEP THIS FIRST LINE/);
+});
+
+// readGroundRulesRaw is the cockpit editor's reader, not the agent's —
+// it must hand back the plain text an owner can save unchanged, with no
+// heading or fallback prose mixed in.
+test("raw read returns the owner's file untouched", () => {
+  const dir = seeded();
+  writeFileSync(join(dir, "ground-rules.md"), "Only answer in German.");
+
+  const result = readGroundRulesRaw(dir);
+  assert.deepEqual(result, {
+    ok: true,
+    text: "Only answer in German.",
+    usingDefault: false,
+  });
+});
+
+test("raw read falls back to the built-in default when there is no file, and says so", () => {
+  const result = readGroundRulesRaw(emptyDir());
+  assert.equal(result.ok, true);
+  assert.equal((result as { usingDefault: boolean }).usingDefault, true);
+  assert.match((result as { text: string }).text, /Ask rather than guess/);
+});
+
+test("raw read reports an unreadable file as an error rather than falling back silently", () => {
+  const dir = emptyDir();
+  mkdirSync(join(dir, "ground-rules.md"));
+
+  const result = readGroundRulesRaw(dir);
+  assert.equal(result.ok, false);
+});
+
+// Business context: same document, no universal default. Absent and
+// empty must read the same way — "not yet configured" — since there is
+// no opt-out concept the way an emptied ground-rules file has one.
+
+test("the document serves the owner's business context under its own heading, after ground rules", () => {
+  const dir = seeded();
+  writeFileSync(join(dir, "about.md"), "We sell handmade pottery.");
+
+  const document = readDeploymentContext(dir);
+  assert.match(document, /## About this site\n\nWe sell handmade pottery\./);
+  // Fixed order settled when the feature was scoped: Ground rules, then
+  // About this site, then History.
+  assert.ok(
+    document.indexOf("## Ground rules") <
+      document.indexOf("## About this site") &&
+      document.indexOf("## About this site") < document.indexOf("## History"),
+  );
+});
+
+test("an absent business-context file reads as not-yet-configured, not as evidence of anything", () => {
+  const document = readDeploymentContext(seeded());
+  assert.match(
+    document,
+    /has not written down what the site is for.*not that the site has no clear purpose/s,
+  );
+});
+
+test("an empty business-context file reads exactly the same as an absent one", () => {
+  const dir = seeded();
+  writeFileSync(join(dir, "about.md"), "   \n\n");
+
+  const document = readDeploymentContext(dir);
+  assert.match(document, /has not written down what the site is for/);
+});
+
+test("an oversized business-context file is cut, and the cut is named", () => {
+  const dir = seeded();
+  const overBy = 8 * 1024;
+  const body = `KEEP THIS FIRST LINE\n${"x".repeat(MAX_PROSE_FIELD_BYTES + overBy)}`;
+  writeFileSync(join(dir, "about.md"), body);
+
+  const document = readDeploymentContext(dir);
+  assert.match(document, /## About this site[\s\S]*\*\*Truncated\.\*\*/);
+  assert.match(document, /KEEP THIS FIRST LINE/);
+});
+
+test("an unreadable business-context file is named, not silently ignored", () => {
+  const dir = emptyDir();
+  mkdirSync(join(dir, "about.md"));
+
+  const document = readDeploymentContext(dir);
+  assert.match(document, /## About this site[\s\S]*could not be read/);
+});
+
+test("raw business-context read returns the owner's file untouched", () => {
+  const dir = seeded();
+  writeFileSync(join(dir, "about.md"), "We sell handmade pottery.");
+
+  assert.deepEqual(readBusinessContextRaw(dir), {
+    ok: true,
+    text: "We sell handmade pottery.",
+  });
+});
+
+test("raw business-context read returns empty text when there is no file, not a default", () => {
+  assert.deepEqual(readBusinessContextRaw(emptyDir()), { ok: true, text: "" });
+});
+
+test("raw business-context read reports an unreadable file as an error", () => {
+  const dir = emptyDir();
+  mkdirSync(join(dir, "about.md"));
+
+  const result = readBusinessContextRaw(dir);
+  assert.equal(result.ok, false);
 });

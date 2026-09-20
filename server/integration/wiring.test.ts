@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { migrate } from "../db/migrations.js";
 import { insertEvent } from "../db/events.js";
+import { MAX_PROSE_FIELD_BYTES } from "../lib/context.js";
 
 // These tests spawn the real compiled server (dist/index.js) as a
 // subprocess instead of importing index.ts directly — its startup logic
@@ -1305,9 +1306,136 @@ test("answers /cockpit/data on a database with nothing in it", async (t) => {
     "rejectedEventCount",
     "botActivityCount",
     "schemaEditable",
+    "groundRules",
+    "businessContext",
+    "proseFieldMaxBytes",
+    "history",
   ]) {
     assert.ok(key in data, `/cockpit/data is missing ${key}`);
   }
+});
+
+// End to end: a real save reaches the file CONTEXT_PATH points at, and
+// a real add lands in history.json in the shape appendHistoryEntry
+// produces — the same three files lib/context.ts composes into the MCP
+// resource the agent reads.
+test("saves ground rules, business context and adds a history note from the cockpit", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const contextDir = join(dir, "context");
+  const port = 4219;
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    EVENTS_PATH: join(dir, "events"),
+    CONTEXT_PATH: contextDir,
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const base = `http://localhost:${port}`;
+  const auth = await signInToCockpit(port);
+
+  const savedRules = await fetch(`${base}/cockpit/context/ground-rules`, {
+    method: "PUT",
+    headers: {
+      cookie: auth,
+      "content-type": "application/json",
+      "x-genug-cockpit": "1",
+    },
+    body: JSON.stringify({ text: "Only answer in German." }),
+  });
+  assert.equal(savedRules.status, 200);
+  assert.equal(
+    readFileSync(join(contextDir, "ground-rules.md"), "utf8"),
+    "Only answer in German.",
+  );
+
+  const savedContext = await fetch(`${base}/cockpit/context/about`, {
+    method: "PUT",
+    headers: {
+      cookie: auth,
+      "content-type": "application/json",
+      "x-genug-cockpit": "1",
+    },
+    body: JSON.stringify({ text: "We sell handmade pottery." }),
+  });
+  assert.equal(savedContext.status, 200);
+  assert.equal(
+    readFileSync(join(contextDir, "about.md"), "utf8"),
+    "We sell handmade pottery.",
+  );
+
+  const addedNote = await fetch(`${base}/cockpit/context/history`, {
+    method: "POST",
+    headers: {
+      cookie: auth,
+      "content-type": "application/json",
+      "x-genug-cockpit": "1",
+    },
+    body: JSON.stringify({ from: "2026-05-03", note: "A redesign shipped." }),
+  });
+  assert.equal(addedNote.status, 200);
+  const history = JSON.parse(
+    readFileSync(join(contextDir, "history.json"), "utf8"),
+  ) as { from: string; note: string }[];
+  assert.deepEqual(history, [
+    { from: "2026-05-03", note: "A redesign shipped." },
+  ]);
+
+  // /cockpit/data reflects both, read fresh rather than from a cache
+  // the writes above would have to know to invalidate.
+  const page = (await (
+    await fetch(`${base}/cockpit/data?days=7`, { headers: { cookie: auth } })
+  ).json()) as {
+    groundRules: { text: string; usingDefault: boolean };
+    businessContext: { text: string };
+    history: { entries: { note: string }[] };
+  };
+  assert.equal(page.groundRules.text, "Only answer in German.");
+  assert.equal(page.groundRules.usingDefault, false);
+  assert.equal(page.businessContext.text, "We sell handmade pottery.");
+  assert.deepEqual(
+    page.history.entries.map((e) => e.note),
+    ["A redesign shipped."],
+  );
+});
+
+// Ordinary prose survives round-tripping through JSON at roughly 1 byte
+// per character, but a `"` costs 2 once escaped (`\"`) — so content
+// right at MAX_PROSE_FIELD_BYTES made entirely of quotes doubles in
+// size on the wire. This pins that the request body's size limit has
+// enough headroom over the content cap for that to still arrive as an
+// ordinary save rather than being rejected by the body parser before
+// writeGroundRules's own friendly error ever runs.
+test("saves ground rules made entirely of characters that double in size once JSON-escaped", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const contextDir = join(dir, "context");
+  const port = 4220;
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    EVENTS_PATH: join(dir, "events"),
+    CONTEXT_PATH: contextDir,
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const base = `http://localhost:${port}`;
+  const auth = await signInToCockpit(port);
+
+  const text = '"'.repeat(MAX_PROSE_FIELD_BYTES);
+  const saved = await fetch(`${base}/cockpit/context/ground-rules`, {
+    method: "PUT",
+    headers: {
+      cookie: auth,
+      "content-type": "application/json",
+      "x-genug-cockpit": "1",
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  assert.equal(saved.status, 200);
+  assert.equal(readFileSync(join(contextDir, "ground-rules.md"), "utf8"), text);
 });
 
 // The cockpit's danger-zone button, end to end: a real event lands, the
@@ -1587,6 +1715,13 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
     ],
     ["POST", "/cockpit/events/reset", { password: "test-cockpit-password" }],
     ["POST", "/cockpit/reset", { password: "test-cockpit-password" }],
+    ["PUT", "/cockpit/context/ground-rules", { text: "New rules." }],
+    ["PUT", "/cockpit/context/about", { text: "New context." }],
+    [
+      "POST",
+      "/cockpit/context/history",
+      { from: "2026-05-03", note: "A redesign shipped." },
+    ],
   ];
   for (const [method, path, body] of writes) {
     const response = await fetch(`${base}${path}`, {
