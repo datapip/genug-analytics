@@ -180,6 +180,7 @@ Two things the software cannot do for you:
 ## Next
 
 - [Make it yours](../README.md#make-it-yours) — the three recipes for
-  adding events, adding MCP tools and changing the cockpit.
+adding events, adding MCP tools and changing the cockpit.
 </content>
+
 </invoke>
