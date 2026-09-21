@@ -58,7 +58,7 @@ The full walk-through with a screenshot is
    configuration there is:
 
    ```sh
-   docker run --rm -p 3000:3000 \
+   docker run --rm -d -p 127.0.0.1:3000:3000 \
      -e ALLOWED_ORIGIN=https://your-domain.com \
      -e SALT_SECRET=<openssl rand -hex 32> \
      -e MCP_API_KEY=<openssl rand -hex 32> \
@@ -71,7 +71,26 @@ The full walk-through with a screenshot is
    nothing. Coolify, Cloudflare and the local build are in
    [deploying](docs/deploying.md).
 
-3. **Put the script on your site**, early in `<head>`:
+3. **Put a reverse proxy in front of it**, unless Coolify or Cloudflare
+   Tunnel already does this for you. The cockpit's login cookie needs
+   HTTPS, and the command above only gives you plain HTTP on a port
+   number. [Caddy](https://caddyserver.com/docs/install) gets there
+   with the least setup — install it, then:
+
+   ```
+   # /etc/caddy/Caddyfile
+   analytics.your-domain.com {
+       reverse_proxy localhost:3000
+   }
+   ```
+
+   `sudo systemctl reload caddy`, and add `-e TRUST_PROXY=1` to the
+   `docker run` above (without it the server logs the proxy's address
+   for every visitor instead of theirs). The full walk-through,
+   including what to do if Cloudflare also sits in front of Caddy, is
+   in [getting started](docs/getting-started.md#4-put-a-reverse-proxy-in-front-of-it).
+
+4. **Put the script on your site**, early in `<head>`:
 
    ```html
    <script>
@@ -80,9 +99,9 @@ The full walk-through with a screenshot is
    <script defer src="https://analytics.your-domain.com/client.js"></script>
    ```
 
-4. **Watch the first event arrive** at `/cockpit`, with the password
+5. **Watch the first event arrive** at `/cockpit`, with the password
    you set. If nothing shows, the rejected counter says why.
-5. **Connect your agent.** For Claude Code it is one line; other
+6. **Connect your agent.** For Claude Code it is one line; other
    clients are in [connecting an agent](docs/mcp.md).
 
    ```sh
