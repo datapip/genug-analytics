@@ -105,7 +105,11 @@ visibly broken, which is the failure mode this project cares most about.
   `lib/context.ts` reads it per request and holds no state, which is
   why it needs no live binding. It is served whole to the agent as one
   markdown resource (`genug://deployment-context`), so a further piece
-  becomes a new **section** of that document, not a second URI. Unlike
+  becomes a new **section** of that document, not a second URI. Also
+  served as the `get_deployment_context` tool, word-for-word the same
+  text — a client that never calls `resources/read` (several
+  connector UIs don't) otherwise has no path to this document at all.
+  Unlike
   visitor text, it is instruction the agent may act on — which is why
   the cockpit must not gain an edit box for it without deciding who may
   write there, and why `READ_ONLY` (a published key) makes it public.

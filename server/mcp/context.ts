@@ -3,12 +3,16 @@ import { DEPLOYMENT_CONTEXT_URI, type ToolRegistrar } from "./shared.js";
 
 // What the owner of this deployment wants the agent to know before it
 // answers anything: how to behave, what the site is for, and what has
-// happened to it.
+// happened to it. lib/context.ts reads it from disk per call, so an
+// edit on the volume is live with no restart.
 //
-// A resource rather than a tool, like the schema registry beside it —
-// it is reference material read once to ground an answer, not a
-// question with arguments. lib/context.ts reads it from disk per call,
-// so an edit on the volume is live with no restart.
+// Served as both a resource and a tool. The resource is the primary
+// form — reference material, not a question with arguments — but a
+// resource only reaches the agent if the MCP client surfaces
+// resources/read to it, which not every client does (some connector
+// UIs expose tools only). The tool exists purely as a fallback path
+// for those clients; both call the same readDeploymentContext(), so
+// there is nothing to keep in sync.
 export const registerContextResources: ToolRegistrar = (server) => {
   server.registerResource(
     "deployment-context",
@@ -28,6 +32,17 @@ export const registerContextResources: ToolRegistrar = (server) => {
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    "get_deployment_context",
+    {
+      description:
+        "The site owner's ground rules, business context and history — the same content as the deployment-context resource, for clients that don't surface MCP resources to the model. Read this before answering any question about this deployment; call it once per conversation, not once per query.",
+    },
+    async () => {
+      return { content: [{ type: "text", text: readDeploymentContext() }] };
     },
   );
 };

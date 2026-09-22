@@ -4969,3 +4969,34 @@ dedicated test, an integration test seeds a 900-day-old row under
 `RETENTION_DAYS=-1` and confirms it survives a real startup prune with
 no "unset" log line, and mutation-checked — reverting the `-1` special
 case fails exactly the tests naming it and nothing else.
+
+### `get_deployment_context`: a tool alongside the resource, not instead of it
+
+Reported by the maintainer: asking Claude.ai (a custom connector, Haiku
+4.5) a question, the model said no deployment context was available —
+it had never read `genug://deployment-context`, despite the file
+holding real ground rules and history. Read directly with the generic
+MCP resource tools from a different client (Claude Code), the resource
+was fine: registered, discoverable, serving live content. The gap was
+the client, not the server — MCP resources only reach a model that
+either auto-attaches them or knows to call `resources/read` itself, and
+that isn't universal, especially in simple connector UIs and with a
+smaller model that won't go looking for a resource unprompted. Tools
+don't have this problem; every client wires them into the normal
+calling loop.
+
+Fixed by adding `get_deployment_context` as a no-argument tool in
+`server/mcp/context.ts` that returns exactly `readDeploymentContext()`'s
+text — the same call the resource handler makes, so the two can't
+drift. The resource stays registered too, for clients that do use it.
+This overrides the "no separate tool, the resource already covers it"
+call made for the schema registry above (line ~2141): that one was
+about per-event *detail*, needed only once a specific query is already
+underway; ground rules govern whether the agent answers *any* question
+correctly, so they have to be reachable with no client resource support
+at all. `genug://schema-registry` has the identical exposure gap —
+`list_event_types` already covers the common case, so a `get_schema`
+tool is a noted, deliberately deferred follow-up rather than done here.
+
+Verified with a test that calls the new tool and asserts its text is
+identical to the resource's.

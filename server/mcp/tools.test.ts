@@ -730,6 +730,19 @@ test("the deployment-context resource is reachable and is markdown", async () =>
   await client.close();
 });
 
+// The tool fallback for clients that don't surface MCP resources to
+// the model — same content, reached a different way.
+test("get_deployment_context returns the same markdown as the resource", async () => {
+  const { client } = await connect();
+  const { contents } = await client.readResource({
+    uri: "genug://deployment-context",
+  });
+  const { text } = await callRaw(client, "get_deployment_context", {});
+
+  assert.equal(text, resourceText(contents));
+  await client.close();
+});
+
 // Role tags are internal wiring for the client script; an agent seeing
 // them would only be distracted by a field it can't use.
 test("role tags never reach the agent", async () => {
