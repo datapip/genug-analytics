@@ -7,6 +7,32 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## 0.7.0 — 2026-09-22
+
+**Added**
+
+- A new `get_deployment_context` MCP tool returns the same ground
+  rules, business context and history as the existing
+  `genug://deployment-context` resource. Some MCP clients (reported:
+  Claude.ai's connector UI) only ever call tools, never
+  `resources/read`, so an agent on one of those clients previously had
+  no way to see this text at all. The resource is unchanged and still
+  registered.
+- The server checks once at startup and once a day whether a newer
+  version has been tagged (one anonymous GET to GitHub's tags API, no
+  data about your deployment sent) and the cockpit shows a "new
+  version available" pill next to the version number when one has.
+  Fails silently with no outbound network access. Set
+  `UPDATE_CHECK=false` to opt out — see the `UPDATE_CHECK` row in
+  [docs/deploying.md](docs/deploying.md).
+
+**Fixed**
+
+- Two cockpit spacing bugs: the "Ground rules" / "About this site" /
+  "History" headings in the Deployment context card, and the read-only
+  note in the MCP tools card, sat flush against whatever preceded them
+  with no gap.
+
 ## 0.6.0 — 2026-09-20
 
 **Added**

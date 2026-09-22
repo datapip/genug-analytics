@@ -86,7 +86,7 @@ docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
   -e MCP_API_KEY=<second-secret> \
   -e COCKPIT_PASSWORD=<third-secret> \
   -v genug-data:/data \
-  ghcr.io/datapip/genug-analytics:v0.6.0
+  ghcr.io/datapip/genug-analytics:v0.7.0
 ```
 
 `-p 127.0.0.1:3000:3000` binds the container to the machine itself,
