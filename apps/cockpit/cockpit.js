@@ -216,7 +216,7 @@
   // into "vdev". Its own line under the product name, so an older
   // server that doesn't send the field leaves an empty line rather
   // than a dangling separator.
-  function renderVersion(version) {
+  function renderVersion(version, latestVersion) {
     document.getElementById("version").textContent = version || "";
     // The header's own version line is deliberately the quietest thing
     // up there (looked up when filing a bug, not read every time) — so
@@ -226,6 +226,10 @@
     document.getElementById("danger-zone-instance").textContent = version
       ? `You are about to act on ${location.host}, running ${version}.`
       : "";
+    // null covers both "no newer tag" and "the server hasn't checked
+    // yet" (see lib/updateCheck.ts) — same hidden state either way,
+    // rather than a pill that flickers in on a later refresh.
+    document.getElementById("version-pill").hidden = !latestVersion;
   }
 
   function renderPeriod(period) {
@@ -2124,7 +2128,7 @@
   function render(data) {
     hideError();
     latestData = data;
-    renderVersion(data.version);
+    renderVersion(data.version, data.latestVersion);
     renderPeriod(data.period);
     renderRetentionNote(data.retentionDays);
     renderReadOnly(data.readOnly === true);

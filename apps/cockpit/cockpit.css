@@ -190,11 +190,35 @@ h1 {
 }
 /* Under the product name rather than beside it: it is looked up when
    filing a bug, not read every time, so it gets the quietest line in
-   the header and never competes with the name for the same row. */
-.brand-version {
+   the header and never competes with the name for the same row. The
+   version text and its pill sit beside *each other* on this one line,
+   though — .brand-version-line is the flex row that holds both. */
+.brand-version-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
   margin: 0.1rem 0 0;
+}
+.brand-version {
   font-size: 0.7rem;
   color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+/* Same pill shape as .section-nav's links, at a size that sits beside
+   the version number rather than competing with it — informational,
+   not a warning, so it borrows the accent pair rather than
+   --critical. align-self keeps it level with the version text instead
+   of sinking to the row's shared text baseline. */
+.version-pill {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.65rem;
+  font-weight: 400;
   letter-spacing: 0.02em;
 }
 /* Both of these are block captions under the control row, not members
@@ -1314,7 +1338,7 @@ td.empty {
     align-items: baseline;
     gap: 0 0.45rem;
   }
-  .brand-meta .brand-version {
+  .brand-meta .brand-version-line {
     margin-top: 0;
   }
   .brand-meta .brand-version::before {

@@ -51,3 +51,16 @@ export function parseReadOnly(value: string | undefined): boolean {
   if (value === "false") return false;
   throw new Error(`READ_ONLY must be "true" or "false", got: ${value}`);
 }
+
+// One outbound GET a day to GitHub's tags API (lib/updateCheck.ts), to
+// tell the cockpit a newer version exists. Default on, like
+// LOCAL_BACKUPS — for a deployment with no outbound access at all this
+// just fails silently and the pill never shows, but an explicit off
+// switch belongs beside every other behaviour toggle here rather than
+// making someone firewall it to opt out.
+export function parseUpdateCheckEnabled(value: string | undefined): boolean {
+  if (value === undefined || value === "") return true;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`UPDATE_CHECK must be "true" or "false", got: ${value}`);
+}

@@ -19,9 +19,11 @@ import {
   parsePort,
   parseReadOnly,
   parseTrustProxy,
+  parseUpdateCheckEnabled,
   requireEnv,
 } from "./lib/env.js";
 import { VERSION } from "./lib/version.js";
+import { startUpdateCheck } from "./lib/updateCheck.js";
 import {
   baseSecurityHeaders,
   cockpitSecurityHeaders,
@@ -197,6 +199,12 @@ const runBotActivityFlush = () => {
   }
 };
 setInterval(runBotActivityFlush, 60 * 60 * 1000);
+
+// Best-effort, off with UPDATE_CHECK=false — see lib/updateCheck.ts for
+// why a failure here is silent rather than logged.
+if (parseUpdateCheckEnabled(process.env.UPDATE_CHECK)) {
+  startUpdateCheck(VERSION);
+}
 
 // Reclaims disk space freed by deleted rows (retention pruning above,
 // or delete_visitor_data via MCP) a little at a time — see

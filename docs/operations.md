@@ -258,6 +258,13 @@ transaction reaches disk.
   doesn't protect against losing that volume/disk entirely. For that,
   copy those files off the host as well: see below.
 
+- **Update check**: on by default (`UPDATE_CHECK=true`, see
+  [Configuration](deploying.md#configuration)) — once at startup and
+  once a day, one anonymous GET to GitHub's tags API for this repo, so
+  the cockpit can show a pill when a newer version is tagged. Sends
+  nothing about your deployment; fails silently with no outbound
+  access. Set `UPDATE_CHECK=false` to opt out.
+
 ## Copying backups off the host
 
 The daily job above already produces what you want to copy. Copy **the

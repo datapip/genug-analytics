@@ -72,6 +72,7 @@ import {
   recordEventsReset,
 } from "../lib/autoHistory.js";
 import { VERSION } from "../lib/version.js";
+import { latestVersion } from "../lib/updateCheck.js";
 
 // Read directly from the environment rather than threaded in, same as
 // eventsRouter's SALT_SECRET/ALLOWED_ORIGIN — server/index.ts already
@@ -156,6 +157,11 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     // carries its own "v" prefix from the release tag, or is "dev" from
     // a clone (see lib/version.ts) — the page prints it verbatim.
     version: VERSION,
+    // Read live, not captured at import time — lib/updateCheck.ts
+    // replaces this binding on its own schedule (same reasoning as
+    // eventRegistry). null means either no newer tag or the check
+    // hasn't resolved yet; the cockpit treats both the same way.
+    latestVersion,
     retentionDays: parseRetentionDays(process.env.RETENTION_DAYS) ?? null,
     trafficSummary: getTrafficSummary(db, period, pageViewEventType),
     botActivityCount: getBotActivityCount(db, period),
