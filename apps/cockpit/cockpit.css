@@ -1166,6 +1166,14 @@ details.schema-item[open] .summary-chevron {
   flex-direction: column;
   gap: 0.5rem;
 }
+/* The read-only note above it has no bottom margin of its own (it
+   isn't always there), so with no rule here the two sit flush against
+   each other in read-only mode. Scoped to when the note is actually
+   shown, so the normal-mode gap under the card's own padding is
+   unchanged. */
+#tools-read-only-note:not([hidden]) + .tool-list {
+  margin-top: 0.7rem;
+}
 /* Each tool is its own bordered tile, so the single-column separator
    the schema items use would read as a stray second line. */
 .tool-list .tool-item + .tool-item {
@@ -1592,6 +1600,17 @@ td.empty {
 }
 
 /* ---------- deployment context ---------- */
+
+/* Ground rules, About this site and History share .danger-action-title
+   with the danger zone below, where the gap above each one comes from
+   the wrapping .danger-action + .danger-action rule instead — there is
+   no such wrapper here, so without a top margin of its own each title
+   sits flush against whatever the previous section left behind (a
+   byte counter, a form). Scoped to this card so the danger zone's own
+   spacing is untouched. */
+#context-card .danger-action-title {
+  margin-top: 1.25rem;
+}
 
 .ground-rules-form textarea.edit-input,
 .history-form textarea.edit-input {
