@@ -54,43 +54,19 @@ The full walk-through with a screenshot is
    `analytics.your-domain.com`. The consent cookie is host-only, so a
    different domain silently degrades consentful tracking. Details in
    [deploying](docs/deploying.md#the-hostname).
-2. **Run it.** Three secrets and the tracked site's origin are all the
-   configuration there is:
+2. **Run it.** On a fresh Ubuntu server, one command installs Docker,
+   puts Caddy in front for HTTPS, and starts it — asking only for the
+   hostname, the tracked site's origin, and a cockpit password:
 
    ```sh
-   docker run --rm -d -p 127.0.0.1:3000:3000 \
-     -e ALLOWED_ORIGIN=https://your-domain.com \
-     -e SALT_SECRET=<openssl rand -hex 32> \
-     -e MCP_API_KEY=<openssl rand -hex 32> \
-     -e COCKPIT_PASSWORD=<openssl rand -hex 32> \
-     -v genug-data:/data \
-     ghcr.io/datapip/genug-analytics:v0.6.0
+   curl -fsSL https://genug-analytics.com/install.sh | sudo bash
    ```
 
-   `/data` must be a persistent volume, or every redeploy starts from
-   nothing. Coolify, Cloudflare and the local build are in
-   [deploying](docs/deploying.md).
+   Already on Coolify, building from source, or want to run `docker run`
+   and a reverse proxy by hand instead? All three are in
+   [deploying](docs/deploying.md#installing).
 
-3. **Put a reverse proxy in front of it**, unless Coolify or Cloudflare
-   Tunnel already does this for you. The cockpit's login cookie needs
-   HTTPS, and the command above only gives you plain HTTP on a port
-   number. [Caddy](https://caddyserver.com/docs/install) gets there
-   with the least setup — install it, then:
-
-   ```
-   # /etc/caddy/Caddyfile
-   analytics.your-domain.com {
-       reverse_proxy localhost:3000
-   }
-   ```
-
-   `sudo systemctl reload caddy`, and add `-e TRUST_PROXY=1` to the
-   `docker run` above (without it the server logs the proxy's address
-   for every visitor instead of theirs). The full walk-through,
-   including what to do if Cloudflare also sits in front of Caddy, is
-   in [getting started](docs/getting-started.md#4-put-a-reverse-proxy-in-front-of-it).
-
-4. **Put the script on your site**, early in `<head>`:
+3. **Put the script on your site**, early in `<head>`:
 
    ```html
    <script>
@@ -99,9 +75,9 @@ The full walk-through with a screenshot is
    <script defer src="https://analytics.your-domain.com/client.js"></script>
    ```
 
-5. **Watch the first event arrive** at `/cockpit`, with the password
+4. **Watch the first event arrive** at `/cockpit`, with the password
    you set. If nothing shows, the rejected counter says why.
-6. **Connect your agent.** For Claude Code it is one line; other
+5. **Connect your agent.** For Claude Code it is one line; other
    clients are in [connecting an agent](docs/mcp.md).
 
    ```sh

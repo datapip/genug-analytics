@@ -3,8 +3,20 @@
 The short path from nothing to asking your first question. Every step
 links to the page that has the details; this one has none of its own.
 
-If you're on Coolify or behind Cloudflare Tunnel, skip step 4 — they
-handle HTTPS for you and [deploying](deploying.md) covers both.
+**On a fresh Ubuntu server, one command does steps 1–4 for you** — asks
+for the hostname, generates the three secrets, runs the container, and
+puts Caddy in front with a real certificate:
+
+```sh
+curl -fsSL https://genug-analytics.com/install.sh | sudo bash
+```
+
+It prints the cockpit password and MCP key once at the end — save them,
+then skip to [step 5](#5-put-the-script-on-your-site). Steps 1–4 below
+are exactly what it automates, for doing it by hand instead — including
+if you're on Coolify or behind Cloudflare Tunnel, where you'd skip step
+4 either way, since they handle HTTPS for you and
+[deploying](deploying.md#installing) covers both.
 
 ## What you need first
 
@@ -181,6 +193,3 @@ Two things the software cannot do for you:
 
 - [Make it yours](../README.md#make-it-yours) — the three recipes for
 adding events, adding MCP tools and changing the cockpit.
-</content>
-
-</invoke>

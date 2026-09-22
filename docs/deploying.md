@@ -34,7 +34,97 @@ this directory, not `/data`); it's optional in Docker/Coolify below.
 
 See [Configuration](#configuration) below for what each env var does.
 
-## Build and run with Docker
+## Installing
+
+Three ways to get a real deployment running, in order of how much they
+do for you.
+
+### The install script
+
+The fastest path on a fresh Ubuntu server — it installs Docker, puts
+[Caddy](https://caddyserver.com/) in front for automatic HTTPS, and
+starts Genug Analytics, asking only for the collector's hostname, the
+tracked site's origin, and a cockpit password:
+
+```sh
+curl -fsSL https://genug-analytics.com/install.sh | sudo bash
+```
+
+It needs root (to install Docker, enable its systemd service, and open
+80/443 in `ufw` if one is already active) and a DNS `A`/`AAAA` record
+for the hostname already pointing at the server — or answer
+`localhost` to try it out first without either; Caddy then issues
+itself a self-signed certificate and binds to `127.0.0.1` instead of
+the internet.
+
+It checks the hostname really is a subdomain of the tracked origin
+(see [above](#the-hostname)) and warns before continuing if it isn't.
+Secrets are generated for you and printed once at the end — copy them
+somewhere safe before closing the terminal, they're also saved to
+`/opt/genug-analytics/.env`.
+
+**Re-running the script on a box that already has a deployment never
+regenerates `SALT_SECRET` or `MCP_API_KEY`** — doing that would
+silently re-identify every visitor and invalidate any MCP client
+already configured. It offers to pull the latest image tag in place
+instead, leaving the hostname and secrets untouched.
+
+Not on a fresh Ubuntu box, or want more control over what gets
+installed? Use one of the two methods below instead.
+
+### Docker Compose on Coolify
+
+Coolify's **Docker Compose** resource type pulls the published image
+directly — no git remote or build step, and no need to connect this
+repo to Coolify at all. Every pushed `v*` tag is built and published to
+`ghcr.io/datapip/genug-analytics` under that tag automatically (see
+[releasing.md](releasing.md)):
+
+```yaml
+services:
+  genug:
+    image: "ghcr.io/datapip/genug-analytics:v0.6.0" # the latest released tag
+    environment:
+      - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
+      - "SALT_SECRET=${SALT_SECRET}"
+      - "MCP_API_KEY=${MCP_API_KEY}"
+      - "COCKPIT_PASSWORD=${COCKPIT_PASSWORD}"
+      # One hop: Coolify's Traefik. Raise to 2 ONLY if this record is
+      # also proxied by Cloudflare. Trusting a hop that is not there
+      # lets anyone forge the address every rate limit and both
+      # password lockouts count — see Configuration below.
+      - TRUST_PROXY=1
+    volumes:
+      - "genug-data:/data"
+volumes:
+  genug-data: null
+```
+
+- **Set the domain**: the **Domains** tab, FQDN e.g.
+  `analytics.your-domain.com` — Coolify's built-in Traefik provisions
+  TLS automatically. No `SERVICE_FQDN_*` variable required, that's
+  Coolify's own shorthand for generating one, not a requirement.
+- **Don't add a `ports:` mapping.** Coolify's Traefik reaches the
+  container over its internal network on port 3000, which the image
+  already exposes — publishing it to the host too is redundant, and on
+  a server running more than one app it can collide with a host port
+  something else already holds.
+- **No `healthcheck:` needed** — the image already carries one (the
+  `Dockerfile`'s `HEALTHCHECK`), and Compose inherits it.
+- **`EVENTS_PATH` and `CONTEXT_PATH` need no separate volume**: they
+  default to `/data/events` and `/data/context`, both inside the same
+  `/data` mount above, and are seeded from the image on first start.
+- **Running a demo or other deployment whose MCP key is meant to be
+  public?** Add `READ_ONLY=true` — it closes every write (cockpit
+  edits, event resets, `delete_visitor_data`) and un-registers
+  `get_recent_events`, the one read tool that returns raw rows rather
+  than an aggregate. See [Configuration](#configuration).
+
+`TRUST_PROXY` and the Cloudflare proxying question are exactly as
+described under [Deploying on Coolify](#deploying-on-coolify) below —
+set `2` instead of `1` if this domain is also proxied.
+
+### Build and run with Docker
 
 ```sh
 docker build -t genug .
@@ -77,6 +167,9 @@ never for ordinary app code changes.
 
 ## Deploying on Coolify
 
+If you'd rather have Coolify build the image itself from this repo on
+every deploy — your own fork, say — instead of pulling the published
+one (the [Docker Compose method](#docker-compose-on-coolify) above),
 Coolify connects to a git remote and does its own `git clone`/`pull` on
 its own server each time you deploy — you `git push` like normal, and
 either click "Deploy" in its UI or let a push-triggered webhook do it.
@@ -143,52 +236,6 @@ forever against Traefik's own HTTP→HTTPS redirect, and not Full
 trusts, running into the same blocked-ACME problem. Full accepts any
 certificate without validating who issued it, which the existing
 self-signed one already satisfies — nothing further to configure.
-
-## Deploying a published image on Coolify
-
-If you'd rather pull a built image than have Coolify build from source,
-use Coolify's **Docker Compose** resource type in place of steps 1–3
-above — no git remote involved at all. Every pushed `v*` tag is built
-and published to `ghcr.io/datapip/genug-analytics` under that tag
-automatically (see [releasing.md](releasing.md)):
-
-```yaml
-services:
-  genug:
-    image: "ghcr.io/datapip/genug-analytics:v0.6.0" # the latest released tag
-    environment:
-      - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
-      - "SALT_SECRET=${SALT_SECRET}"
-      - "MCP_API_KEY=${MCP_API_KEY}"
-      - "COCKPIT_PASSWORD=${COCKPIT_PASSWORD}"
-      # One hop: Coolify's Traefik. Raise to 2 ONLY if this record is
-      # also proxied by Cloudflare. Trusting a hop that is not there
-      # lets anyone forge the address every rate limit and both
-      # password lockouts count — see Configuration below.
-      - TRUST_PROXY=1
-    volumes:
-      - "genug-data:/data"
-volumes:
-  genug-data: null
-```
-
-- **Set the domain the same way as the git-build flow**: the
-  **Domains** tab works for a Compose resource too, no
-  `SERVICE_FQDN_*` variable required — that's Coolify's own shorthand
-  for generating one, not a requirement.
-- **Don't add a `ports:` mapping.** Coolify's Traefik reaches the
-  container over its internal network on port 3000, which the image
-  already exposes — publishing it to the host too is
-  redundant, and on a server running more than one app it can collide
-  with a host port something else already holds.
-- **No `healthcheck:` needed** — the image already carries one (the
-  `Dockerfile`'s `HEALTHCHECK`), and Compose inherits it.
-- **`EVENTS_PATH` and `CONTEXT_PATH` need no separate volume**: they
-  default to `/data/events` and `/data/context`, both inside the same
-  `/data` mount above, and are seeded from the image on first start.
-
-`TRUST_PROXY` and the Cloudflare proxying question are exactly as
-described above — set `1` instead of `2` if this domain stays DNS-only.
 
 ## Configuration
 
