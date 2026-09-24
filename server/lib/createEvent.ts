@@ -1,7 +1,11 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { checkEvent, isValidEventName } from "@genug/schema-registry";
+import {
+  checkEvent,
+  EVENT_NAME_RULE,
+  isValidEventName,
+} from "@genug/schema-registry";
 
 // Creates one event file from the cockpit's New event form.
 //
@@ -79,8 +83,7 @@ export function createEventFile(
   if (!isValidEventName(create.name)) {
     return failed(
       `"${create.name}" cannot be an event name. The file is named after ` +
-        `the event, so a name may only contain lowercase letters, digits ` +
-        `and underscores.`,
+        `the event, so ${EVENT_NAME_RULE}.`,
     );
   }
 

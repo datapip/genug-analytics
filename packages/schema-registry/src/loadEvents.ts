@@ -81,9 +81,30 @@ const EVENT_NAME_PATTERN = /^[a-z0-9_]+$/;
 // an incoming event name to lowercase before matching it here, so a
 // stray-case track() call still resolves instead of being rejected over
 // nothing but casing.
+//
+// The pattern allows three names that every plain object already has.
+// The registry is keyed by name, so a file called __proto__.json would
+// replace the registry's prototype instead of adding an event: the
+// event would silently not exist.
+export const RESERVED_EVENT_NAMES: readonly string[] = [
+  "__proto__",
+  "constructor",
+  "prototype",
+];
+
 export function isValidEventName(name: string): boolean {
-  return EVENT_NAME_PATTERN.test(name) && name.length <= MAX_EVENT_NAME_LENGTH;
+  return (
+    EVENT_NAME_PATTERN.test(name) &&
+    name.length <= MAX_EVENT_NAME_LENGTH &&
+    !RESERVED_EVENT_NAMES.includes(name)
+  );
 }
+
+// The rule in words, for every message that refuses a name.
+export const EVENT_NAME_RULE =
+  "a name may only contain lowercase letters, digits and underscores, " +
+  `be at most ${MAX_EVENT_NAME_LENGTH} characters, and not be ` +
+  RESERVED_EVENT_NAMES.join(", ");
 
 // The role tags, as they appear on a loaded definition. Spelled out
 // rather than imported from registry.ts's EventRoleTag, because
@@ -133,8 +154,7 @@ export function loadEvents(directory: string): LoadedEvents {
         file,
         messages: [
           `"${name}" is not a usable event name — the filename is the event ` +
-            `name, so it may only contain lowercase letters, digits and ` +
-            `underscores, and be at most ${MAX_EVENT_NAME_LENGTH} characters`,
+            `name, so ${EVENT_NAME_RULE}`,
         ],
       });
       continue;

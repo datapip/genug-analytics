@@ -683,6 +683,62 @@ test("refuses a reload that did not come from the cockpit page", async (t) => {
   assert.equal(response.status, 400);
 });
 
+// A session cookie is not the password, so a stolen one must not be a
+// way to test guesses at it. Five wrong confirmations in a row sign
+// every session out. Each one also counts toward the sign-in lockout
+// for its address, so ten lock that address out of signing in too.
+test("wrong danger-zone passwords sign sessions out and lock sign-in", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const port = 4227;
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    EVENTS_PATH: join(dir, "events"),
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const base = `http://localhost:${port}`;
+  const confirm = (cookie: string, path: string, password: string) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-genug-cockpit": "1",
+        origin: base,
+      },
+      body: JSON.stringify({ password }),
+    });
+  const paths = ["/cockpit/reset", "/cockpit/events/reset"];
+
+  // Two rounds of five: each round ends in a sign-out.
+  for (let round = 0; round < 2; round++) {
+    const cookie = await signInToCockpit(port);
+    for (let i = 0; i < 4; i++) {
+      // Stays 403: a 401 would send the owner to the sign-in page.
+      const res = await confirm(cookie, paths[i % 2]!, "wrong");
+      assert.equal(res.status, 403);
+    }
+    const fifth = await confirm(cookie, "/cockpit/reset", "wrong");
+    assert.equal(fifth.status, 401);
+    const after = await fetch(`${base}/cockpit/data?period=7d`, {
+      headers: { cookie },
+    });
+    assert.equal(after.status, 401, "the session should be signed out");
+  }
+
+  // Ten failures from this address: sign-in is locked, even with the
+  // right password.
+  const signIn = await fetch(`${base}/cockpit/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-genug-cockpit": "1" },
+    body: JSON.stringify({ password: "test-cockpit-password" }),
+  });
+  assert.equal(signIn.status, 429);
+  assert.ok(signIn.headers.get("retry-after"));
+});
+
 // The create route's counterpart to the reload test above, and the same
 // assumption under test: the event a form just defined is accepted by
 // the collector immediately, with nothing else called in between. The

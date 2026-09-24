@@ -64,9 +64,9 @@ export function stripUnknownParams(rawUrl: string): string {
   try {
     url = new URL(rawUrl);
   } catch {
-    // Same fallback as parseUrl below: `referrer` is deliberately not
-    // URL-validated, because "" is the normal value for a direct
-    // visitor. An unparseable value passes through untouched.
+    // Same fallback as parseUrl below. The envelope lets `referrer`
+    // through as "", the normal value for a direct visitor, and that
+    // passes through untouched.
     return rawUrl;
   }
   // Snapshotted before deleting, since deleting mutates what keys()

@@ -53,6 +53,13 @@ import { getToolManifest } from "../mcp/tools.js";
 import { resetDatabase } from "../lib/resetDatabase.js";
 import { parseReadOnly, requireEnv } from "../lib/env.js";
 import { timingSafeStringEqual } from "../lib/auth.js";
+import { logInfo } from "../lib/logger.js";
+import {
+  clearConfirmationFailures,
+  cockpitPasswordLimiter,
+  recordConfirmationFailure,
+  refuseLockedOut,
+} from "../lib/cockpitAuth.js";
 import {
   contextPath,
   readGroundRulesRaw,
@@ -842,6 +849,40 @@ cockpitRouter.post(
 
 const resetSchema = z.strictObject({ password: z.string() });
 
+// A session cookie is not the password, so a stolen cookie must not be
+// a way to test guesses at it. Two limits: each wrong guess counts
+// toward the sign-in lockout for its address (a 429, which cockpitFetch
+// leaves alone), and five in a row from anywhere sign every session out
+// (lib/cockpitAuth.ts). A wrong guess otherwise stays 403, for the
+// reason below. The sign-out answers 401, because the session really
+// is gone.
+function confirmPassword(
+  req: Request,
+  res: Response,
+  supplied: string,
+): boolean {
+  const ip = req.ip ?? "unknown";
+  if (refuseLockedOut(cockpitPasswordLimiter, ip, res)) return false;
+  if (!timingSafeStringEqual(supplied, cockpitPassword)) {
+    cockpitPasswordLimiter.recordFailure(ip);
+    if (recordConfirmationFailure()) {
+      logInfo(
+        "Too many wrong danger-zone passwords — every cockpit session was signed out",
+        { ip },
+      );
+      res.status(401).json({
+        ok: false,
+        error: "Too many wrong passwords. Every session was signed out.",
+      });
+      return false;
+    }
+    res.status(403).json({ ok: false, error: "Incorrect password." });
+    return false;
+  }
+  clearConfirmationFailures();
+  return true;
+}
+
 // Both danger-zone routes answer a wrong *confirmation* password with
 // 403, never 401. The request is already authenticated — it carried a
 // valid session to reach the handler — and it is the retyped
@@ -881,10 +922,7 @@ cockpitRouter.post(
       return;
     }
 
-    if (!timingSafeStringEqual(body.data.password, cockpitPassword)) {
-      res.status(403).json({ ok: false, error: "Incorrect password." });
-      return;
-    }
+    if (!confirmPassword(req, res, body.data.password)) return;
 
     // Counted before the registry changes: afterwards these names are
     // gone from it, and what they collected is exactly what nothing
@@ -952,10 +990,7 @@ cockpitRouter.post("/reset", parseEditBody, (req: Request, res: Response) => {
     return;
   }
 
-  if (!timingSafeStringEqual(body.data.password, cockpitPassword)) {
-    res.status(403).json({ ok: false, error: "Incorrect password." });
-    return;
-  }
+  if (!confirmPassword(req, res, body.data.password)) return;
 
   const result = resetDatabase(db);
   // The in-memory bot-hit counter is a fourth place data lives besides

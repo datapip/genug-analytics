@@ -8,6 +8,7 @@ export {
   loadEvents,
   formatSchemaErrors,
   isValidEventName,
+  EVENT_NAME_RULE,
   type EventDefinition,
   type PropMetadata,
   type SchemaFileError,

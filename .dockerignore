@@ -11,3 +11,10 @@ node_modules
 # clone, and keeps the folder out of the build context on a machine
 # that has it. Docker reads only this file, never .gitignore.
 local-demo
+# Everything not listed here is copied into the image by `COPY . .`
+# and published with it. These can hold real data: local backups of a
+# database, cockpit screenshots, and an agent's local notes and settings.
+backups
+.claude
+CLAUDE.local.md
+.playwright-mcp

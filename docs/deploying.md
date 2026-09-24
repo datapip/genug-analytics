@@ -186,11 +186,21 @@ already has, so a root-owned one isn't writable:
 
 ```bash
 mkdir -p /srv/genug-data && chown -R 1000:1000 /srv/genug-data
+chmod 700 /srv/genug-data
 docker run ... -v /srv/genug-data:/data genug
 ```
 
-If you skip this, the server refuses to start and tells you exactly
-this — it doesn't fail silently or come up half-working.
+If you skip the `chown`, the server refuses to start and tells you
+exactly this — it doesn't fail silently or come up half-working.
+
+The `chmod 700` keeps other users on the host out of the database and
+its backups. A new directory is usually readable by everyone. Root can
+still read it, so a backup job run as root (like the one in
+[operations.md](operations.md)) keeps working. If a separate non-root
+user copies the backups, give it a group instead:
+`chgrp backup /srv/genug-data && chmod 750 /srv/genug-data`. A named
+volume needs none of this: Docker keeps those under a folder only root
+can open.
 
 **Updating after a code change:** re-run `docker build` — it only
 re-runs the layers after your changed files, not the slow dependency-

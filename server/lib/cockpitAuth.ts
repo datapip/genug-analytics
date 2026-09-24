@@ -25,6 +25,34 @@ import {
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 
+// One budget for every place the cockpit password is typed: the sign-in
+// here and the two danger-zone confirmations in routes/cockpit.ts. A
+// session cookie is not the password, so without this a stolen cookie
+// could test guesses at full speed against a confirmation box and come
+// away with the password itself. Shared, so ten wrong guesses anywhere
+// lock both doors.
+export const cockpitPasswordLimiter: FailedAttemptLimiter =
+  createFailedAttemptLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
+
+// The refusal a locked-out address gets, wherever it typed the password.
+export function refuseLockedOut(
+  limiter: FailedAttemptLimiter,
+  ip: string,
+  res: Response,
+): boolean {
+  if (!limiter.isBlocked(ip)) return false;
+  const retryAfterSeconds = limiter.retryAfterSeconds(ip);
+  res.set("Retry-After", String(retryAfterSeconds));
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  res.status(429).json({
+    ok: false,
+    error: `Too many failed attempts. Try again in ${minutes} ${
+      minutes === 1 ? "minute" : "minutes"
+    }.`,
+  });
+  return true;
+}
+
 // Where a browser with no session is sent, as a constant. Never built
 // from anything on the request: a login page that redirects onward to an
 // address someone else chose is how a password ends up typed into
@@ -88,6 +116,28 @@ const COOKIE_OPTIONS = {
 // reason to press it is that a copy is somewhere it should not be.
 let sessionsIssuedBefore = 0;
 
+// The per-IP lockout above cannot stop someone holding a stolen cookie:
+// they can send guesses from many addresses. The session is the one
+// thing they cannot rotate. So this many wrong confirmations in a row,
+// from anywhere, signs every browser out. Only a session reaches the
+// confirmation boxes, so a stranger cannot use this to lock the owner
+// out. The owner mistyping five times just signs in again.
+const MAX_CONFIRMATION_FAILURES = 5;
+let confirmationFailures = 0;
+
+// Returns true when this failure signed every session out.
+export function recordConfirmationFailure(): boolean {
+  confirmationFailures++;
+  if (confirmationFailures < MAX_CONFIRMATION_FAILURES) return false;
+  confirmationFailures = 0;
+  sessionsIssuedBefore = Date.now();
+  return true;
+}
+
+export function clearConfirmationFailures(): void {
+  confirmationFailures = 0;
+}
+
 export interface CockpitAuth {
   // Mounted before the gate: the two routes a browser reaches without a
   // session yet, or on the way out.
@@ -103,10 +153,7 @@ export interface CockpitAuth {
 // COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
 export function createCockpitAuth(
   password: string,
-  limiter: FailedAttemptLimiter = createFailedAttemptLimiter(
-    MAX_FAILURES,
-    FAILURE_WINDOW_MS,
-  ),
+  limiter: FailedAttemptLimiter = cockpitPasswordLimiter,
 ): CockpitAuth {
   const key = deriveSessionKey(password);
   const router = Router();
@@ -115,18 +162,7 @@ export function createCockpitAuth(
   // /events, and nothing legitimate sends more than a password.
   router.post(SESSION_ROUTE, json({ limit: "1kb" }), (req, res) => {
     const ip = req.ip ?? "unknown";
-    if (limiter.isBlocked(ip)) {
-      const retryAfterSeconds = limiter.retryAfterSeconds(ip);
-      res.set("Retry-After", String(retryAfterSeconds));
-      const minutes = Math.ceil(retryAfterSeconds / 60);
-      res.status(429).json({
-        ok: false,
-        error: `Too many failed attempts. Try again in ${minutes} ${
-          minutes === 1 ? "minute" : "minutes"
-        }.`,
-      });
-      return;
-    }
+    if (refuseLockedOut(limiter, ip, res)) return;
 
     // The same header every other write on this router requires. Belt
     // and braces beside SameSite: a login a stranger's page can trigger
@@ -236,4 +272,5 @@ export function createCockpitAuth(
 // the sessions every later test issues.
 export function resetSessionRevocationForTests(): void {
   sessionsIssuedBefore = 0;
+  confirmationFailures = 0;
 }

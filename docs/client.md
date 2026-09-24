@@ -404,6 +404,8 @@ Generous, and only there to stop one request filling the database:
   must be a real absolute `http` or `https` URL. The client script
   always sends `location.href`, so this only matters for a custom
   integration — one sending a `javascript:` or `data:` URL gets a `400`.
+  `referrer` must be `""` or an `http`, `https` or `android-app` URL.
+  The last is what Chrome on Android sends for a click in an app.
 - Query parameters other than `utm_*`, `gclid`, `fbclid`, `msclkid`,
   `ttclid`, `ref` and `source` are **stripped** from `url` and
   `referrer`, by the client before sending and again on arrival. Page

@@ -3334,6 +3334,16 @@ immediately and binds from the first real deployment onward.)
   office NAT) is locked out alongside them; acceptable for a
   single-owner tool where the fallback is waiting 15 minutes or
   restarting the process.
+
+  2026-09-24: the two danger-zone confirmations had no limit at all.
+  They sit behind a session, but a session cookie is not the password,
+  so a stolen cookie could guess the password there at full speed. Now
+  each wrong guess counts toward the same per-IP budget as sign-in.
+  That alone does not stop the cookie holder, who can switch
+  addresses. The session is the one thing they cannot switch, so five
+  wrong confirmations in a row, from anywhere, sign every session out.
+  Only a session reaches those boxes, so a stranger cannot use this to
+  lock the owner out.
 - ~~A request limit on `/mcp`~~ Done, 2026-09-15: `createRequestLimiter`
   in `lib/rateLimit.ts` is the `/events` limiter made into a factory,
   and `/mcp` mounts one at 60 calls a minute per address, ahead of the

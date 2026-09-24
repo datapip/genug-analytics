@@ -184,6 +184,17 @@ test("refuses a name that could not be a file", () => {
   }
 });
 
+// Valid as filenames, but every plain object already has them, so the
+// loader would never register the event the form just wrote.
+test("refuses the names every object already has", () => {
+  for (const name of ["__proto__", "constructor", "prototype"]) {
+    const dir = directory();
+    const result = createEventFile(database(), dir, create({ name }));
+    assert.equal(result.ok, false, `"${name}" should be refused`);
+    assert.deepEqual(readdirSync(dir), [], "nothing should be written");
+  }
+});
+
 test("refuses two props of one name rather than collapsing them", () => {
   const dir = directory();
   const result = createEventFile(

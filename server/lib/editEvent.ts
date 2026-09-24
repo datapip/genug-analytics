@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import {
   checkEvent,
+  EVENT_NAME_RULE,
   isValidEventName,
   type PropRule,
 } from "@genug/schema-registry";
@@ -59,9 +60,8 @@ export function editEventFile(
 
   if (!isValidEventName(edit.name)) {
     return failed(
-      `"${edit.name}" cannot be an event name. The file is named after the ` +
-        `event, so a name may only contain lowercase letters, digits and ` +
-        `underscores.`,
+      `"${edit.name}" cannot be an event name. The file is named after ` +
+        `the event, so ${EVENT_NAME_RULE}.`,
     );
   }
 

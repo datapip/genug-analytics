@@ -12,6 +12,7 @@ import { z } from "zod";
 const MAX_URL_LENGTH = 2048; // the de facto browser/CDN URL ceiling
 export const MAX_EVENT_NAME_LENGTH = 128;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+const REFERRER_PROTOCOLS = new Set(["http:", "https:", "android-app:"]);
 
 // The three events the bundled client script fires on its own. It sends
 // the role rather than a name, because it does not know what this
@@ -57,11 +58,29 @@ export const envelopeSchema = z
         (value) => /^https?:\/\//i.test(value),
         "url must be http or https",
       ),
-    // NOT validated as a URL, unlike `url` above: document.referrer is ""
-    // for a visitor arriving directly, which is the common case and not
-    // an error. getTopReferrers already treats an unparseable referrer as
-    // direct traffic.
-    referrer: z.string().max(MAX_URL_LENGTH).optional(),
+    // "" or a URL whose scheme is on a short list. Not http(s) only,
+    // unlike `url`: Chrome on Android sends
+    // android-app://com.google.android.gm/ for a click in the Gmail app,
+    // and rejecting that would lose a real page view. "" is a visitor
+    // arriving directly, the common case. An allowlist rather than a
+    // "scheme://" pattern, because javascript://%0aalert(1) fits that
+    // pattern and runs as code in a link: the full referrer reaches the
+    // agent through get_recent_events, and its client may render links.
+    // Same cap as `url`: past the first page of a visit the referrer is
+    // this site's own previous URL.
+    referrer: z
+      .string()
+      .max(MAX_URL_LENGTH)
+      // URL.canParse first: a refinement that throws turns safeParse
+      // into a thrown error.
+      .refine(
+        (value) =>
+          value === "" ||
+          (URL.canParse(value) &&
+            REFERRER_PROTOCOLS.has(new URL(value).protocol)),
+        'referrer must be "" or an http, https or android-app URL',
+      )
+      .optional(),
     // Optional, deployment-supplied dedup key (e.g. a real order id) —
     // see idx_events_dedup in db/migrations.ts. On the envelope rather
     // than in props, being fixed metadata that means the same thing for

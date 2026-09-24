@@ -234,6 +234,28 @@ test("rejects a filename that isn't a usable event name", () => {
   );
 });
 
+// Each is a name every plain object already has. __proto__.json would
+// replace the registry's prototype, and the event would silently not
+// exist.
+test("rejects the names every object already has", () => {
+  const { registry, errors } = loadEvents(
+    directoryWith({
+      "page_view.json": PAGE_VIEW,
+      "__proto__.json": PAGE_VIEW,
+      "constructor.json": PAGE_VIEW,
+      "prototype.json": PAGE_VIEW,
+    }),
+  );
+  assert.deepEqual(Object.keys(registry), ["page_view"]);
+  assert.equal(Object.getPrototypeOf(registry), Object.prototype);
+  assert.deepEqual(errors.map((error) => error.file).sort(), [
+    "__proto__.json",
+    "constructor.json",
+    "prototype.json",
+  ]);
+  assert.match(errors[0]!.messages.join(), /not be __proto__/);
+});
+
 // The volume directory in phase 2 may legitimately not exist. Reported,
 // never thrown — the caller decides whether that is fatal.
 test("a missing directory is an error, not a crash", () => {
