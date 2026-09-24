@@ -4456,6 +4456,31 @@ immediately and binds from the first real deployment onward.)
   across all three traps is the same: the generator has to be told the
   truth about the defences, or it measures them instead of the server.
 
+- ~~Run `PRAGMA optimize`~~ **Measured and rejected, 2026-09-24.** The
+  app never runs `ANALYZE`, so SQLite plans without statistics. That
+  once cost us: a segment's event condition walked the event's whole
+  history through `idx_events_event_ts`, now fixed with a unary `+` in
+  `lib/segment.ts`. SQLite's advice is to run `PRAGMA optimize` at
+  startup and every few hours, so it was measured before being added.
+
+  It makes this app slower. On a 1,000,000-event fill (0.5 s to run),
+  with the same answers every time: `get_traffic_summary` over 30 days
+  28 ms → 67 ms, `get_new_vs_returning_visitors` 61 → 104 ms, a segmented
+  `get_top_referrers` 103 → 148 ms, the cockpit's 30-day page 530 →
+  670 ms. Only `get_top_events` got faster (22 → 8 ms). Repeated three
+  times each way; the numbers held.
+
+  The cause is in the plan. With statistics SQLite learns that `event`
+  has only a few distinct values, and answers a plain date range with a
+  skip-scan over `(event, ts)` instead of `idx_events_ts`. That reads
+  the period once per event type and fetches rows out of date order. A
+  real site also has a handful of event types, so the fixture is not
+  the reason.
+
+  If this is tried again: measure through the server as above, and
+  compare every tool, not the slow one you were chasing. A statistics
+  table changes every plan at once.
+
 ### Data lifecycle (legal exposure, not just nice-to-have)
 
 Both done:
