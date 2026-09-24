@@ -7,7 +7,7 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
-## Unreleased
+## 0.8.0 — 2026-09-24
 
 **Breaking**
 
