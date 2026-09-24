@@ -295,32 +295,6 @@
       <h2 class="area-label" id="events">Events</h2>
 
       <div class="stack">
-        <!-- Present only when something was actually rejected. A card
-             reading "nothing was rejected" every day is noise that
-             trains the eye to skip the spot where the real warning
-             will one day appear. -->
-        <section class="card" id="rejected-card" hidden>
-          <div class="card-head">
-            <h3 class="card-title">Rejected events</h3>
-            <span class="card-note"
-              >Top 5 by count — grouped by reason and event name</span
-            >
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Reason</th>
-                  <th>Event</th>
-                  <th>Count</th>
-                  <th>Latest detail</th>
-                </tr>
-              </thead>
-              <tbody id="rejected-events"></tbody>
-            </table>
-          </div>
-        </section>
-
         <section class="card" id="recent-card">
           <div class="card-head">
             <h3 class="card-title">Recent events</h3>
@@ -352,6 +326,45 @@
             </table>
           </div>
         </section>
+
+        <!-- Present only when something was actually rejected. A card
+             reading "nothing was rejected" every day is noise that
+             trains the eye to skip the spot where the real warning
+             will one day appear. Collapsed by default, same as the
+             reference cards below it, since it's a drill-down rather
+             than the first thing to check. -->
+        <details class="card" id="rejected-card" hidden>
+          <summary>
+            <svg
+              class="summary-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h3 class="card-title">Rejected events</h3>
+            <span class="summary-count"
+              >Top 5 by count — grouped by reason and event name</span
+            >
+          </summary>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reason</th>
+                  <th>Event</th>
+                  <th>Count</th>
+                  <th>Latest detail</th>
+                </tr>
+              </thead>
+              <tbody id="rejected-events"></tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <h2 class="area-label" id="configuration">Configuration</h2>

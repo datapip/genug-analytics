@@ -1185,10 +1185,16 @@ details.schema-item[open] .summary-chevron {
 /* One per row rather than a grid of tiles: every tool is a closed
    accordion now, so the card is a scannable list of names and a
    multi-column layout would only make that list harder to read down. */
+/* Schema registry gets this same hairline from its always-present
+   reload-button row, which happens to sit right above its list; MCP
+   tools has no such row, so without a rule of its own the list here
+   would start flush against the summary with no break at all. */
 .tool-list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
 }
 /* The read-only note above it has no bottom margin of its own (it
    isn't always there), so with no rule here the two sit flush against
@@ -1545,6 +1551,13 @@ td.empty {
 .danger-zone > summary .card-title {
   color: var(--critical);
 }
+/* Same red as the Rejected stat tile up top and the danger zone's
+   title — unlike the danger zone, only the text, not the card border:
+   this isn't a destructive action, just a warning worth carrying
+   through from the overview. */
+#rejected-card > summary .card-title {
+  color: var(--critical);
+}
 .danger-zone-body {
   display: flex;
   flex-direction: column;
@@ -1626,14 +1639,21 @@ td.empty {
 /* ---------- deployment context ---------- */
 
 /* Ground rules, About this site and History share .danger-action-title
-   with the danger zone below, where the gap above each one comes from
-   the wrapping .danger-action + .danger-action rule instead — there is
-   no such wrapper here, so without a top margin of its own each title
-   sits flush against whatever the previous section left behind (a
-   byte counter, a form). Scoped to this card so the danger zone's own
+   with the danger zone below, where the boundary between stacked
+   sections comes from the wrapping .danger-action + .danger-action
+   rule instead — there is no such wrapper here, so without a rule of
+   its own each title sits flush against whatever the previous section
+   left behind (a byte counter, a form), with nothing marking where one
+   section ends and the next begins. Reuses that same border-top, on
+   every title but the first, so it reads as the same house pattern
+   rather than a new one. Scoped to this card so the danger zone's own
    spacing is untouched. */
 #context-card .danger-action-title {
   margin-top: 1.25rem;
+}
+#context-card .danger-action-title:not(:first-of-type) {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
 }
 
 .ground-rules-form textarea.edit-input,
