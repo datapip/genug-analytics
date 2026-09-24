@@ -4,7 +4,7 @@
   "_note": "Fired automatically by the client script when enableAutoLinkTracking is on, and takes precedence over outbound_link_click when a link is both — a link to another site's PDF is recorded as a download, since downloading the file is what the visitor actually did.",
 
   "file_url": "string.long",
-  "file_url_description": "Full URL of the file",
+  "file_url_description": "URL of the file. Query parameters other than campaign ones (utm_*, gclid, ref and the like) and any #fragment are removed before storage, so signed or tokenised links do not keep their secrets",
   "file_url_example": "https://example.com/docs/price-list.pdf",
 
   "file_extension": "string",

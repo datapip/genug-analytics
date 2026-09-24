@@ -618,6 +618,33 @@ test("a link to a known file extension fires file_download", async () => {
   assert.equal(body!.props.link_text, "Download");
 });
 
+// A signed download link or a partner link carrying ?email= is the same
+// leak as a page URL carrying one, so both link props go through the
+// page URL's allowlist.
+test("link and download URLs keep only campaign parameters and no fragment", async () => {
+  const { window, beaconCalls } = loadClient({
+    config: { enableAutoLinkTracking: true },
+  });
+  clickLink(window, {
+    href: "https://files.example/invoice.pdf?token=secret&utm_source=mail#sig=x",
+  });
+  clickLink(window, {
+    href: "https://partner.example/signup?email=a%40b.example&ref=us#access_token=y",
+  });
+
+  const [download, outbound] = (await beaconBodies(beaconCalls)) as {
+    props: Record<string, string>;
+  }[];
+  assert.equal(
+    download!.props.file_url,
+    "https://files.example/invoice.pdf?utm_source=mail",
+  );
+  assert.equal(
+    outbound!.props.target_url,
+    "https://partner.example/signup?ref=us",
+  );
+});
+
 test("a download attribute fires file_download even with no extension", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },

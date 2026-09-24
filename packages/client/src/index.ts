@@ -400,7 +400,7 @@ function strippedUrl(href: string): string {
         send(
           { auto: "fileDownload" },
           {
-            file_url: anchor.href,
+            file_url: strippedUrl(anchor.href),
             file_extension: fileExtension(anchor.pathname),
             link_text: linkText,
           },
@@ -412,7 +412,7 @@ function strippedUrl(href: string): string {
         send(
           { auto: "outboundClick" },
           {
-            target_url: anchor.href,
+            target_url: strippedUrl(anchor.href),
             target_host: anchor.host,
             link_text: linkText,
           },

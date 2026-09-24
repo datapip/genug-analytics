@@ -43,6 +43,7 @@ interface EventRow {
   browser: string | null;
   visitor_language: string | null;
   consent_mode: string;
+  props: string;
 }
 
 // A distinct User-Agent per test keeps each one on its own derived
@@ -610,6 +611,70 @@ test("resolves the outbound-click and file-download roles too", async () => {
   assert.deepEqual(
     newRows().map((row) => row.event),
     ["outbound_link_click", "file_download"],
+  );
+});
+
+// The backstop for a caller that isn't the client script: the clicked
+// link gets the same allowlist as the page URL.
+test("strips the clicked link's query and fragment on the two link roles", async () => {
+  const ua = "test-role-link-urls";
+  await post(
+    {
+      auto: "outboundClick",
+      url: "https://site.example/",
+      props: {
+        target_url:
+          "https://partner.example/x?email=a%40b.example&utm_campaign=c#t=1",
+        target_host: "partner.example",
+        link_text: "x",
+      },
+    },
+    { "user-agent": ua },
+  );
+  await post(
+    {
+      auto: "fileDownload",
+      url: "https://site.example/",
+      props: {
+        file_url: "https://files.example/a.pdf?X-Amz-Signature=abc#page=2",
+        file_extension: "pdf",
+        link_text: "a",
+      },
+    },
+    { "user-agent": ua },
+  );
+
+  const [outbound, download] = newRows().map(
+    (row) => JSON.parse(row.props) as Record<string, string>,
+  );
+  assert.equal(
+    outbound!.target_url,
+    "https://partner.example/x?utm_campaign=c",
+  );
+  assert.equal(download!.file_url, "https://files.example/a.pdf");
+});
+
+// Keyed on the event, not on how it was sent: a hand-written track()
+// naming the event gets the same filter, so the prop's description,
+// which the agent reads as fact, holds for every stored row.
+test("strips the link URL when the link event is sent by name too", async () => {
+  await post(
+    {
+      event: "outbound_link_click",
+      url: "https://site.example/",
+      props: {
+        target_url: "https://partner.example/x?token=secret",
+        target_host: "partner.example",
+        link_text: "x",
+      },
+    },
+    { "user-agent": "test-link-by-name" },
+  );
+
+  const [row] = newRows();
+  assert.equal(
+    (JSON.parse(row!.props) as Record<string, string>).target_url,
+    "https://partner.example/x",
   );
 });
 

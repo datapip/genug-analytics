@@ -275,6 +275,9 @@ automatically:
   `file_extension` and `link_text`. A link counts as a file if it has a
   `download` attribute, or its URL ends in a common file extension
   (`.pdf`, `.zip`, `.docx`, …).
+- Both URLs are filtered like the page URL: only campaign parameters
+  survive, and the `#fragment` is dropped. A signed download link keeps
+  its path and loses its signature.
 
 Ask your agent things like _"what are people downloading?"_ or _"where
 is my traffic leaving to?"_ — `get_events_by_property` groups either event by

@@ -4,7 +4,7 @@
   "_note": "Fired automatically by the client script when enableAutoLinkTracking is on. The _outboundClick tag is what the client resolves this name through, so renaming this event keeps auto-tracking working instead of silently sending a name the registry no longer has.",
 
   "target_url": "string.long",
-  "target_url_description": "Full URL the link points to",
+  "target_url_description": "URL the link points to. Query parameters other than campaign ones (utm_*, gclid, ref and the like) and any #fragment are removed before storage",
   "target_url_example": "https://partner.example.com/pricing",
 
   "target_host": "string",

@@ -15,6 +15,13 @@ how a version is cut.
   needs no session, and any request to it signed out every browser. A
   loop of requests locked the owner out. Now only a signed-in cockpit
   can sign everyone out; any other request just clears its own cookie.
+- **Clicked links and downloads kept their full query string.**
+  `target_url` and `file_url` are now filtered like the page URL: only
+  campaign parameters survive and the `#fragment` is dropped. A token
+  or `?email=` in a link no longer reaches the database. Rows stored
+  before this update are unchanged. The built-in event descriptions say
+  so; a deployment keeps its own copies in `EVENTS_PATH`, so update
+  them there if you want the agent to read the new wording.
 
 ## 0.7.0 — 2026-09-22
 

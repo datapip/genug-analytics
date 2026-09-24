@@ -55,6 +55,10 @@ that `ref` and `source` are kept, so a link written `?ref=a-person's-name`
 does store that name. That keeps a newsletter link's
 `?email=`, a password reset's token and a site search's typed query out
 of the database, and out of whatever you point at the MCP endpoint. The
+same filter applies to the clicked link on `outbound_link_click` and
+`file_download` (`target_url`, `file_url`), however they are sent.
+Props on your own events are stored as sent, so don't put a raw URL in
+one. The
 one place an address is written down is the server log, once per minute
 per refused client, when the rate limiter refuses traffic — otherwise
 you would have no way to tell a runaway script from a busy office. An

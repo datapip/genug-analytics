@@ -78,6 +78,13 @@ const AUTO_ROLE_TAG_KEYS: Record<string, string> = {
   fileDownload: "automaticFileDownload",
 };
 
+// The prop each automatic link event puts the clicked URL in. Fixed by
+// the client script, not by the event file, which is why it can live here.
+const ROLE_URL_PROPS: Record<string, string> = {
+  outboundClick: "target_url",
+  fileDownload: "file_url",
+};
+
 function isKnownEventType(event: string): boolean {
   return Object.prototype.hasOwnProperty.call(eventRegistry, event);
 }
@@ -276,6 +283,23 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   const lowercasedProps: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(envelope.props)) {
     lowercasedProps[key.toLowerCase()] = value;
+  }
+
+  // The link a visitor clicked carries the same ?email= and tokens a page
+  // URL can, so it gets the same allowlist. The client strips it too;
+  // this is the backstop, as for `url`. Keyed on the resolved event, not
+  // on how it was sent, so a track() call naming the event by hand is
+  // filtered the same way and the prop's description stays true. Only
+  // these two events: there the client script fixes the prop name, while
+  // a deployment's own props are its own to name.
+  for (const [role, prop] of Object.entries(ROLE_URL_PROPS)) {
+    const linkUrl = lowercasedProps[prop];
+    if (
+      roleEventNames[role as keyof typeof roleEventNames] === eventName &&
+      typeof linkUrl === "string"
+    ) {
+      lowercasedProps[prop] = stripUnknownParams(linkUrl);
+    }
   }
 
   const propsResult =
