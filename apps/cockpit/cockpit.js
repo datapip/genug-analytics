@@ -41,6 +41,31 @@
     return res;
   }
 
+  // A reverse proxy answers a timeout, an oversized body or a stopped
+  // server with its own HTML page. Parsing that as JSON throws
+  // "Unexpected token '<'", which tells the owner nothing. Say what
+  // happened instead, with the status that came back.
+  async function readJson(res) {
+    try {
+      return await res.json();
+    } catch {
+      // Retrying a body the proxy refuses as too large fails the same
+      // way every time, so that one case says what to change instead.
+      if (res.status === 413) {
+        throw new Error(
+          "The text is larger than the proxy in front of the server " +
+            "accepts. Shorten it, or raise the proxy's body size limit.",
+        );
+      }
+      throw new Error(
+        "The server sent back a page instead of data (HTTP " +
+          res.status +
+          "). Something in front of it, such as a proxy, may have " +
+          "refused or timed out. Try again in a moment.",
+      );
+    }
+  }
+
   // The shape every write on the schema registry card shares: save,
   // add a prop, delete, create. Disable the button, show a pending
   // message, send the request, and — only on a genuine success, never
@@ -77,7 +102,7 @@
     message.textContent = pending;
     try {
       const res = await cockpitFetch(url, init);
-      const result = await res.json();
+      const result = await readJson(res);
       if (!result.ok) {
         failWith(message, result.error || "HTTP " + res.status);
         return;
@@ -107,7 +132,7 @@
     message.textContent = pending;
     try {
       const res = await cockpitFetch(url, init);
-      const result = await res.json();
+      const result = await readJson(res);
       if (!result.ok) {
         failWith(message, result.error || "HTTP " + res.status);
         return null;
@@ -826,6 +851,52 @@
     }
   }
 
+  // "3 days ago, 09:10" rather than a bare clock time: the recent
+  // events can span days on a quiet site, and "14:02" alone reads as
+  // today. The clock time stays in the text, not only in a title, which
+  // a phone, a keyboard or a screen reader never reaches. Computed at
+  // render, so it is as fresh as the "Updated" time in the header.
+  const relativeFormat = new Intl.RelativeTimeFormat(undefined, {
+    numeric: "auto",
+  });
+  const clockFormat = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const dateFormat = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+  });
+  function localMidnight(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+  function relativeTime(ts) {
+    const when = new Date(ts);
+    const now = new Date();
+    // A browser clock behind the server's would say "in 2 minutes".
+    const ago = Math.max(now.getTime() - when.getTime(), 0);
+    // Calendar days, not 24-hour blocks: 36 hours ago at 01:00 is the
+    // day before yesterday, not "yesterday".
+    const days = Math.round(
+      (localMidnight(now) - localMidnight(when)) / 86_400_000,
+    );
+    let text;
+    if (ago < 60_000) text = "just now";
+    else if (ago < 3_600_000) {
+      text = relativeFormat.format(-Math.floor(ago / 60_000), "minute");
+    } else if (days === 0) {
+      text =
+        relativeFormat.format(-Math.floor(ago / 3_600_000), "hour") +
+        ", " +
+        clockFormat.format(when);
+    } else if (days < 7) {
+      text =
+        relativeFormat.format(-days, "day") + ", " + clockFormat.format(when);
+    } else {
+      text = dateFormat.format(when) + ", " + clockFormat.format(when);
+    }
+    return el("time", { dateTime: ts, title: when.toLocaleString() }, [text]);
+  }
+
   function renderRecentEvents(recentEvents) {
     const body = document.getElementById("recent-events");
     clear(body);
@@ -842,9 +913,7 @@
     for (const event of recentEvents) {
       body.append(
         el("tr", null, [
-          el("td", { className: "ts" }, [
-            new Date(event.ts).toLocaleTimeString(),
-          ]),
+          el("td", { className: "ts" }, [relativeTime(event.ts)]),
           el("td", null, [
             el("span", { className: "event-name" }, [event.event]),
           ]),
@@ -857,18 +926,29 @@
     }
   }
 
+  // Fills a prose textarea with the stored text, unless the owner has
+  // typed in it since the last fill. Saving one box reloads the page,
+  // and overwriting the other box then would throw away what they were
+  // halfway through writing there. The stored text is remembered on the
+  // element, so "edited" means "differs from what the server last sent".
+  function fillProse(id, stored) {
+    const box = document.getElementById(id);
+    const edited =
+      box.dataset.stored !== undefined &&
+      box.value !== box.dataset.stored &&
+      box.value !== stored;
+    if (!edited) box.value = stored;
+    box.dataset.stored = stored;
+  }
+
   // Populates the two prose textareas (ground rules, business context)
-  // and their byte counters. Reset on every load(), same as the
-  // schema-registry forms — typed-but-unsaved text lost to an unrelated
-  // refresh is an existing trade-off of this page's one-shot render, not
-  // one this card invents.
+  // and their byte counters.
   let proseFieldMaxBytes = 0;
   function renderContext(groundRules, businessContext, maxBytes, history) {
     proseFieldMaxBytes = maxBytes;
-    document.getElementById("ground-rules-text").value = groundRules.text || "";
+    fillProse("ground-rules-text", groundRules.text || "");
     updateByteCount("ground-rules-text", "ground-rules-count");
-    document.getElementById("business-context-text").value =
-      businessContext.text || "";
+    fillProse("business-context-text", businessContext.text || "");
     updateByteCount("business-context-text", "business-context-count");
     renderHistoryList(history);
     document.getElementById("context-count-note").textContent =
@@ -1048,6 +1128,23 @@
   // reopening a card someone deliberately closed on every refresh is
   // its own kind of broken.
   let schemaProblemOpened = false;
+  // Kept so renderSchemaRegistry can put it back: opening a form
+  // re-renders the card and rewrites the count, which dropped the
+  // problem while leaving it red.
+  let schemaProblemNote = "";
+
+  function flagOrphansInOverview(orphanedEvents) {
+    const orphans = orphanedEvents || [];
+    document.getElementById("orphan-note").hidden = orphans.length === 0;
+    if (orphans.length === 0) return;
+    document.getElementById("orphan-note-text").textContent =
+      (orphans.length === 1
+        ? "1 event type that is no longer registered still has "
+        : orphans.length +
+          " event types that are no longer registered still have ") +
+      "stored events. They count toward the totals above but are left " +
+      "out of every per-event panel.";
+  }
 
   function flagSchemaProblems(schemaErrors, orphanedEvents) {
     const errors = schemaErrors || [];
@@ -1071,8 +1168,8 @@
 
     const count = document.getElementById("schema-count-note");
     count.classList.toggle("is-critical", notes.length > 0);
+    schemaProblemNote = notes.length > 0 ? " · " + notes.join(" · ") : "";
     if (notes.length === 0) return;
-    count.textContent = count.textContent + " · " + notes.join(" · ");
 
     if (schemaProblemOpened) return;
     schemaProblemOpened = true;
@@ -1086,15 +1183,17 @@
   // to survive that (a save triggers a reload of exactly this card).
   let editing = null;
   let creating = false;
-  // The open form's DOM node, kept across re-renders. Refresh and the
-  // period buttons re-render the whole page, and rebuilding the form
-  // from server data would replace a half-typed description — or five
+  // The open forms' DOM nodes, kept across re-renders. Refresh and the
+  // period buttons re-render the whole page, and rebuilding a form from
+  // server data would replace a half-typed description — or five
   // half-filled props — with stored values, leaving the form open and
-  // looking as though nothing had happened. Keyed so that switching to
+  // looking as though nothing had happened. Keyed by form and event;
+  // a key the latest render did not ask for is dropped, so switching to
   // a different event, or reopening one after cancelling, still builds
-  // a fresh form.
-  let openFormNode = null;
-  let openFormKey = null;
+  // a fresh form. A map rather than one slot: an edit form and another
+  // event's add-prop form can be open at once.
+  const openForms = new Map();
+  let formKeysThisRender = new Set();
   let schemaEditable = false;
   let storedEventCounts = {};
   let pageViewEventType = null;
@@ -1116,17 +1215,15 @@
     clear(container);
     const entries = Object.entries(schemaRegistry);
     document.getElementById("schema-count-note").textContent =
-      entries.length + (entries.length === 1 ? " event" : " events");
+      entries.length +
+      (entries.length === 1 ? " event" : " events") +
+      schemaProblemNote;
 
     // Same rule as the Edit buttons: absent when the events directory
     // is one the server cannot write, rather than present and failing.
     document.getElementById("new-event").hidden = !schemaEditable;
 
-    if (!creating && !editing) {
-      openFormNode = null;
-      openFormKey = null;
-    }
-
+    formKeysThisRender = new Set();
     if (creating) container.append(openOrBuildForm("create", createForm));
     for (const [eventName, def] of entries) {
       container.append(
@@ -1141,6 +1238,9 @@
               storedEventCounts[eventName] || 0,
             ),
       );
+    }
+    for (const key of openForms.keys()) {
+      if (!formKeysThisRender.has(key)) openForms.delete(key);
     }
   }
 
@@ -1163,11 +1263,9 @@
   }
 
   function openOrBuildForm(key, build) {
-    if (openFormKey !== key) {
-      openFormKey = key;
-      openFormNode = build();
-    }
-    return openFormNode;
+    formKeysThisRender.add(key);
+    if (!openForms.has(key)) openForms.set(key, build());
+    return openForms.get(key);
   }
 
   // How much there is to see before opening one, so the closed row
@@ -1316,16 +1414,24 @@
 
       body.push(el("div", { className: "schema-actions" }, actions));
 
+      // The role is in the key because it changes the whole warning.
+      // The stored count only changes a number in it, and a live event
+      // gains rows between refreshes: rebuilding for that would wipe a
+      // typed reason, so the kept form updates its number instead.
       if (confirmDeleteName === eventName) {
+        const isPageView = eventName === pageViewEventType;
+        const form = openOrBuildForm(
+          "delete:" + eventName + ":" + isPageView,
+          () => deleteConfirm(eventName, isPageView),
+        );
+        form.setStoredCount(storedCount);
+        body.push(form);
+      } else if (addingPropTo === eventName) {
         body.push(
-          deleteConfirm(
-            eventName,
-            storedCount,
-            eventName === pageViewEventType,
+          openOrBuildForm("add-prop:" + eventName, () =>
+            addPropForm(eventName),
           ),
         );
-      } else if (addingPropTo === eventName) {
-        body.push(addPropForm(eventName));
       }
     }
 
@@ -1384,16 +1490,20 @@
     });
     const propInputs = {};
     const propRows = Object.entries(def.props).map(([propName, prop]) => {
+      // No <label> in a table row, so each box names itself: a column
+      // header alone leaves a screen reader announcing "edit text".
       const description = el("input", {
         type: "text",
         className: "edit-input",
         value: prop.description,
+        ariaLabel: "Description of " + propName,
       });
       // A plain string's example is its own text; anything else is
       // typed as JSON, which is how the server reads it back.
       const example = el("input", {
         type: "text",
         className: "edit-input",
+        ariaLabel: "Example for " + propName,
         value:
           prop.type === "string" && !prop.list
             ? prop.example
@@ -1836,8 +1946,8 @@
   // before anything is removed. Same disclosure pattern the rename form
   // already uses for the same reason: the number, not a generic warning,
   // is what lets someone decide.
-  function deleteConfirm(eventName, storedCount, isPageView) {
-    const rowsNote =
+  function deleteConfirm(eventName, isPageView) {
+    const rowsNote = (storedCount) =>
       storedCount > 0
         ? `${fullNumber.format(storedCount)} stored ${plural(storedCount)} ` +
           `will be left behind. They keep counting toward totals but ` +
@@ -1857,26 +1967,26 @@
     // below), skipping past this paragraph visually and, without the
     // link, for a screen reader as well — the one part of this warning
     // a sighted user gets for free just by it sitting above the field.
-    const warning = el(
-      "p",
-      { className: "edit-migrate", id: "delete-warning" },
-      [
-        isPageView
-          ? `This does not stop page views being tracked — it can't be: ` +
-            `every page-scoped number on this page depends on some event ` +
-            `carrying this role, so nothing here can leave none. What it ` +
-            `does is revert to the built-in page_view definition ` +
-            `(page_title, document_language) under this same name, which ` +
-            `the Schema registry card will flag as a stand-in. If this ` +
-            `event carries any prop beyond those two, sites still sending ` +
-            `it get invalid_props rejections from the moment this file is ` +
-            `gone — not a change any client redeploy caused. ${rowsNote} ` +
-            `If some other event already uses the built-in's name, the ` +
-            `stand-in has nowhere to go and the delete is refused instead, ` +
-            `leaving this file exactly as it was.`
-          : rowsNote,
-      ],
-    );
+    const warningText = (storedCount) =>
+      isPageView
+        ? `This does not stop page views being tracked — it can't be: ` +
+          `every page-scoped number on this page depends on some event ` +
+          `carrying this role, so nothing here can leave none. What it ` +
+          `does is revert to the built-in page_view definition ` +
+          `(page_title, document_language) under this same name, which ` +
+          `the Schema registry card will flag as a stand-in. If this ` +
+          `event carries any prop beyond those two, sites still sending ` +
+          `it get invalid_props rejections from the moment this file is ` +
+          `gone — not a change any client redeploy caused. ` +
+          `${rowsNote(storedCount)} ` +
+          `If some other event already uses the built-in's name, the ` +
+          `stand-in has nowhere to go and the delete is refused instead, ` +
+          `leaving this file exactly as it was.`
+        : rowsNote(storedCount);
+    const warning = el("p", {
+      className: "edit-migrate",
+      id: "delete-warning",
+    });
     const reasonInput = el("input", {
       type: "text",
       className: "edit-input",
@@ -1957,12 +2067,18 @@
       );
     });
 
-    return el("div", { className: "schema-item-editing" }, [
+    const form = el("div", { className: "schema-item-editing" }, [
       warning,
       reasonRow,
       message,
       el("div", { className: "edit-actions" }, [confirmButton, cancel]),
     ]);
+    // Called on every render: the form outlives refreshes, the count
+    // it quotes does not.
+    form.setStoredCount = (storedCount) => {
+      warning.textContent = warningText(storedCount);
+    };
+    return form;
   }
 
   // Creating an event does define its props, where editing one only
@@ -2157,10 +2273,12 @@
     storedEventCounts = data.storedEventCounts || {};
     pageViewEventType = data.pageViewEventType || null;
     roleEventNames = data.roleEventNames || {};
+    // Before the registry: it sets the note the count line carries.
+    flagSchemaProblems(data.schemaErrors, data.orphanedEvents);
     renderSchemaRegistry(data.schemaRegistry);
     renderSchemaErrors(data.schemaErrors);
     renderOrphanedEvents(data.orphanedEvents);
-    flagSchemaProblems(data.schemaErrors, data.orphanedEvents);
+    flagOrphansInOverview(data.orphanedEvents);
     renderMcpTools(data.toolManifest);
     renderRecentEvents(data.recentEvents);
     renderContext(
@@ -2210,7 +2328,7 @@
     try {
       const res = await cockpitFetch(`/cockpit/data?days=${windowDays}`);
       if (!res.ok) throw new Error("HTTP " + res.status);
-      render(await res.json());
+      render(await readJson(res));
     } catch (err) {
       showError(err.message);
     } finally {
@@ -2274,7 +2392,7 @@
           // POSTing here on a logged-in browser's behalf. See the route.
           headers: { "X-Genug-Cockpit": "1" },
         });
-        const result = await res.json();
+        const result = await readJson(res);
         if (!result.ok) {
           // Worth spelling out — "failed" on its own reads as "the
           // server is down", and the previous registry is still serving.
@@ -2328,7 +2446,7 @@
           },
           body: JSON.stringify({ password: passwordInput.value }),
         });
-        const result = await res.json();
+        const result = await readJson(res);
         if (!result.ok) {
           message.classList.add("is-critical");
           message.textContent = result.error || "HTTP " + res.status;
@@ -2383,7 +2501,7 @@
           },
           body: JSON.stringify({ password: passwordInput.value }),
         });
-        const result = await res.json();
+        const result = await readJson(res);
         if (!result.ok) {
           message.classList.add("is-critical");
           message.textContent = result.error || "HTTP " + res.status;
@@ -2608,5 +2726,12 @@
   updateThemeIcon();
 
   document.getElementById("refresh").addEventListener("click", load);
+
+  // The list sits inside a card that may be closed, and a link cannot
+  // scroll to something a closed <details> hides. Open it first; the
+  // link's own navigation then scrolls to the list.
+  document.getElementById("orphan-note-link").addEventListener("click", () => {
+    document.getElementById("schema-card").open = true;
+  });
   load();
 })();

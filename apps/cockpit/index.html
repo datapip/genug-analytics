@@ -106,7 +106,7 @@
                 ></path>
               </svg>
             </button>
-            <button id="refresh" type="button">
+            <button id="refresh" type="button" title="Refresh the data">
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -121,7 +121,7 @@
                   d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
                 ></path>
               </svg>
-              Refresh
+              <span class="button-label">Refresh</span>
             </button>
             <button id="logout" type="button" title="Sign out of the cockpit">
               <svg
@@ -136,7 +136,7 @@
                 <polyline points="16 17 21 12 16 7"></polyline>
                 <line x1="21" y1="12" x2="9" y2="12"></line>
               </svg>
-              Log out
+              <span class="button-label">Log out</span>
             </button>
           </div>
           <div class="header-captions">
@@ -198,6 +198,15 @@
         </div>
 
         <p class="strip-note" id="consent-note" hidden></p>
+        <!-- Orphaned rows make the numbers above wrong while looking
+             right. The card that lists them starts closed, far down the
+             page, so the warning sits beside the numbers it affects. -->
+        <p class="strip-note is-critical" id="orphan-note" hidden>
+          <span id="orphan-note-text"></span>
+          <a href="#orphaned-events" id="orphan-note-link"
+            >See them in the schema registry</a
+          >
+        </p>
         <!-- Read-only is the only deployment state that removes a whole
              card further down the page (the danger zone). Said here, on
              the first screen, because the operator who set READ_ONLY by
