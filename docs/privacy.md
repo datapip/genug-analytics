@@ -87,7 +87,7 @@ notice from.
 | `visitor_language` | The first entry of the `Accept-Language` header, e.g. `de-DE`, if it is a locale tag |
 | `consent_mode`     | `consentful` or `consentless`                                                        |
 | `props`            | Whatever that event type declares — see below                                        |
-| `idempotency_key`  | Only when you pass one yourself (e.g. an order id)                                   |
+| `idempotency_key`  | Only when you pass one yourself — see the note on order numbers below                |
 
 `props` is your schema and your choice ([defining events](client.md#defining-your-own-events)), with one thing to know before
 you write the notice: the built-in `page_view` event declares
@@ -96,6 +96,12 @@ so those are collected by default on every page view unless you edit
 that event. The other two built-ins record what a visitor
 clicked: the outbound link's URL, host and visible text, or the
 downloaded file's URL, extension and link text.
+
+**Order numbers.** An order number, as an idempotency key or as a
+prop, links the visitor's session to a named customer in your shop.
+Everything else in that session then belongs to a known person, not a
+pseudonym. Send a keyed hash of the order number instead: see
+[client.md](client.md#from-javascript).
 
 The consent cookie is named `genug_vid`. It holds the visitor ID and
 nothing else, is set `HttpOnly; Secure; SameSite=Lax`, and expires 13

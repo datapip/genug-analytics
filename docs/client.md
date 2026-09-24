@@ -120,16 +120,23 @@ of these gets it in before the auto page-view fires:
 
 For an event where firing twice would double-count (a completed order,
 not a page view), pass a third argument — a value you know uniquely
-identifies it, like your own order id:
+identifies it:
 
 ```js
 window.genugAnalytics.track(
   "order_completed",
-  { order_id: "ORD-1001", value: 129.9, currency: "EUR" },
-  "ORD-1001", // idempotency key — reuse the same value on a page
+  { value: 129.9, currency: "EUR" },
+  "3f9c2a…", // idempotency key — reuse the same value on a page
   // refresh or back-navigation and the duplicate is silently dropped
 );
 ```
+
+Don't use the order number printed on the invoice. It links the
+visitor's session to a named customer in your shop. Use a hash of it
+instead, made by the shop's backend with a secret the shop keeps (an
+HMAC). A plain hash without a secret is not enough: order numbers are
+sequential, so anyone can hash them one by one and find the match. The
+same goes for an `order_id` prop.
 
 Most events should omit this third argument entirely.
 

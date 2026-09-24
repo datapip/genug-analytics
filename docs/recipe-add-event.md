@@ -511,10 +511,11 @@ Or with no JavaScript at all, on any clickable element:
 A confirmation page that the visitor refreshes or back-navigates to
 will fire the event again, and `get_property_sum` will add the revenue
 twice. Pass a third argument that identifies the real-world occurrence
-— your order id:
+— a keyed hash of your order id, not the id itself (see
+[client.md](client.md#from-javascript)):
 
 ```js
-window.genugAnalytics.track("order_completed", props, "order-10432");
+window.genugAnalytics.track("order_completed", props, orderKey);
 ```
 
 A second event with the same `(event, idempotencyKey)` pair is silently
