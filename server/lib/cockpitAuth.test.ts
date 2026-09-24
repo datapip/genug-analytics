@@ -213,9 +213,11 @@ test("logging out stops the cookie working", async (t) => {
 
   const loggedOut = await fetch(`${origin}/cockpit/logout`, {
     method: "POST",
+    headers: { cookie, "x-genug-cockpit": "1" },
     redirect: "manual",
   });
   assert.equal(loggedOut.status, 200);
+  assert.deepEqual(await loggedOut.json(), { ok: true, revoked: true });
   // Cleared with the same path and sameSite it was set with: a
   // clearCookie that disagrees about either silently clears nothing.
   const cleared = loggedOut.headers.get("set-cookie") ?? "";
@@ -235,6 +237,67 @@ test("logging out stops the cookie working", async (t) => {
   const newCookie = cookieFrom(await signIn(origin));
   assert.equal(
     (await get(`${origin}/cockpit/data`, { cookie: newCookie })).status,
+    200,
+  );
+});
+
+// The watermark is global, so moving it signs every browser out. When
+// an anonymous POST could move it, a loop of them locked the owner out
+// for as long as it ran.
+test("a logout without a live session from the cockpit signs nobody else out", async (t) => {
+  t.after(resetSessionRevocationForTests);
+  const origin = mountCockpit();
+  const cookie = cookieFrom(await signIn(origin));
+
+  const attempts: Record<string, string>[] = [
+    {},
+    { "x-genug-cockpit": "1" },
+    { "x-genug-cockpit": "1", cookie: `${COCKPIT_SESSION_COOKIE}=forged` },
+    // A cross-site form carries the cookie at most, never the header.
+    { cookie },
+  ];
+  for (const headers of attempts) {
+    const response = await fetch(`${origin}/cockpit/logout`, {
+      method: "POST",
+      headers,
+      redirect: "manual",
+    });
+    assert.equal(response.status, 200);
+    // Told the truth, so the page doesn't claim every browser is out.
+    assert.deepEqual(await response.json(), { ok: true, revoked: false });
+    // Still clears the caller's own cookie: a stale tab can sign out.
+    assert.match(
+      response.headers.get("set-cookie") ?? "",
+      new RegExp(`^${COCKPIT_SESSION_COOKIE}=;`),
+    );
+    assert.equal(
+      (await get(`${origin}/cockpit/data`, { cookie })).status,
+      200,
+      `session survived ${JSON.stringify(Object.keys(headers))}`,
+    );
+  }
+});
+
+// A leaked cookie stays a valid signature after logout revokes it. If
+// it could still move the watermark, replaying it would sign out every
+// new session: the same lockout, for anyone holding an old copy.
+test("a revoked cookie cannot sign out the session that replaced it", async (t) => {
+  t.after(resetSessionRevocationForTests);
+  const origin = mountCockpit();
+  const old = cookieFrom(await signIn(origin));
+  await fetch(`${origin}/cockpit/logout`, {
+    method: "POST",
+    headers: { cookie: old, "x-genug-cockpit": "1" },
+  });
+  const current = cookieFrom(await signIn(origin));
+
+  const replay = await fetch(`${origin}/cockpit/logout`, {
+    method: "POST",
+    headers: { cookie: old, "x-genug-cockpit": "1" },
+  });
+  assert.deepEqual(await replay.json(), { ok: true, revoked: false });
+  assert.equal(
+    (await get(`${origin}/cockpit/data`, { cookie: current })).status,
     200,
   );
 });

@@ -166,14 +166,29 @@ export function createCockpitAuth(
     res.json({ ok: true });
   });
 
-  // No session required: this only ever takes access away. Clearing has
-  // to repeat the options the cookie was set with — a clearCookie that
-  // disagrees about path or sameSite silently clears nothing, and the
-  // owner is left believing they logged out.
+  // Reachable without a session, so a stale tab can still sign out. But
+  // only a live session sent from the cockpit itself moves the watermark
+  // that signs out every browser: it is global, and when anyone could
+  // move it, a curl loop — or a hidden form on any page — kept the owner
+  // out of the cockpit for as long as it ran. Anyone else just has their
+  // own cookie cleared. Clearing has to repeat the options the cookie was
+  // set with — a clearCookie that disagrees about path or sameSite
+  // silently clears nothing, and the owner is left believing they logged
+  // out.
+  //
+  // `revoked` says which of the two happened. The reason to press the
+  // button is often that a copy leaked, so a stale tab must not be told
+  // it signed out every browser when it did not.
   router.post("/logout", (req, res) => {
-    sessionsIssuedBefore = Date.now();
+    const token = parseCookies(req.headers.cookie)[COCKPIT_SESSION_COOKIE];
+    const session = verifySessionToken(token, key);
+    const revoked =
+      req.get("x-genug-cockpit") === "1" &&
+      session !== undefined &&
+      session.issuedAt >= sessionsIssuedBefore;
+    if (revoked) sessionsIssuedBefore = Date.now();
     res.clearCookie(COCKPIT_SESSION_COOKIE, COOKIE_OPTIONS);
-    res.json({ ok: true });
+    res.json({ ok: true, revoked });
   });
 
   function requireSession(

@@ -7,6 +7,15 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Fixed**
+
+- **Anyone could sign the owner out of the cockpit.** The logout route
+  needs no session, and any request to it signed out every browser. A
+  loop of requests locked the owner out. Now only a signed-in cockpit
+  can sign everyone out; any other request just clears its own cookie.
+
 ## 0.7.0 — 2026-09-22
 
 **Added**

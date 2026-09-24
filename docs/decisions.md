@@ -3779,7 +3779,11 @@ immediately and binds from the first real deployment onward.)
   - **Logout and expiry**, neither of which Basic Auth has. Twelve
     hours, and the button signs out every browser at once — with one
     password there is one session, and the reason to press it is that a
-    copy is somewhere it should not be.
+    copy is somewhere it should not be. Only a live session sending the
+    `X-Genug-Cockpit` header can do that. The logout route needs no
+    session, and at first any request to it moved the watermark, so a
+    loop of anonymous POSTs kept the owner signed out (2026-09 review).
+    Anyone else only gets their own cookie cleared.
   - **The lockout stopped counting the wrong things.** It sat on every
     request under `/cockpit`; now it sits on the sign-in route alone, so
     a page full of assets cannot spend the budget and a locked-out

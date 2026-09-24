@@ -30,6 +30,10 @@
       critical: false,
       text: "Signed out. Any other browser signed in to this cockpit is signed out too.",
     },
+    "signed-out-this-tab": {
+      critical: true,
+      text: "This browser is signed out. Other browsers may still be signed in: this tab's session had already ended, so it could not end theirs. To sign them all out, sign in and press Log out again.",
+    },
     expired: {
       critical: false,
       text: "Your session ran out after 12 hours. Sign in again.",

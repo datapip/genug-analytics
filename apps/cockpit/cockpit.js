@@ -2225,18 +2225,25 @@
   // not be. Goes to the login page whatever the server answers — a
   // failed sign-out that leaves the page sitting there looking signed in
   // is the one outcome worth ruling out.
+  //
+  // Only a live session can sign the others out. When this tab's had
+  // already ended, or the answer never arrived, the login page says the
+  // other browsers may still be signed in, rather than claiming they
+  // are not.
   document.getElementById("logout").addEventListener("click", async () => {
+    let revoked = false;
     try {
-      await fetch("/cockpit/logout", {
+      const res = await fetch("/cockpit/logout", {
         method: "POST",
         headers: { "X-Genug-Cockpit": "1" },
       });
+      revoked = (await res.json()).revoked === true;
     } catch {
       // there is nothing this page can do about that from here.
     }
     // The login page says what happened, and says the part the button
     // itself cannot: this signs out every browser, not this one.
-    leaveNotice("signed-out");
+    leaveNotice(revoked ? "signed-out" : "signed-out-this-tab");
     window.location.replace("login.html");
   });
 
