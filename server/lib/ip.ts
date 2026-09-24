@@ -64,7 +64,7 @@ function isIpv4(ip: string): boolean {
 // that this function could not read at all.
 //
 // Why narrow it at all, when the raw address is never stored: the hash
-// is reproducible by anyone holding SALT_SECRET, so a full address
+// is reproducible by anyone holding the day's salt, so a full address
 // makes "was this exact person here today" answerable. A truncated one
 // only answers "was someone from this block here", which is the
 // difference a supervisory authority looks for when an operator relies

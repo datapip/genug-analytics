@@ -173,7 +173,7 @@ transaction reaches disk.
   under [Running without a consent banner](privacy.md#running-without-a-consent-banner).
 - <a id="retention"></a>**Retention**: `RETENTION_DAYS` (see [Configuration](deploying.md#configuration))
   controls how many days of events, rejected events and bot activity are
-  kept before the daily job deletes the rest. **Defaults to 425 (~13
+  kept before the daily job deletes the rest. **Defaults to 396 (13
   months)** — deliberately, and loudly: an unset value used to mean
   forever, and defaulting to a real number instead is worth more than a
   full explanation each time it's mentioned, so see
@@ -183,7 +183,7 @@ transaction reaches disk.
   the way unset used to, now that omitting it no longer says that for
   you. (`0` is refused rather than accepted: "0 days" reads as "keep
   nothing", which is the opposite of what it would do.)
-  425 is a commonly used figure, and comfortably under what France's
+  13 months is a commonly used figure, and comfortably under what France's
   CNIL allows for exempted analytics — a 25-month ceiling on the
   underlying data, separate from the 13-month ceiling on the tracker
   itself that this project's consent cookie already follows; it is not
@@ -203,11 +203,12 @@ transaction reaches disk.
 
   **Read this before you promise anyone erasure.** The tool needs a
   `visitor_id`, and nothing Genug stores can be worked backwards to one.
-  But the id is not unknowable: it is
-  `HMAC(SALT_SECRET, "YYYY-MM-DD")` over the truncated address and the
-  User-Agent, so a data subject who supplies their address, their
-  browser's User-Agent and the dates they visited gives you everything
-  needed to recompute the ids and erase those rows. That is the case
+  For today only, the id can be recomputed: it is a hash of the
+  truncated address and the User-Agent, keyed by the day's random
+  salt. So a data subject who supplies their address and their
+  browser's User-Agent on the same UTC day gives you what you need to
+  find and erase today's rows. After midnight the salt is gone, and
+  earlier days cannot be found this way. That is the case
   Art. 11(2) describes, where the subject provides information enabling
   identification and Arts. 15 to 20 apply again — so a request backed by
   those details should be honoured rather than refused. The same lookup
@@ -258,9 +259,16 @@ transaction reaches disk.
   doesn't protect against losing that volume/disk entirely. For that,
   copy those files off the host as well: see below.
 
+- **Daily salt**: `daily-salt.json` beside the database holds the
+  day's salt for the visitor hash, and is replaced at midnight UTC. A
+  stopped server replaces nothing, so the last day's salt stays there
+  until the next start. When you shut a deployment down for good, or
+  for a long time, delete that file. Nothing is lost: a new one is
+  made on start.
+
 - **Update check**: on by default (`UPDATE_CHECK=true`, see
   [Configuration](deploying.md#configuration)) — once at startup and
-  once a day, one anonymous GET to GitHub's tags API for this repo, so
+  once a day, one unauthenticated GET to GitHub's tags API for this repo, so
   the cockpit can show a pill when a newer version is tagged. Sends
   nothing about your deployment; fails silently with no outbound
   access. Set `UPDATE_CHECK=false` to opt out.

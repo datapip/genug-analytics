@@ -1,14 +1,7 @@
 import { createHmac } from "node:crypto";
 
-// HMAC of the current date (YYYY-MM-DD), keyed by SALT_SECRET — rotates
-// daily without persisting any per-visitor state.
-export function dailySalt(secret: string, date: Date): string {
-  const day = date.toISOString().slice(0, 10);
-  return createHmac("sha256", secret).update(day).digest("hex");
-}
-
 // Consentless visitor_id: a hash of IP + User-Agent, keyed by the daily
-// salt. Also used to compute the "frozen" value on the consentless →
+// salt (lib/dailySalt.ts). Also used to compute the "frozen" value on the consentless →
 // consentful transition (see Data model docs) — same inputs, same hash.
 export function consentlessVisitorId(
   ip: string,
@@ -28,7 +21,7 @@ const ISSUED_VISITOR_ID = /^[a-f0-9]{64}$/;
 // cookie used to be trusted verbatim. It's httpOnly, so page JS can't
 // set it — but any HTTP client can put whatever it likes in a Cookie
 // header, and the value went straight into the database. Guessing a
-// real visitor's id is impractical (it's an HMAC keyed by SALT_SECRET),
+// real visitor's id is impractical (it's an HMAC keyed by the daily salt),
 // but sending a fresh random value per request was a free way to
 // manufacture unlimited distinct "visitors" and sessions, at unbounded
 // string length per row. A value that fails this check is ignored and

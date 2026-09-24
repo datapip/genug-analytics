@@ -1,10 +1,9 @@
 import type Database from "better-sqlite3";
 
-// 14 months — the figure docs/operations.md and docs/privacy.md already
-// point deployers toward as what to configure, now also what applies
-// when nobody does. See "Data lifecycle" in docs/decisions.md for why
+// 13 months, the same 396 days as the consent cookie in
+// routes/events.ts. See "Data lifecycle" in docs/decisions.md for why
 // unset stopped meaning forever.
-export const DEFAULT_RETENTION_DAYS = 425;
+export const DEFAULT_RETENTION_DAYS = 396;
 
 // Fails fast on a bad value rather than silently ignoring it or running
 // with a nonsensical window — same reasoning as requireEnv's guard.

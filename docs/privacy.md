@@ -17,24 +17,27 @@ visitor and session counts.
 
 When a visitor consents, Genug switches to the conventional model — a
 first-party cookie holding a persistent ID — so returning visitors can
-be recognised across days.
+be recognised across days. The cookie's value is that day's hash. So
+the visitor's earlier events from the same day, recorded before they
+consented, join the persistent ID too. Say so in your notice.
 
 Two things worth stating plainly, because they shape what you have to
 tell your own users. Consent selects _how_ a visitor is identified,
 not _whether_ events are recorded: consentless events are still
-stored, under a daily-rotating pseudonym. And those IDs are
-pseudonymous rather than anonymous — your server holds the secret the
-salt is derived from, so a known IP and User-Agent can still be
-re-identified for a given day. Genug ships no consent banner; wiring
+stored, under a daily-rotating ID. The salt behind that ID is random,
+kept only for its day, and replaced at midnight UTC. While it exists,
+anyone with access to the server can recompute today's ID from a known
+address and User-Agent. After midnight, nobody can. Genug ships no consent banner; wiring
 your own to `setConsent()` is your site's job. The full model is in
 [decisions.md](decisions.md) under "Visitor identification".
 
-**What an EU operator still has to do.** Genug not setting a cookie in
-consentless mode is what keeps § 25 TDDDG's consent requirement for
-storing on a device out of the picture, and recognising a returning
-visitor by IP and User-Agent instead is the same pattern the common
-cookieless analytics tools use. It is a defensible reading rather than
-a settled one, and it is not a legal opinion: if the site is a client's,
+**What an EU operator still has to do.** Genug sets no cookie in
+consentless mode, which removes the storage half of § 25 TDDDG.
+Whether reading the page address and referrer counts as "access" is
+not settled (see [Where the argument is not settled](#where-the-argument-is-not-settled)).
+Recognising a visitor within one day by a hash of their address block
+and User-Agent is the same pattern the common cookieless analytics
+tools use. It is a defensible reading rather than a settled one, and it is not a legal opinion: if the site is a client's,
 have counsel confirm it. What is not optional either way is that the
 records are personal data, so you need a basis for them — for
 consentless mode that is normally Art. 6(1)(f), legitimate interests,
@@ -91,23 +94,25 @@ notice from.
 
 `props` is your schema and your choice ([defining events](client.md#defining-your-own-events)), with one thing to know before
 you write the notice: the built-in `page_view` event declares
-`page_title` and `document_language` (the page's own `<html lang>`),
-so those are collected by default on every page view unless you edit
-that event. The other two built-ins record what a visitor
-clicked: the outbound link's URL, host and visible text, or the
+`page_title` and `document_language` (the page's own `<html lang>`).
+With `enableAutoPageTracking` on, both are sent with every page view.
+Nothing is tracked on page load until you turn that on
+([tracking page loads](client.md#tracking-page-loads)). The other two
+built-ins record what a visitor clicked, once `enableAutoLinkTracking`
+is on: the outbound link's URL, host and visible text, or the
 downloaded file's URL, extension and link text.
 
 **Order numbers.** An order number, as an idempotency key or as a
 prop, links the visitor's session to a named customer in your shop.
-Everything else in that session then belongs to a known person, not a
-pseudonym. Send a keyed hash of the order number instead: see
+Everything else in that session then belongs to a known person. Send a keyed hash of the order number instead: see
 [client.md](client.md#from-javascript).
 
 The consent cookie is named `genug_vid`. It holds the visitor ID and
 nothing else, is set `HttpOnly; Secure; SameSite=Lax`, and expires 13
-months after the visitor's last event — the ceiling EU data-protection
-authorities treat as the maximum for an analytics identifier. Note that
-it is refreshed on each visit, so a regular visitor's identifier lives
+months after the visitor's last event. France's CNIL names 13 months
+as a ceiling, but it also says the lifetime should not be extended on
+each visit. This cookie is extended, so it relies on consent, not on
+CNIL's exemption. Note that it is refreshed on each visit, so a regular visitor's identifier lives
 on rather than lapsing 13 months after they first consented; re-asking
 for consent on a schedule is your consent manager's job, not this
 cookie's. It is only ever set for a visitor who consented, and cleared
@@ -119,7 +124,7 @@ activity keeps an hourly count. The message names the field that
 failed, and for a few kinds of failure quotes the value that was sent
 — so a malformed request can leave a fragment of its own payload
 there. Those rows are pruned by `RETENTION_DAYS` ([operations](operations.md#retention)) along with everything
-else — 425 days by default, or whatever period you've configured.
+else — 396 days (13 months) by default, or whatever period you've configured.
 
 ## Running without a consent banner
 
@@ -131,9 +136,13 @@ advice, and it does not replace running it past your data protection
 officer.** What it should do is make that conversation short, because
 most of the usual objections are already answered in the architecture.
 
+If you would rather collect nothing without consent, load the script
+only after the visitor accepts:
+[loading only after consent](client.md#loading-only-after-consent).
+
 ### What Genug does for you
 
-**No access to, or storage on, the visitor's device (§ 25 TDDDG).** In
+**No storage on the visitor's device (§ 25 TDDDG).** In
 the default consentless mode there is no cookie, no `localStorage`, no
 `sessionStorage`, and no fingerprinting — no canvas, no screen or font
 enumeration, no hardware probing. The script reads the page's own URL,
@@ -141,11 +150,15 @@ title and `<html lang>`, the referrer, and the host of a clicked link.
 The one thing it ever writes to a device is the opt-out flag described
 below, and only if a visitor asks for it.
 
-**A visitor ID that cannot follow anyone.** The hash is
-`truncated IP + User-Agent + a salt derived from today's date`. It
-cannot be recomputed tomorrow, and the address going into it is a
-network block, not a connection. There is no cross-site identifier and
-no profile built on the side.
+**A visitor ID that cannot follow anyone across days.** The hash is
+`truncated IP + User-Agent + today's salt`. The salt is random, and
+it is kept only for its day, in one file beside the database
+(`daily-salt.json`). At midnight UTC a new one replaces it, and the old
+one is gone: no backup copies that file. So the same visitor gets an
+unrelated ID tomorrow, and nobody can later work out which address was
+behind an old ID. The address going into it is a network block, not a
+connection. There is no cross-site identifier and no profile built on
+the side.
 
 **The raw address and the User-Agent header are never stored.** Both
 go into the hash, the header is classified to a device type and
@@ -165,7 +178,7 @@ genugAnalytics.optIn(); // resumes
 genugAnalytics.isOptedOut(); // for rendering your own toggle
 ```
 
-`optOut()` writes a first-party `genug_optout` flag, and from that
+`optOut()` writes a first-party cookie, `genug_optout=1`, and from that
 moment the script is silent — no page views, no clicks, no route
 changes, nothing, until `optIn()` is called.
 
@@ -180,9 +193,21 @@ there; one request that removes an identifier from someone's device is
 the better trade. Put these calls behind a link in your privacy policy
 and you have an objection route that works.
 
+The opt-out cookie holds no identifier. It lasts 400 days, the most
+Chrome allows for any cookie. It is host-only: an opt-out
+on `www.example.com` does not cover `shop.example.com`. If the script
+runs on several hosts, put the opt-out link on each of them. It is not
+`HttpOnly`, because the script must read it.
+
 **Self-hosted, so there is no analytics vendor** to sign an Art. 28
 DPA with, and no data leaving for a third party until you point an AI
 agent at the MCP endpoint — see [What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask).
+
+One request leaves the server on its own. Once at startup and once a
+day, it asks GitHub's API whether a newer version exists. That request
+carries no visitor data, but GitHub sees your server's address. Set
+`UPDATE_CHECK=false` to turn it off
+([configuration](deploying.md#configuration)).
 
 ### What is still yours to do
 
@@ -198,19 +223,19 @@ agent at the MCP endpoint — see [What leaves your server when you ask](mcp.md#
   page view.
 - **Name a legal basis and write it down.** For consentless mode that
   is normally Art. 6(1)(f) legitimate interests, which means actually
-  doing the balancing test and keeping it. The IDs are pseudonymous,
-  not anonymous: you hold the salt secret, so a given day's ID is
-  reproducible from a candidate address and User-Agent.
+  doing the balancing test and keeping it. Until midnight UTC, the
+  day's salt is on your server, so today's ID can be recomputed from a
+  known address and User-Agent.
 - **Tell people, in your own privacy notice.** The field table under
   "What actually gets stored" is the list to write it from. Cover what
   is collected, the daily-rotating hash and what it is for, the legal
   basis, your retention period, the opt-out link, and — if you use an
   AI agent — that model vendor as a recipient.
 - **State your retention period in the notice.** `RETENTION_DAYS`
-  defaults to 425 days (~13 months) unset — a real period now, not
+  defaults to 396 days (13 months) unset — a real period now, not
   forever — but the software choosing a sensible default doesn't write
   your Art. 13(2)(a) notice for you. State it anyway, and change
-  `RETENTION_DAYS` if 425 isn't the period you actually want (see
+  `RETENTION_DAYS` if 13 months isn't the period you actually want (see
   [operations.md](operations.md#retention)).
 - **Add the Art. 30 record**, and remember your hosting provider is
   still a processor even though your analytics vendor no longer exists.
@@ -233,3 +258,111 @@ consent, which is the same ground every cookieless analytics tool
 stands on. It is a defensible position, not a decided one. If the site
 belongs to a client, or the exposure is anything but small, have a
 Datenschutzanwalt confirm it rather than relying on this file.
+
+## Text for your privacy policy
+
+A starting point for the analytics section of a privacy policy. Fill
+in the brackets, delete what doesn't apply, and translate it for a
+German site. **Have a lawyer check it once** before you reuse it
+across clients. It covers only analytics; the general parts (the
+controller, the visitor's rights, the right to complain to a
+supervisory authority) belong elsewhere in the policy.
+
+> **Web analytics with Genug Analytics**
+>
+> We use Genug Analytics to understand how our website is used and to
+> improve it. The software runs on a server at [hosting provider,
+> country]. No third-party analytics service receives the data.
+>
+> **What we record.** For each page view or action: the page address
+> without personal query parameters, the address of the page you came
+> from, the time, the device type (e.g. mobile), the browser family,
+> the browser's preferred language, [the page title and the page's
+> language,] [links you click to other sites and files you download,]
+> [further events: list them].
+>
+> **How we tell visits apart.** We do not store your IP address in
+> the analytics data, and we set no cookie for this. Instead we shorten
+> your IP address (e.g. 203.0.113.47 becomes 203.0.113.0), combine it
+> with your browser's identification string and a key that changes
+> every day, and store only a hash of the result. We can therefore
+> recognise repeated visits on the same day, but not across days. The
+> key is random and is deleted at the end of each day. After that,
+> nobody, including us, can link the stored code to an IP address. If
+> our server blocks unusually many requests from one address, it writes
+> that address to a log, which is kept for [period].
+>
+> **Legal basis.** Art. 6(1)(f) GDPR. Our legitimate interest is
+> understanding how our website is used, in order to improve it. No
+> information is stored on your device for this. You are not required
+> to provide this data. If you object, the website works the same.
+>
+> [**With your consent.** If you agree in our cookie settings, we set a
+> cookie named `genug_vid`, so that we can tell returning visitors from
+> new ones. It holds an identifier, computed on the day you consent
+> from your shortened IP address and your browser's identification
+> string. Events from earlier that day are then linked to it. It
+> expires 13 months after your last visit. The legal basis is your
+> consent, Art. 6(1)(a) GDPR and § 25(1) TDDDG. You can withdraw it at
+> any time in [link to cookie settings]; the cookie is then deleted.
+> This does not affect processing before the withdrawal.]
+>
+> **Retention.** Records are deleted automatically after [13 months].
+> [The `genug_vid` cookie lasts 13 months after your last visit.] The
+> `genug_optout` cookie lasts 400 days.
+>
+> **Your right to object.** You can object at any time (Art. 21 GDPR):
+> [opt-out link]. We then store a cookie named `genug_optout` in your
+> browser, which says only that you objected, and record nothing more
+> from this browser. It applies only to this website address and this
+> browser. Storing it is necessary to honour your objection (§ 25(2)
+> No. 2 TDDDG). We cannot link data already recorded to you, because we
+> do not know which hash is yours (Art. 11 GDPR). So we cannot find or
+> delete it individually; it is deleted with everything else after [13
+> months].
+>
+> **Recipients.** Our hosting provider [name] processes the data on our
+> behalf under a data processing agreement (Art. 28 GDPR). [[Name of
+> the agency or freelancer running the server] does so too, under a
+> data processing agreement.] [To analyse the statistics we use [AI
+> provider]. It receives aggregated figures and, where needed,
+> individual records: page address, time, referring address, device
+> type, browser, a session code and event details. It does not receive
+> the visitor hash. It processes them on our behalf under a data
+> processing agreement. [It is based in [country]. The transfer relies
+> on [the EU Commission's adequacy decision for the EU-US Data Privacy
+> Framework, Art. 45 GDPR; the provider is certified] / [EU standard
+> contractual clauses, Art. 46(2)(c) GDPR; you can request a copy at
+> [contact]].]]
+
+Notes on the brackets:
+
+- **Page title and links.** Only if `enableAutoPageTracking` or
+  `enableAutoLinkTracking` is on. List your own events by what they
+  record, not by their names.
+- **The server log.** The rate limiter writes refused addresses to the
+  log (see [above](#privacy-by-architecture)). State how long your
+  host keeps logs, or point to the policy's general server-log section.
+- **The consent paragraph.** Only if your banner calls `setConsent`.
+- **Consent-only.** If you
+  [load the script only after consent](client.md#loading-only-after-consent):
+  keep "How we tell visits apart", but remove its first sentence. Drop
+  the "Legal basis" paragraph and the brackets around the consent
+  paragraph. Replace "Your right to object" with: "You can withdraw
+  your consent at any time (Art. 7(3) GDPR) in [link to cookie
+  settings]. This does not affect processing before the withdrawal."
+- **The opt-out link.** A button that calls
+  `window.genugAnalytics.optOut()` (see
+  [a working opt-out](#what-genug-does-for-you) above). An inline
+  `onclick` works only if your site's CSP allows inline handlers.
+- **Retention.** The value of `RETENTION_DAYS`. The default, 396 days,
+  is 13 months.
+- **Running it for a client.** If you run the server for a client, you
+  are their processor. Sign an Art. 28 agreement with them, and name
+  yourself under Recipients.
+- **The AI provider.** Only if you point an agent at the MCP endpoint.
+  What it receives is in
+  [What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask).
+  Its terms decide whether it is a processor with a DPA; check them,
+  and use a plan that offers one. The Data Privacy Framework applies
+  only if the provider is listed at dataprivacyframework.gov.

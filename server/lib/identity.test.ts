@@ -1,27 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  dailySalt,
-  consentlessVisitorId,
-  isIssuedVisitorId,
-} from "./identity.js";
+import { consentlessVisitorId, isIssuedVisitorId } from "./identity.js";
 import { truncateIp } from "./ip.js";
-
-test("dailySalt is deterministic for the same secret and day", () => {
-  const date = new Date("2026-01-01T12:00:00Z");
-  assert.equal(dailySalt("secret", date), dailySalt("secret", date));
-});
-
-test("dailySalt differs across days", () => {
-  const a = dailySalt("secret", new Date("2026-01-01T00:00:00Z"));
-  const b = dailySalt("secret", new Date("2026-01-02T00:00:00Z"));
-  assert.notEqual(a, b);
-});
-
-test("dailySalt differs across secrets", () => {
-  const date = new Date("2026-01-01T00:00:00Z");
-  assert.notEqual(dailySalt("secret-a", date), dailySalt("secret-b", date));
-});
 
 test("consentlessVisitorId is deterministic for the same inputs", () => {
   const salt = "some-salt";
@@ -80,7 +60,7 @@ test("isIssuedVisitorId rejects values a client could make up", () => {
 // The whole point: two addresses in one block become one visitor, and
 // two blocks stay apart.
 test("truncated addresses collide within a block and not across one", () => {
-  const salt = dailySalt("secret", new Date("2026-09-13T10:00:00Z"));
+  const salt = "some-salt";
   const id = (ip: string) =>
     consentlessVisitorId(truncateIp(ip), "Mozilla/5.0", salt);
 

@@ -166,7 +166,6 @@ function baseEnv(dbPath: string, port: number): Record<string, string> {
     PORT: String(port),
     DB_PATH: dbPath,
     MCP_API_KEY: "test-key",
-    SALT_SECRET: "test-salt",
     COCKPIT_PASSWORD: "test-cockpit-password",
     ALLOWED_ORIGIN: `http://localhost:${port}`,
     LOCAL_BACKUPS: "false",
@@ -384,21 +383,21 @@ test("RETENTION_DAYS=-1 keeps events forever, explicitly, without the unset warn
 });
 
 // The startup log for an unset RETENTION_DAYS is covered separately, by
-// message text alone — that proves the server *says* 425 days, not that
+// message text alone — that proves the server *says* 396 days, not that
 // it actually prunes to that boundary. A deployment upgrading from a
 // version where unset meant forever hits exactly this path on its next
 // restart, so it is the one behavior change in this release with real
 // data-loss consequence if the wiring slipped.
-test("a deployment that never set RETENTION_DAYS prunes at the 425-day default, for real", async (t) => {
+test("a deployment that never set RETENTION_DAYS prunes at the 396-day default, for real", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const dbPath = join(dir, "test.db");
   const port = 4225;
 
   const seedDb = new Database(dbPath);
   migrate(seedDb);
-  const keptTs = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+  const keptTs = new Date(Date.now() - 380 * 24 * 60 * 60 * 1000).toISOString();
   const prunedTs = new Date(
-    Date.now() - 450 * 24 * 60 * 60 * 1000,
+    Date.now() - 410 * 24 * 60 * 60 * 1000,
   ).toISOString();
   insertEvent(seedDb, {
     event: "page_view",
@@ -477,7 +476,7 @@ test("says so at startup when RETENTION_DAYS is unset", async (t) => {
   stopAndCleanUp(t, dir, server);
 
   const line = await server.waitForLog((l) => l.msg.includes("RETENTION_DAYS"));
-  assert.match(line.msg, /defaulting to 425 days/);
+  assert.match(line.msg, /defaulting to 396 days/);
   assert.match(line.msg, /RETENTION_DAYS=-1/);
 });
 
@@ -497,6 +496,50 @@ test("stays quiet about retention when RETENTION_DAYS is set", async (t) => {
     server.rawLines.some((l) => l.includes("RETENTION_DAYS")),
     false,
   );
+});
+
+// The salt is random and lives in a file beside the database. If that
+// file stopped being read at startup, every deploy would split each
+// visitor on the site into two, and nothing else would fail.
+test("a restart on the same day keeps each visitor's id", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const dbPath = join(dir, "test.db");
+  const port = 4226;
+  const env = baseEnv(dbPath, port);
+
+  const sendPageView = () =>
+    fetch(`http://localhost:${port}/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: `http://localhost:${port}`,
+      },
+      body: JSON.stringify({
+        auto: "pageView",
+        url: "https://example.com/",
+        props: { page_title: "Home", document_language: "en" },
+      }),
+    });
+
+  const first = spawnServer(env);
+  await first.waitForLog((line) => line.msg === "genug server listening");
+  assert.equal((await sendPageView()).status, 204);
+  await first.stop();
+
+  const second = spawnServer(env);
+  stopAndCleanUp(t, dir, second);
+  await second.waitForLog((line) => line.msg === "genug server listening");
+  assert.equal((await sendPageView()).status, 204);
+
+  const checkDb = new Database(dbPath, { readonly: true });
+  const ids = checkDb
+    .prepare("SELECT DISTINCT visitor_id FROM events")
+    .all() as { visitor_id: string }[];
+  checkDb.close();
+  assert.equal(ids.length, 1);
+  // 0600 is covered in lib/dailySalt.test.ts; here only that it sits
+  // beside the database, where the deployment docs say it is.
+  assert.ok(existsSync(join(dir, "daily-salt.json")));
 });
 
 // The container runs as an unprivileged user, so the most likely

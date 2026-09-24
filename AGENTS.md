@@ -261,7 +261,9 @@ visibly broken, which is the failure mode this project cares most about.
 
 - Consentless is the default and sets no identifying cookie:
   `visitor_id` hashes a **truncated** address (IPv4 /24, IPv6 /48,
-  `truncateIp` in `lib/ip.ts`) + User-Agent + a daily salt. Never
+  `truncateIp` in `lib/ip.ts`) + User-Agent + a daily salt. The salt is
+  random and kept only for its day (`lib/dailySalt.ts`); never derive
+  it from a lasting secret, or every past day's IDs can be rebuilt. Never
   persist anything per-visitor in that mode; the one exception written
   to any device is the opt-out flag, which holds no identifier.
 - Anything counting abuse per client — a rate limit, a lockout — keys

@@ -12,14 +12,11 @@ import {
   roleEventNames,
   MAX_EVENT_NAME_LENGTH,
 } from "@genug/schema-registry";
-import { db } from "../db/index.js";
+import { dirname, join } from "node:path";
+import { db, dbPath } from "../db/index.js";
 import { insertEvent, findLastEventForVisitor } from "../db/events.js";
 import { insertRejectedEvent } from "../db/rejectedEvents.js";
-import {
-  dailySalt,
-  consentlessVisitorId,
-  isIssuedVisitorId,
-} from "../lib/identity.js";
+import { consentlessVisitorId, isIssuedVisitorId } from "../lib/identity.js";
 import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
 import { requireEnv } from "../lib/env.js";
@@ -28,6 +25,7 @@ import { classifyUserAgent } from "../lib/userAgent.js";
 import { stripUnknownParams } from "../lib/url.js";
 import { recordBotHit, botActivityCounter } from "../lib/botActivity.js";
 import { parseCookies } from "../lib/cookies.js";
+import { createDailySalt, startRotation } from "../lib/dailySalt.js";
 
 const VISITOR_ID_COOKIE = "genug_vid";
 // 13 months — the ceiling EU data-protection authorities (CNIL, and the
@@ -61,7 +59,8 @@ if (allowedOrigins.size === 0) {
     "ALLOWED_ORIGIN must name at least one origin (comma-separated for more than one)",
   );
 }
-const saltSecret = requireEnv("SALT_SECRET");
+const dailySalt = createDailySalt(join(dirname(dbPath), "daily-salt.json"));
+startRotation(dailySalt);
 
 // Plain boolean, not a type predicate: event names come from JSON files
 // read at startup, so `EventType` is `string` and narrowing to it would
@@ -329,7 +328,7 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
     userAgent === undefined ? undefined : classifyUserAgent(userAgent);
   const visitorLanguage = parsePrimaryLanguage(req.headers["accept-language"]);
 
-  const salt = dailySalt(saltSecret, now);
+  const salt = dailySalt.saltFor(now);
 
   const cookies = parseCookies(req.headers.cookie);
 

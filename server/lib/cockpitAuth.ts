@@ -100,7 +100,7 @@ export interface CockpitAuth {
 // up with an open cockpit: it serves recent event URLs and raw props —
 // where order ids and other business data live — at an entirely
 // predictable hostname. server/index.ts fails fast at startup when
-// COCKPIT_PASSWORD is unset, the same as SALT_SECRET and MCP_API_KEY.
+// COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
 export function createCockpitAuth(
   password: string,
   limiter: FailedAttemptLimiter = createFailedAttemptLimiter(

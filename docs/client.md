@@ -52,6 +52,66 @@ disagree.
 - **`enableAutoRouteTracking`** (default `false`): see "Tracking
   single-page-app route changes" below.
 
+### Loading only after consent
+
+By default a visitor who clicks "Reject" is still counted, under the
+daily hash (see [privacy](privacy.md#running-without-a-consent-banner)).
+`consent: false` changes _how_ they are identified, not _whether_.
+If you or your client want no analytics at all without consent, don't
+put the script tag in the page. Load it from your consent manager
+instead:
+
+```html
+<script>
+  const GENUG_SRC = "https://data.your-domain.com/client.js";
+
+  // Call from the "accept" callback, and on every page load where
+  // consent is already stored.
+  function startAnalytics() {
+    const running = window.genugAnalytics && !window.genugAnalytics.q;
+    if (running) {
+      // Accepted again after withdrawing, on the same page.
+      window.genugAnalytics.optIn();
+      window.genugAnalytics.setConsent(true);
+      return;
+    }
+    if (window.genugAnalytics) return; // already loading
+    window.genugAnalyticsConfig = {
+      consent: true,
+      enableAutoPageTracking: true,
+    };
+    // Clears the opt-out an earlier withdrawal left, before the first
+    // page view is sent.
+    window.genugAnalytics = { q: [["optIn", []]] };
+    const script = document.createElement("script");
+    script.src = GENUG_SRC;
+    document.head.append(script);
+  }
+
+  // Call from the "withdraw" callback.
+  function stopAnalytics() {
+    const api = window.genugAnalytics;
+    if (!api) return;
+    if (api.q) api.q.push(["optOut", []]);
+    else api.optOut();
+  }
+</script>
+```
+
+On reject, nothing loads and nothing is sent. On withdrawal,
+`optOut()` stops the script on the current page and removes the
+`genug_vid` cookie. It also leaves the `genug_optout` flag, which is
+why `startAnalytics()` queues `optIn()` first.
+
+Consent (Art. 6(1)(a) GDPR, § 25(1) TDDDG) is then the basis for the
+analytics. It must be valid under Art. 7 GDPR: withdrawing must be as
+easy as accepting. Server logs still need their own basis, usually
+Art. 6(1)(f). The [privacy policy text](privacy.md#text-for-your-privacy-policy)
+says what to change for this mode.
+
+The cost: every visitor who rejects or ignores the banner is missing
+from every number. Expect far lower counts than consentless mode gives.
+
 ## Tracking events
 
 ### From JavaScript

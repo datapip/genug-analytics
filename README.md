@@ -90,7 +90,7 @@ The full walk-through with a screenshot is
 
 Before going live on an EU site, two things the software cannot do for
 you: name what you collect in your privacy notice, and state your
-retention period there (it defaults to 425 days — a real period, not
+retention period there (it defaults to 396 days, 13 months — a real period, not
 forever — but your notice still has to say so). Both are laid out in
 [privacy](docs/privacy.md).
 
@@ -111,7 +111,8 @@ deployment tracks, then picks the tool. The tools cover:
 What each number means, what it excludes and where it misleads is in
 every tool's description — that is the documentation the agent reads,
 and it is written to be argued with. There is deliberately no raw-SQL
-tool and no row export. More in [docs/mcp.md](docs/mcp.md), including
+tool. One tool, `get_recent_events`, returns recent raw rows for
+checking that tracking works; `READ_ONLY=true` removes it. More in [docs/mcp.md](docs/mcp.md), including
 what leaves your server when a hosted model answers.
 
 ## Tracking your own events
@@ -169,7 +170,7 @@ that are plausible while wrong. The reasoning behind every rule is in
 
 ## Operating it
 
-- **Retention** defaults to 425 days, a defensible starting point (see
+- **Retention** defaults to 396 days (13 months), a defensible starting point (see
   [operations](docs/operations.md#retention) for the reasoning) — set
   `RETENTION_DAYS=-1` to keep everything instead, or a different number
   of days to choose your own period.

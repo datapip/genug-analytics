@@ -9,6 +9,25 @@ how a version is cut.
 
 ## Unreleased
 
+**Breaking**
+
+- **`RETENTION_DAYS` now defaults to 396 days (13 months), not 425.**
+  425 days is about 14 months, while the docs said 13. If you never set
+  `RETENTION_DAYS`, the next start deletes events between 396 and 425
+  days old. Set `RETENTION_DAYS=425` first to keep them.
+
+**Changed**
+
+- **The daily salt is random and kept only for its day.** It used to be
+  derived from `SALT_SECRET`, so whoever held that secret could rebuild
+  any past day's visitor IDs from a known address and User-Agent. Now
+  the salt is replaced at midnight UTC and the old one is gone. It sits
+  in `daily-salt.json` beside the database, so a restart keeps it; the
+  backup never copies it. `SALT_SECRET` is no longer read; remove it
+  and destroy it, since it still rebuilds IDs made before the upgrade.
+  Upgrading starts a new salt, so visitors seen earlier that day get a
+  new ID, as if the day had turned.
+
 **Fixed**
 
 - **Anyone could sign the owner out of the cockpit.** The logout route
@@ -41,7 +60,7 @@ how a version is cut.
   no way to see this text at all. The resource is unchanged and still
   registered.
 - The server checks once at startup and once a day whether a newer
-  version has been tagged (one anonymous GET to GitHub's tags API, no
+  version has been tagged (one unauthenticated GET to GitHub's tags API, no
   data about your deployment sent) and the cockpit shows a "new
   version available" pill next to the version number when one has.
   Fails silently with no outbound network access. Set

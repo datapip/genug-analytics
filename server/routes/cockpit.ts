@@ -75,7 +75,7 @@ import { VERSION } from "../lib/version.js";
 import { latestVersion } from "../lib/updateCheck.js";
 
 // Read directly from the environment rather than threaded in, same as
-// eventsRouter's SALT_SECRET/ALLOWED_ORIGIN — server/index.ts already
+// eventsRouter's ALLOWED_ORIGIN — server/index.ts already
 // requires this to build the cockpit's session gate, so by the time a
 // request reaches this router it is guaranteed to be set.
 const cockpitPassword = requireEnv("COCKPIT_PASSWORD");

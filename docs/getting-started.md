@@ -47,17 +47,17 @@ needs a few minutes to propagate, and step 4 needs it already working.
 
 ## 2. Generate your secrets
 
-Three secrets, no defaults — the server refuses to start without them,
+Two secrets, no defaults — the server refuses to start without them,
 deliberately, rather than coming up in an insecure state. Run this
-three times and keep the three results somewhere safe, like a password
-manager; you'll paste them into the next step:
+twice and keep both results somewhere safe, like a password manager;
+you'll paste them into the next step:
 
 ```sh
 openssl rand -hex 32
 ```
 
 Which one is which doesn't matter yet — you'll assign them to
-`SALT_SECRET`, `MCP_API_KEY` and `COCKPIT_PASSWORD` in a moment. Just
+`MCP_API_KEY` and `COCKPIT_PASSWORD` in a moment. Just
 don't lose track of which value you used where.
 
 ## 3. Run it
@@ -70,9 +70,8 @@ npm install
 npm run build
 DB_PATH=./genug.db \
 ALLOWED_ORIGIN=https://your-tracked-site.com \
-SALT_SECRET=<first-secret> \
-MCP_API_KEY=<second-secret> \
-COCKPIT_PASSWORD=<third-secret> \
+MCP_API_KEY=<first-secret> \
+COCKPIT_PASSWORD=<second-secret> \
 node server/dist/index.js
 ```
 
@@ -83,9 +82,8 @@ survives a redeploy:
 ```sh
 docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
   -e ALLOWED_ORIGIN=https://your-tracked-site.com \
-  -e SALT_SECRET=<first-secret> \
-  -e MCP_API_KEY=<second-secret> \
-  -e COCKPIT_PASSWORD=<third-secret> \
+  -e MCP_API_KEY=<first-secret> \
+  -e COCKPIT_PASSWORD=<second-secret> \
   -v genug-data:/data \
   ghcr.io/datapip/genug-analytics:v0.7.0
 ```
@@ -186,8 +184,8 @@ Two things the software cannot do for you:
 - **Say what you collect** in your privacy notice, and name a legal
   basis. The field table and the checklist are written for exactly
   this. → [Running without a consent banner](privacy.md#running-without-a-consent-banner)
-- **Say how long you keep it, if 425 days isn't right.** `RETENTION_DAYS`
-  defaults to 425 days; set it if you want a different period, or `-1`
+- **Say how long you keep it, if 13 months isn't right.** `RETENTION_DAYS`
+  defaults to 396 days; set it if you want a different period, or `-1`
   to keep everything. Your notice should say which. → [Retention](operations.md#retention)
 
 ## Next

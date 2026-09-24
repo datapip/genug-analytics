@@ -6,14 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 
-// The route reads ALLOWED_ORIGIN/SALT_SECRET through requireEnv at
+// The route reads ALLOWED_ORIGIN through requireEnv at
 // module scope, and db/index.ts opens the database on import — so env
 // has to be in place before either module is loaded, which is why these
 // are dynamic imports rather than ordinary ones at the top of the file.
 const tmpDir = mkdtempSync(join(tmpdir(), "genug-events-"));
 process.env.DB_PATH = join(tmpDir, "test.db");
 process.env.ALLOWED_ORIGIN = "https://site.example, https://www.site.example";
-process.env.SALT_SECRET = "test-salt-secret";
 
 const { eventsRouter } = await import("./events.js");
 const { db } = await import("../db/index.js");

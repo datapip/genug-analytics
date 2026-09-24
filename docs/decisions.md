@@ -374,9 +374,9 @@ This detail matters architecturally, not just operationally:
 ## Configuration (env vars)
 
 `.env.example` at the repo root is the copy-paste starting point, listing
-every variable below, with an `openssl rand -hex 32` line on each of the
-two secrets that should be generated rather than chosen (`MCP_API_KEY`
-and `SALT_SECRET`). It's committed deliberately (`.gitignore` ignores
+every variable below, with an `openssl rand -hex 32` line on the
+secret that should be generated rather than chosen (`MCP_API_KEY`;
+`SALT_SECRET` was the second until the salt became random). It's committed deliberately (`.gitignore` ignores
 `.env` and `.env.*` but re-includes this one) — eight variables, four of
 which fail startup when missing, is more than a deployer should have to
 reconstruct from prose.
@@ -397,14 +397,14 @@ reconstruct from prose.
   quietly disabling CORS — same treatment as the three secrets below.
 - `MCP_API_KEY` — **required**. Shared secret to call the MCP endpoint.
   The AI agent config on the client's side includes this key.
-- `SALT_SECRET` — server secret used to derive the daily rotating hash
-  salt for consentless visitor identification (see "Visitor
-  identification"). Required.
+- `SALT_SECRET` — no longer read. It keyed the daily salt until the
+  salt became random (see "The daily salt is random" under "Visitor
+  identification").
 - `COCKPIT_PASSWORD` — **required**. `/cockpit` (both the JSON route
   and the static page) is behind a sign-in page that exchanges this
   password for a session cookie (see "The cockpit signs in instead of
   re-sending a password"), and the server fails fast at startup without
-  it, same as `SALT_SECRET` and `MCP_API_KEY`.
+  it, same as `MCP_API_KEY`.
 
   This was optional at first, defaulting to a fully open cockpit. That
   was wrong, and not a small wrongness: `/cockpit/data` returns recent
@@ -624,17 +624,16 @@ cannot. A full User-Agent plus a second-resolution timestamp can single
 out one device on a quiet site — a 50-visitor intranet, a niche B2B
 page. And it joins cleanly to the reverse-proxy or hosting log an
 operator almost always keeps, which holds the full address; "mobile /
-Safari" joins to nothing much. Re-linking through the hash is still
-possible for whoever holds `SALT_SECRET` — that is what makes the IDs
-pseudonymous rather than anonymous, and the README says so — but a
-database copy plus a log no longer re-links on its own by string
-equality. That is the Art. 4(5) condition, the extra information kept
+Safari" joins to nothing much. Re-linking through the hash was still
+possible for whoever held `SALT_SECRET` (today, only for whoever holds
+the current day's salt), but a database copy plus a log no longer
+re-links on its own by string equality. That is the Art. 4(5) condition, the extra information kept
 separately, met in fact rather than argued.
 
 What it does not change: the header still feeds the bot check and the
 consentless hash, at request time, and is then dropped. The hash was
-never computed from the stored column, so it is exactly as
-pseudonymous as before — this is a minimisation change, not a
+never computed from the stored column, so re-linking through it is
+exactly as possible as before — this is a minimisation change, not a
 re-identification one. `get_device_breakdown` and the cockpit's device
 card keep their shape; they read two columns instead of classifying.
 
@@ -1497,10 +1496,9 @@ one place in the data model where the distinction between `false` and
 - **`consent: false` — an explicit decline or withdrawal.** No cookie is
   set, and any cookie already on the request is ignored for
   identification and actively removed. `visitor_id` is a hash of
-  `IP + User-Agent + daily rotating salt`. The salt is derived
-  server-side (e.g. an HMAC of the current date keyed by a server
-  secret, `SALT_SECRET`) rather than stored, so no per-visitor state
-  persists anywhere. Rotating daily means the same visitor gets a new
+  `IP + User-Agent + daily rotating salt`. The salt is random, one per
+  UTC day, and replaced at midnight (see "The daily salt is random"
+  below). No per-visitor state persists anywhere. Rotating daily means the same visitor gets a new
   `visitor_id` each day — an accepted privacy tradeoff, not a bug. A
   session that happens to cross midnight will split into two; also an
   accepted edge case, not something to special-case. See "Withdrawal"
@@ -1525,7 +1523,7 @@ one place in the data model where the distinction between `false` and
   originally was. It's `httpOnly`, so page JS can't set it — but any
   HTTP client can put whatever it likes in a `Cookie` header, and the
   value went straight into the `visitor_id` column. Guessing a real
-  visitor's id is impractical (it's an HMAC keyed by `SALT_SECRET`), so
+  visitor's id is impractical (it's an HMAC keyed by the daily salt), so
   the exposure was never impersonation; it was that sending a fresh
   random value per request manufactured unlimited distinct "visitors"
   and sessions, at unbounded string length per row. Anything that isn't
@@ -1630,7 +1628,7 @@ true rather than aspirational.
 The claim being checked said this already happened. It did not — the
 full address went into the HMAC, and only the fact that it was never
 *stored* was true. Truncating matters because the hash is reproducible
-by anyone holding `SALT_SECRET`: with a full address, "was this exact
+by anyone holding the day's salt: with a full address, "was this exact
 person here today" is answerable; with a block, only "was someone from
 this block here". That is the difference a supervisory authority is
 looking at when an operator relies on legitimate interest rather than
@@ -1694,6 +1692,55 @@ Left alone deliberately: no `Do-Not-Track` or `Sec-GPC` handling. DNT
 is dead — Firefox dropped the toggle — and GPC is a US "sale of data"
 signal rather than an Art. 21 objection. Honouring a header nobody sends
 would look like a feature while doing nothing.
+
+### The daily salt is random
+
+Decided 2026-09-24. The salt used to be `HMAC(SALT_SECRET, date)`.
+`SALT_SECRET` never changed, so whoever held it could rebuild the salt
+for any past day, and with a known address and User-Agent, that day's
+`visitor_id`. The daily rotation then only stopped linking across days
+inside the database. It did not stop the operator linking an old ID
+back to an address.
+
+Now the salt is 32 random bytes, one per UTC day
+(`lib/dailySalt.ts`). At midnight a new one replaces it, and nothing
+keeps the old one. A minute timer rotates it even with no traffic, so
+yesterday's salt does not wait for the first visitor. Nothing a visitor
+sees changes: same-day visits still share an ID, the consent cookie
+still freezes that day's hash, and a session crossing midnight still
+splits, as before.
+
+**Kept in a file, not only in memory.** In memory, every restart during
+the day would start a new salt, and each visitor on the site at that
+moment would count twice, with their session cut in two. A deploy is a
+restart. So the salt sits in `daily-salt.json` beside the database,
+mode 0600, written by write-then-rename so the old value is replaced
+at once. The backup copies the database, events and context
+directories, never this file, so no snapshot holds an old salt. A
+volume snapshot taken by the host holds only that day's salt. If the
+file cannot be written, collection carries on with the salt in memory,
+and the old file is deleted rather than left in place: a failed write
+must not keep yesterday's salt. The cost is only a split on the next
+restart. A stopped server rotates nothing, so the last day's salt sits
+on the volume until the next start; `operations.md` says to delete it
+when shutting down for good.
+
+**`SALT_SECRET` is simply no longer read**, with no startup check or
+warning: the maintainer was the only deployment when this changed. The
+secret still rebuilds every ID made before the upgrade, and consent
+cookies issued before it keep that old ID: the cookie is re-set on each
+visit, and an old value cannot be told from a new one. Renaming the
+cookie would cut those loose, at the cost of one break in every
+consented visitor's history. Not done: destroying the secret does the
+same job. The upgrade itself starts a new salt, so
+visitors seen before the upgrade get a new ID on their next event that
+day, the same as crossing midnight.
+
+**The docs put no legal label on the data.** Whether this changes the
+data's status in law is not settled: rows still hold URL, referrer and
+a second-resolution timestamp, which a web server log with full
+addresses can match. So the docs state the mechanism — what can be
+recomputed, by whom, and until when — and leave the label to counsel.
 
 ## Session logic (keep intentionally simple)
 
@@ -3782,7 +3829,7 @@ immediately and binds from the first real deployment onward.)
     copy is somewhere it should not be. Only a live session sending the
     `X-Genug-Cockpit` header can do that. The logout route needs no
     session, and at first any request to it moved the watermark, so a
-    loop of anonymous POSTs kept the owner signed out (2026-09 review).
+    loop of unauthenticated POSTs kept the owner signed out (2026-09 review).
     Anyone else only gets their own cookie cleared.
   - **The lockout stopped counting the wrong things.** It sat on every
     request under `/cockpit`; now it sits on the sign-in route alone, so
@@ -4466,8 +4513,8 @@ deliberately omits `--delete`, which is right for backups and wrong for
 erasure, so it had better be written down.
 
 **No legal basis was named anywhere.** The README was careful that the
-IDs are pseudonymous personal data and then never said what permits
-recording them. For consentless mode that is normally Art. 6(1)(f),
+IDs are personal data and then never said what permits recording
+them. For consentless mode that is normally Art. 6(1)(f),
 which carries a balancing test and an Art. 21 objection route. Added,
 along with the Art. 13 and Art. 30 obligations and the one genuinely
 good piece of news worth stating out loud: self-hosting means there is
@@ -4972,6 +5019,12 @@ themselves; that's a real difference in weight, not just phrasing, and
 is worth a second look from actual counsel on a deployment where the
 exposure is anything but small — same caveat this file already holds
 itself to everywhere else it touches § 25 TDDDG / Art. 6(1)(f).
+
+**Changed on 2026-09-24: the default is now 396 days.** 425 days is
+about 14 months, but every doc called it 13. The docs were right about
+the intent, so the number moved. 396 is the same 13 months the consent
+cookie already uses (`routes/events.ts`), so the cookie and the data it
+identifies now end together.
 
 Verified rather than assumed: `parseRetentionDays("-1")`, unset, and the
 refusal of `0` (with its specific message) are each covered by a

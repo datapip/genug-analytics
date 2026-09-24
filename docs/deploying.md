@@ -53,7 +53,6 @@ npm install
 npm run build
 DB_PATH=./genug.db \
 ALLOWED_ORIGIN=https://your-tracked-site.com \
-SALT_SECRET=<random-secret> \
 MCP_API_KEY=<random-secret> \
 COCKPIT_PASSWORD=<random-secret> \
 node server/dist/index.js
@@ -102,9 +101,8 @@ somewhere safe before closing the terminal, they're also saved to
 `/opt/genug-analytics/.env`.
 
 **Re-running the script on a box that already has a deployment never
-regenerates `SALT_SECRET` or `MCP_API_KEY`** — doing that would
-silently re-identify every visitor and invalidate any MCP client
-already configured. It offers to pull the latest image tag in place
+regenerates `MCP_API_KEY`** — doing that would invalidate any MCP
+client already configured. It offers to pull the latest image tag in place
 instead, leaving the hostname and secrets untouched.
 
 Not on a fresh Ubuntu box, or want more control over what gets
@@ -124,7 +122,6 @@ services:
     image: "ghcr.io/datapip/genug-analytics:v0.7.0" # the latest released tag
     environment:
       - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
-      - "SALT_SECRET=${SALT_SECRET}"
       - "MCP_API_KEY=${MCP_API_KEY}"
       - "COCKPIT_PASSWORD=${COCKPIT_PASSWORD}"
       # One hop: Coolify's Traefik. Raise to 2 ONLY if this record is
@@ -168,7 +165,6 @@ set `2` instead of `1` if this domain is also proxied.
 docker build -t genug .
 docker run --rm -p 3000:3000 \
   -e ALLOWED_ORIGIN=https://your-tracked-site.com \
-  -e SALT_SECRET=<random-secret> \
   -e MCP_API_KEY=<random-secret> \
   -e COCKPIT_PASSWORD=<random-secret> \
   -v genug-data:/data \
@@ -224,7 +220,7 @@ either click "Deploy" in its UI or let a push-triggered webhook do it.
    `3000` (the internal port `server/index.ts` listens on via `PORT`).
 5. **Add environment variables** (see [Configuration](#configuration) below):
    `PORT=3000`, `ALLOWED_ORIGIN=https://<the-tracked-site>`, plus
-   `SALT_SECRET`, `MCP_API_KEY` and `COCKPIT_PASSWORD` all toggled as
+   `MCP_API_KEY` and `COCKPIT_PASSWORD`, both toggled as
    **secret**. `DB_PATH` doesn't need to be set — it defaults to
    `/data/genug.db`, matching the volume mount in the next step.
 6. **Add persistent storage**: in **Storages**, add a **Volume Mount**
@@ -285,23 +281,22 @@ coming up in an insecure state.
 | `DB_PATH`          | no (default `/data/genug.db`) | Path to the SQLite file. The default matches the volume mount used in the Docker/Coolify instructions above, so this rarely needs setting — override only if you want the file somewhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `TRUST_PROXY`      | no (default `0`)              | How many reverse-proxy hops sit in front of the server: `1` behind a single proxy (Coolify's Traefik, nginx, Caddy), `2` behind that plus Cloudflare. Leave unset when the port is published directly. **Setting this higher than the number of proxies you actually have is a security hole** — `X-Forwarded-For` is text the sender writes, so an extra trusted hop lets anyone forge the address every rate limiter counts, including the cockpit's password lockout.                                                                                                                                                                                                      |
 | `ALLOWED_ORIGIN`   | yes                           | The tracked site's exact origin (scheme + host + port, no path), for CORS on `/events`. Comma-separate several if the site serves on more than one origin (an apex plus a `www.` host, a staging host).                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `SALT_SECRET`      | yes                           | Server secret for the daily-rotating consentless visitor-id hash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `MCP_API_KEY`      | yes                           | Shared secret your AI agent's MCP config authenticates with.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `COCKPIT_PASSWORD` | yes                           | The password for `/cockpit`. Typed once on a sign-in page, which exchanges it for a session cookie lasting 12 hours; changing it signs out every browser. Required — the server refuses to start without it, so the cockpit is never unintentionally public. The cockpit reads and (unless `READ_ONLY`) writes `ground-rules.md`, `about.md` and `history.json`, so on a non-`READ_ONLY` deployment this carries the same read-exposure as `MCP_API_KEY` for that text — don't hand it to someone you wouldn't hand the MCP key to.                                                                                                                                           |
 | `EVENTS_PATH`      | no (default `/data/events`)   | Where every event schema lives, yours and the built-ins (see [Defining your own events](client.md#defining-your-own-events)). Created and filled from the image on first start; after that it is yours to edit and nothing overwrites it.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `CONTEXT_PATH`     | no (default `/data/context`)  | Where `ground-rules.md`, `about.md` and `history.json` live — the instructions your agent reads before answering, what the site or business is for, and what has happened to it (see [what the agent reads](mcp.md)). `ground-rules.md` and `history.json` are seeded on first start; `about.md` is not, since there's no universal default for what your site is for — it doesn't exist until you write to it, from the cockpit or by hand. All three are yours to edit; edits apply on the next question, no restart. Included in the daily backup, because a history log cannot be re-created. **On a `READ_ONLY` deployment the MCP key is public, so this text is too.** |
-| `RETENTION_DAYS`   | no (default `425`)            | Events, rejected events and bot activity older than this many days are deleted once at startup and then once a day. Unset defaults to 425 (~13 months); set `-1` for no limit, explicitly — `0` is refused, since "0 days" reads as the opposite (see below, and [Retention](operations.md#retention)).                                                                                                                                                                                                                                                                                                                                                                       |
+| `RETENTION_DAYS`   | no (default `396`)            | Events, rejected events and bot activity older than this many days are deleted once at startup and then once a day. Unset defaults to 396 (13 months); set `-1` for no limit, explicitly — `0` is refused, since "0 days" reads as the opposite (see below, and [Retention](operations.md#retention)).                                                                                                                                                                                                                                                                                                                                                                        |
 | `LOCAL_BACKUPS`    | no (default `true`)           | A hot backup is written daily into a `backups` folder next to `DB_PATH`, keeping the last 7 days. Set to `false` to opt out.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `UPDATE_CHECK`     | no (default `true`)           | Once at startup and once a day, the server makes one anonymous GET to GitHub's tags API for this repo to see whether a newer version has been tagged; the cockpit shows a pill next to the version line if so. No data about your deployment is sent. Fails silently on a deployment with no outbound network access — the pill just never appears. Set to `false` to opt out entirely.                                                                                                                                                                                                                                                                                       |
+| `UPDATE_CHECK`     | no (default `true`)           | Once at startup and once a day, the server makes one unauthenticated GET to GitHub's tags API for this repo to see whether a newer version has been tagged; the cockpit shows a pill next to the version line if so. No data about your deployment is sent. Fails silently on a deployment with no outbound network access — the pill just never appears. Set to `false` to opt out entirely.                                                                                                                                                                                                                                                                                 |
 | `READ_ONLY`        | no (default `false`)          | Closes every write: `delete_visitor_data` and `add_history_note` are not registered, and the cockpit refuses edits, new events, reloads and both resets. Also unregisters `get_recent_events`, the one tool that returns raw rows instead of an aggregate — a public key shouldn't double as a raw event export either. Collection on `/events` continues. For a deployment whose MCP key is meant to be public, such as a demo. Only `true` or `false`; anything else refuses to start.                                                                                                                                                                                      |
 
-**On `RETENTION_DAYS` defaulting to 425 rather than to forever:**
+**On `RETENTION_DAYS` defaulting to 396 rather than to forever:**
 unbounded retention used to be the default, on the reasoning that
 defaulting to a number would quietly delete data you never chose to
 delete. That still matters — which is why this stays loud rather than
 becoming quiet just because the default changed to a reasonable one: the
 server logs it once at startup (`RETENTION_DAYS is not set — defaulting
-to 425 days...`) and the cockpit's on-screen line changes to match. **If
+to 396 days...`) and the cockpit's on-screen line changes to match. **If
 you're upgrading a deployment that relied on unset meaning forever, set
 `RETENTION_DAYS=-1` before you do** — that's the explicit way to say
 what unset used to say for you, and the log line names it. See

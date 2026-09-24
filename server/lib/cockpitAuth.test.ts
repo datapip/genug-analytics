@@ -242,7 +242,7 @@ test("logging out stops the cookie working", async (t) => {
 });
 
 // The watermark is global, so moving it signs every browser out. When
-// an anonymous POST could move it, a loop of them locked the owner out
+// an unauthenticated POST could move it, a loop of them locked the owner out
 // for as long as it ran.
 test("a logout without a live session from the cockpit signs nobody else out", async (t) => {
   t.after(resetSessionRevocationForTests);
