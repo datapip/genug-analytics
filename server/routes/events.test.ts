@@ -18,6 +18,9 @@ const { eventsRouter } = await import("./events.js");
 const { db } = await import("../db/index.js");
 
 const app = express();
+// Lets a test choose its address through X-Forwarded-For. Without the
+// header req.ip is still the loopback address, as for every other test.
+app.set("trust proxy", true);
 app.use("/events", eventsRouter);
 const server = app.listen(0);
 const { port } = server.address() as AddressInfo;
@@ -173,6 +176,25 @@ test("assigns visitor_id, session_id and ts itself, ignoring the client's", asyn
   assert.ok(Date.now() - new Date(row.ts).getTime() < 60_000);
   assert.equal(row.consent_mode, "consentless");
   assert.equal(res.headers.get("set-cookie"), null);
+});
+
+// The hash must be over the truncated address, or the visitor_id is as
+// precise as the full IP the privacy notice says is never kept. A unit
+// test of truncateIp cannot see the route pass req.ip in untruncated.
+test("gives two addresses in one /24 the same consentless visitor_id", async () => {
+  const body = {
+    event: "page_view",
+    url: "https://site.example/",
+    props: { page_title: "Home", document_language: "en" },
+  };
+  const ua = "test-truncation";
+  await post(body, { "user-agent": ua, "x-forwarded-for": "203.0.113.7" });
+  await post(body, { "user-agent": ua, "x-forwarded-for": "203.0.113.200" });
+  await post(body, { "user-agent": ua, "x-forwarded-for": "203.0.114.7" });
+
+  const [first, sameBlock, otherBlock] = newRows();
+  assert.equal(sameBlock!.visitor_id, first!.visitor_id);
+  assert.notEqual(otherBlock!.visitor_id, first!.visitor_id);
 });
 
 // The consentless → consentful transition freezes the hash this visitor
@@ -483,6 +505,12 @@ test("clears the visitor cookie when consent is explicitly withdrawn", async () 
   assert.ok(setCookie, "withdrawing must send a Set-Cookie that clears it");
   assert.match(setCookie, /genug_vid=;/);
   assert.match(setCookie, /Expires=Thu, 01 Jan 1970/i);
+
+  // Clearing the cookie is half of it: the row written with the
+  // withdrawal is stored as consentless. Its visitor_id may still equal
+  // the cookie's, since that cookie froze the same day's consentless
+  // hash (see "freezes the existing consentless hash" above).
+  assert.equal(newRows()[1]!.consent_mode, "consentless");
 });
 
 // The race this exists to close: a returning, already-consented

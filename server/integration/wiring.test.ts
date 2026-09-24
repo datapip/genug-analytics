@@ -845,6 +845,79 @@ test("refuses a creation that did not come from the cockpit page", async (t) => 
   assert.equal(existsSync(join(dir, "events", "x.json")), false);
 });
 
+// A deployment whose EVENTS_PATH could not be seeded serves the image's
+// events. A write there would be lost on the next deploy, so every
+// event write answers 409 rather than saving into the image.
+test("refuses event writes while events are read from the image", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const port = 4228;
+
+  // The seeder never creates a missing parent, so this path is not used.
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    EVENTS_PATH: join(dir, "missing", "events"),
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const base = `http://localhost:${port}`;
+  const auth = await signInToCockpit(port);
+
+  const page = (await (
+    await fetch(`${base}/cockpit/data?days=7`, { headers: { cookie: auth } })
+  ).json()) as { readOnly: boolean; schemaEditable: boolean };
+  assert.equal(page.readOnly, false);
+  assert.equal(page.schemaEditable, false);
+
+  const writes: [string, string, unknown][] = [
+    [
+      "POST",
+      "/cockpit/events",
+      { name: "x", description: "x".repeat(20), props: [] },
+    ],
+    [
+      "PUT",
+      "/cockpit/events/page_view",
+      {
+        name: "page_view",
+        description: "x".repeat(20),
+        props: {},
+        renameStoredEvents: false,
+      },
+    ],
+    [
+      "POST",
+      "/cockpit/events/page_view/props",
+      {
+        name: "section",
+        type: "text",
+        optional: true,
+        list: false,
+        description: "x".repeat(20),
+        example: ["news"],
+      },
+    ],
+    ["DELETE", "/cockpit/events/page_view", undefined],
+    ["POST", "/cockpit/events/reset", { password: "test-cockpit-password" }],
+  ];
+  for (const [method, path, body] of writes) {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: {
+        cookie: auth,
+        "content-type": "application/json",
+        "x-genug-cockpit": "1",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(response.status, 409, `${method} ${path}`);
+    const json = (await response.json()) as { ok: boolean; error: string };
+    assert.equal(json.ok, false);
+    assert.match(json.error, /read from the image/);
+  }
+  assert.equal(existsSync(join(dir, "missing")), false);
+});
+
 // The stand-in only exists for a deployment that has edited its own
 // event files, which is exactly what a published image produces — and
 // it is the branch that keeps a typo in one file from taking the whole
@@ -1087,6 +1160,41 @@ test("renames an event from the cockpit and keeps collecting under the new name"
     }
   ).result.contents[0]!.text;
   assert.match(document, /Recorded automatically: the event "page_view"/);
+
+  // The numbers the agent reads. Every page-view metric resolves the
+  // tagged event at query time; one that kept "page_view" would count
+  // neither view here and report a quiet day rather than an error.
+  const today = new Date().toISOString().slice(0, 10);
+  const callTool = async (name: string) => {
+    const response = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: "Bearer test-key",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: { from: today, to: today } },
+      }),
+    });
+    const data = (await response.text())
+      .split("\n")
+      .find((each) => each.startsWith("data: "));
+    assert.ok(data, `expected a data: line from ${name}`);
+    const { result } = JSON.parse(data.slice("data: ".length)) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    assert.notEqual(result.isError, true, name);
+    return JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+  };
+
+  const summary = await callTool("get_traffic_summary");
+  assert.equal(summary.viewEvents, 2);
+  const pages = await callTool("get_top_pages");
+  assert.deepEqual(pages.items, [{ path: "/", views: 2 }]);
 });
 
 // Deleting the event tagged _pageView is safe exactly when the
@@ -1814,6 +1922,19 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
       "/cockpit/events",
       { name: "x", description: "x".repeat(20), props: [] },
     ],
+    [
+      "POST",
+      "/cockpit/events/page_view/props",
+      {
+        name: "section",
+        type: "text",
+        optional: true,
+        list: false,
+        description: "x".repeat(20),
+        example: ["news"],
+      },
+    ],
+    ["DELETE", "/cockpit/events/page_view", { reason: "Not needed." }],
     ["POST", "/cockpit/events/reset", { password: "test-cockpit-password" }],
     ["POST", "/cockpit/reset", { password: "test-cockpit-password" }],
     ["PUT", "/cockpit/context/ground-rules", { text: "New rules." }],

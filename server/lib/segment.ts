@@ -83,9 +83,11 @@ export function buildSegment(
         // exactly that session in full; bounding the event to the
         // period dropped it from every segmented one of them while the
         // unsegmented query still counted it. Candidates are sessions
-        // touching the period, so this never scans an event's whole
-        // history.
-        let where = `event = ${bind("event", condition.event)} AND session_id IN (SELECT session_id FROM events WHERE ts BETWEEN @from AND @to)`;
+        // touching the period. The unary + keeps SQLite off the
+        // (event, ts) index: with no ANALYZE statistics it would pick
+        // that one and walk every row of the event since the database
+        // began, checking each against the period's sessions.
+        let where = `+event = ${bind("event", condition.event)} AND session_id IN (SELECT session_id FROM events WHERE ts BETWEEN @from AND @to)`;
         if (condition.property !== undefined) {
           const path = bind("path", `$.${condition.property}`);
           // SQLite stores JSON booleans as 0/1, so a boolean value has

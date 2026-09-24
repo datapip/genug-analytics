@@ -6,7 +6,7 @@ The rules and recipes are in `AGENTS.md`, imported above, so every
 coding agent reads the same instructions. Only Claude-specific notes
 belong in this file.
 
-- `docs/decisions.md` is the design journal (~4,000 lines). It is
+- `docs/decisions.md` is the design journal (~5,000 lines). It is
   deliberately **not** imported — an import loads at launch and would
   cost that context every session. Read it with your file tools when
   you need it: before proposing an architectural change, or when a rule

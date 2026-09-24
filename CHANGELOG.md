@@ -47,6 +47,9 @@ how a version is cut.
   refuses to start if a period tool lacks a segment.
 - `get_new_vs_returning_visitors` no longer reads every stored visitor
   on each call, so it stays fast as history grows.
+- A segment on an event (`"sessions that ordered"`) no longer reads
+  every stored row of that event. It now starts from the period's
+  sessions, so it stays fast as history grows.
 - **The danger-zone password boxes had no attempt limit.** Someone with
   a stolen session cookie could guess the cockpit password there as
   fast as they liked. Wrong guesses now count toward the sign-in

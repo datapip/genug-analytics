@@ -734,6 +734,31 @@ test("an event condition keeps a session that started in the period and did the 
   ]);
 });
 
+// The (event, ts) index looks like the natural way in, but it would
+// walk every row of the event since the database began and check each
+// one against the period's sessions. The app never runs ANALYZE, so the
+// planner picks it on shape alone; the plan has to start from the
+// sessions instead.
+test("an event condition starts from the period's sessions, not the event's history", () => {
+  const db = setupDb();
+  const clause = buildSegment(
+    db,
+    [{ kind: "event", event: "page_view" }],
+    PERIOD,
+    "page_view",
+  );
+  const plan = db
+    .prepare(
+      `EXPLAIN QUERY PLAN SELECT COUNT(*) FROM events WHERE ts BETWEEN @from AND @to${clause.sql}`,
+    )
+    .all({ ...PERIOD, ...clause.params }) as { detail: string }[];
+
+  assert.ok(
+    !plan.some((row) => row.detail.includes("idx_events_event_ts")),
+    plan.map((row) => row.detail).join("\n"),
+  );
+});
+
 test("a segment on the unclassified device or browser reaches rows with no User-Agent", () => {
   const db = setupDb();
   visit(db, "s1", "https://example.com/", {

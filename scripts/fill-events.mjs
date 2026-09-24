@@ -1,7 +1,8 @@
 // Fills an events table with synthetic rows, so query time can be
 // measured against a database the size a deployment will actually reach.
 // Ingest throughput is scripts/load-events.mjs's job — this one only
-// cares how big the table is when a question is asked of it.
+// cares how big the table is when a question is asked of it, so it
+// writes rows directly, in one transaction per batch.
 //
 //   node scripts/fill-events.mjs ./genug.db 1000000
 //
@@ -9,15 +10,13 @@
 // schema, and writes nothing else), with the server stopped. Keep the
 // result as a pristine copy and restore it before each measurement:
 // load-events.mjs writes rows timestamped now, so one run leaves every
-// later window measurement reading its leftovers rather than this fill. The rows
-// are plausible rather than real: page views, outbound clicks and
-// orders spread over a year, with a handful of pages, referrers,
-// devices and languages.
+// later window measurement reading its leftovers rather than this fill.
 //
-// Fills the events table to a realistic size so query latency can be
-// measured against one. Ingest throughput is measured over HTTP by
-// load.mjs — this is only about how big the table is when a question is
-// asked of it, so it writes rows directly, in one transaction.
+// The rows are plausible rather than real: page views, outbound clicks
+// and orders spread over a year, with a handful of pages, referrers,
+// devices and languages. order_completed is not a built-in event. Add
+// it as docs/recipe-add-event.md shows before querying, or the cockpit
+// and get_orphaned_events report its rows as stranded.
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -91,9 +90,8 @@ const write = db.transaction((from, count) => {
     const props =
       event === "order_completed"
         ? JSON.stringify({
-            order_id: `o${i}`,
-            total: (i % 400) + 9.99,
-            currency: "EUR",
+            order_total: (i % 400) + 0.99,
+            order_currency: "EUR",
           })
         : event === "outbound_link_click"
           ? JSON.stringify({
