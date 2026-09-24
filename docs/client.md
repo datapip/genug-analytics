@@ -13,7 +13,7 @@ early in `<head>`:
     enableAutoPageTracking: true,
   };
 </script>
-<script defer src="https://analytics.your-domain.com/client.js"></script>
+<script defer src="https://data.your-domain.com/client.js"></script>
 ```
 
 The script reads its own `<script src>` to find your server — no
@@ -90,7 +90,7 @@ _before_ the `<script src>` tag:
     },
   };
 </script>
-<script defer src="https://analytics.your-domain.com/client.js"></script>
+<script defer src="https://data.your-domain.com/client.js"></script>
 ```
 
 Calls made before the script loads are queued and replayed, in order,

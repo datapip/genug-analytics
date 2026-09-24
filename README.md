@@ -51,7 +51,7 @@ The full walk-through with a screenshot is
 [docs/getting-started.md](docs/getting-started.md). The short version:
 
 1. **Pick a hostname on a subdomain of the site you track**, such as
-   `analytics.your-domain.com`. The consent cookie is host-only, so a
+   `data.your-domain.com`. The consent cookie is host-only, so a
    different domain silently degrades consentful tracking. Details in
    [deploying](docs/deploying.md#the-hostname).
 2. **Run it.** On a fresh Ubuntu server, one command installs Docker,
@@ -72,7 +72,7 @@ The full walk-through with a screenshot is
    <script>
      window.genugAnalyticsConfig = { enableAutoPageTracking: true };
    </script>
-   <script defer src="https://analytics.your-domain.com/client.js"></script>
+   <script defer src="https://data.your-domain.com/client.js"></script>
    ```
 
 4. **Watch the first event arrive** at `/cockpit`, with the password
@@ -81,7 +81,7 @@ The full walk-through with a screenshot is
    clients are in [connecting an agent](docs/mcp.md).
 
    ```sh
-   claude mcp add --transport http genug https://analytics.your-domain.com/mcp \
+   claude mcp add --transport http genug https://data.your-domain.com/mcp \
      --header "Authorization: Bearer YOUR_MCP_API_KEY"
    ```
 

@@ -35,14 +35,15 @@ if you're on Coolify or behind Cloudflare Tunnel, where you'd skip step
 ## 1. Pick a hostname
 
 The collector has to live on a **subdomain of the site it tracks**:
-`analytics.your-domain.com` for `your-domain.com`. Not a different
+`data.your-domain.com` for `your-domain.com`. Not a different
 domain, not a hosting provider's shared one. Get this wrong and nothing
 looks broken, but consenting visitors are forgotten every day.
 → [The hostname](deploying.md#the-hostname)
 
-Add the DNS record now (an `A` record pointing at your server's
-address) — it needs a few minutes to propagate, and step 4 needs it
-already working.
+Add the DNS record now: an `A` record pointing at your server's
+address, **unproxied** — on Cloudflare that means DNS-only rather than
+the orange cloud, or step 4's certificate request never completes. It
+needs a few minutes to propagate, and step 4 needs it already working.
 
 ## 2. Generate your secrets
 
@@ -98,7 +99,7 @@ nothing else needs to reach port 3000 directly.
 
 ## 4. Put a reverse proxy in front of it
 
-The browser needs `https://analytics.your-domain.com` — the cockpit's
+The browser needs `https://data.your-domain.com` — the cockpit's
 login cookie won't even be set over plain HTTP — and the `docker run`
 above only gives you HTTP on a port number. [Caddy](https://caddyserver.com/docs/install)
 is the least fiddly way to close that gap on a fresh Linux box: it
@@ -106,7 +107,7 @@ requests and renews the TLS certificate itself, no separate `certbot`
 step. Install it, then put this in `/etc/caddy/Caddyfile`:
 
 ```
-analytics.your-domain.com {
+data.your-domain.com {
     reverse_proxy localhost:3000
 }
 ```
@@ -141,7 +142,7 @@ tracking on, which is what the config object does:
 <script>
   window.genugAnalyticsConfig = { enableAutoPageTracking: true };
 </script>
-<script defer src="https://analytics.your-domain.com/client.js"></script>
+<script defer src="https://data.your-domain.com/client.js"></script>
 ```
 
 → [Embedding the client script](client.md#embedding-the-client-script),
@@ -150,7 +151,7 @@ and your own events
 
 ## 6. Watch the first event arrive
 
-Open `https://analytics.your-domain.com/cockpit` with the
+Open `https://data.your-domain.com/cockpit` with the
 `COCKPIT_PASSWORD` you set (any username). Load a page on your site and
 it shows up under **Recent events**. If it doesn't:
 
@@ -169,7 +170,7 @@ Point any MCP client at `/mcp` with the `MCP_API_KEY`. For Claude Code
 it is one line:
 
 ```sh
-claude mcp add --transport http genug https://analytics.your-domain.com/mcp \
+claude mcp add --transport http genug https://data.your-domain.com/mcp \
   --header "Authorization: Bearer YOUR_MCP_API_KEY"
 ```
 

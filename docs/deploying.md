@@ -6,7 +6,7 @@ Where to put the collector, how to run it, and what every environment variable d
 
 **Decide the hostname first: the collector must sit on a subdomain of
 the site it tracks.** If `your-domain.com` is the tracked site, the
-collector belongs at something like `analytics.your-domain.com` — not on
+collector belongs at something like `data.your-domain.com` — not on
 a different registrable domain, and not on a hosting provider's shared
 one (`something.fly.dev`, `something.vercel.app`). The visitor-id cookie
 is `SameSite=Lax` and host-only, so it is only sent back when the two
@@ -15,6 +15,36 @@ events keep arriving, but every consenting visitor is re-identified from
 scratch each day, so consentful mode quietly degrades into the
 consentless one. See "Deployment model" in [decisions.md](decisions.md) for why
 this is the design rather than a limitation.
+
+**Avoid `analytics.`, `stats.` and `tracking.` as the label**, which is
+why the examples here use `data.`. Those are the names ad-blocker filter
+lists match on, and a blocked collector fails the same silent way as the
+wrong domain — the page still works, the events simply never arrive.
+It is the same reasoning that serves the script as `client.js` rather
+than `tracker.js`; see "Client script embedding contract" in
+[decisions.md](decisions.md).
+
+**Point the record straight at the server, unproxied.** On Cloudflare
+that means DNS-only (the grey cloud), not the orange one. A proxied
+record resolves to the CDN's edge rather than to your server, which
+breaks two separate things:
+
+- **Automatic HTTPS stops being reliable.** Whether the ACME challenge
+  behind Caddy or Traefik reaches your server at all depends on the
+  zone's SSL/TLS mode and its "Always Use HTTPS" setting, and a zone
+  that happens to issue a certificate once can still fail to renew it
+  60 days later — at which point the collector goes down rather than
+  merely losing its padlock.
+- **Every visitor arrives wearing the edge's address.** So all
+  consentless visitors collapse into one shared daily identity, and the
+  `/events` rate limiter treats your entire audience as a single client.
+
+Proxying it anyway is a supported setup, but it is a deliberate one
+with its own requirements — `TRUST_PROXY=2`, an origin nobody can reach
+directly, and a specific SSL/TLS mode. A firewall that only admits
+Cloudflare's ranges is the usual reason to want it. See
+[Deploying on Coolify](#deploying-on-coolify) below, where all three are
+spelled out.
 
 ## Build and run locally
 
@@ -52,13 +82,21 @@ curl -fsSL https://genug-analytics.com/install.sh | sudo bash
 
 It needs root (to install Docker, enable its systemd service, and open
 80/443 in `ufw` if one is already active) and a DNS `A`/`AAAA` record
-for the hostname already pointing at the server — or answer
-`localhost` to try it out first without either; Caddy then issues
-itself a self-signed certificate and binds to `127.0.0.1` instead of
-the internet.
+for the hostname already pointing at the server, **unproxied** — on
+Cloudflare, DNS-only rather than the orange cloud, or Caddy never gets
+its certificate. Or answer `localhost` to try it out first without
+either; Caddy then issues itself a self-signed certificate and binds to
+`127.0.0.1` instead of the internet.
 
-It checks the hostname really is a subdomain of the tracked origin
-(see [above](#the-hostname)) and warns before continuing if it isn't.
+It checks two things before it does any of that, warning and asking
+rather than deciding for you: that the hostname really is a subdomain of
+the tracked origin (see [above](#the-hostname)), and that it resolves to
+an address this machine actually holds. A proxied record fails the
+second check — it resolves to the CDN's edge — but so does a record
+pointing at the wrong server, or a box behind NAT, and the script cannot
+tell those apart. So it names the proxy as the likely cause rather than
+asserting it.
+
 Secrets are generated for you and printed once at the end — copy them
 somewhere safe before closing the terminal, they're also saved to
 `/opt/genug-analytics/.env`.
@@ -101,7 +139,7 @@ volumes:
 ```
 
 - **Set the domain**: the **Domains** tab, FQDN e.g.
-  `analytics.your-domain.com` — Coolify's built-in Traefik provisions
+  `data.your-domain.com` — Coolify's built-in Traefik provisions
   TLS automatically. No `SERVICE_FQDN_*` variable required, that's
   Coolify's own shorthand for generating one, not a requirement.
 - **Don't add a `ports:` mapping.** Coolify's Traefik reaches the
@@ -192,7 +230,7 @@ either click "Deploy" in its UI or let a push-triggered webhook do it.
 6. **Add persistent storage**: in **Storages**, add a **Volume Mount**
    with container path `/data` — this is what survives redeploys.
 7. **Set the domain**: in **Domains**, set the FQDN (e.g.
-   `analytics.your-domain.com`). Coolify's built-in Traefik provisions
+   `data.your-domain.com`). Coolify's built-in Traefik provisions
    TLS automatically.
 8. **Deploy**, and optionally enable the **auto-deploy webhook** in the
    app's Git settings so future pushes redeploy automatically.
@@ -204,14 +242,11 @@ constrains: it has to be a subdomain of the tracked site.
 of the server. Without it the server sees Traefik's address for every
 request instead of the visitor's.
 
-**Keep the collector's DNS record unproxied.** If your DNS is on
-Cloudflare, leave this record DNS-only (grey cloud) rather than proxied
-(orange cloud). A second hop in front means every request arrives
-carrying Cloudflare's edge address instead of the visitor's — so all
-consentless visitors collapse into one shared daily identity, and the
-`/events` rate limiter treats your whole audience as a single client. If
-you must proxy it, set `TRUST_PROXY=2` instead, so the address that gets
-read is the visitor's.
+**Keep the collector's DNS record unproxied** — ["The hostname"](#the-hostname)
+at the top of this page says why, and the firewall note two paragraphs
+down is worth reading before you assume DNS-only will work here. If you
+must proxy it, set `TRUST_PROXY=2` rather than `1`, so the address that
+gets read is the visitor's and not Cloudflare's.
 
 **`TRUST_PROXY=2` is only safe if the origin cannot be reached
 directly.** The number says how many hops to believe, and the server has
@@ -290,11 +325,11 @@ happens, rather than leaving it looking like a wrong password.
 **From a script or a terminal**, sign in first and keep the cookie:
 
 ```sh
-curl -s -c genug-cookies.txt -X POST https://analytics.your-domain.com/cockpit/session \
+curl -s -c genug-cookies.txt -X POST https://data.your-domain.com/cockpit/session \
   -H 'content-type: application/json' -H 'x-genug-cockpit: 1' \
   -d '{"password":"<COCKPIT_PASSWORD>"}'
 
-curl -s -b genug-cookies.txt 'https://analytics.your-domain.com/cockpit/data?days=7'
+curl -s -b genug-cookies.txt 'https://data.your-domain.com/cockpit/data?days=7'
 ```
 
 `curl -u` no longer works — the cockpit used to take HTTP Basic Auth and

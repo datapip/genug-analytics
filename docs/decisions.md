@@ -1749,7 +1749,13 @@ a plain `<script src="...">` tag with no `type="module"` attribute
 required. `/server` serves the compiled file at `GET /client.js`
 (`index.ts`) — named generically, not `tracker.js`, since ad-blocker
 filter lists (EasyList/EasyPrivacy) block well-known generic tracker
-filenames outright.
+filenames outright. The same reasoning applies one level up, to the
+hostname the collector answers on: the examples throughout these docs
+use `data.your-domain.com` rather than `analytics.`, `stats.` or
+`tracking.`, which those lists match just as readily — see "The
+hostname" in [deploying.md](deploying.md). Neither choice hides
+anything a visitor could otherwise see: the script is first-party, sets
+no cookie in consentless mode, and honours its own opt-out either way.
 
 - **Endpoint auto-detection:** the script reads its own `<script>` tag's
   URL (`document.currentScript.src`) and derives the collector's origin

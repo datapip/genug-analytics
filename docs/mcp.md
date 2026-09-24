@@ -1,6 +1,6 @@
 # Connecting an AI agent
 
-Point your AI client at `https://analytics.your-domain.com/mcp`,
+Point your AI client at `https://data.your-domain.com/mcp`,
 authenticating with `Authorization: Bearer <MCP_API_KEY>`. Once
 connected, just ask it things like "what were my top pages last week?"
 or "where's my traffic coming from?" — it reads the schema-registry
@@ -178,7 +178,7 @@ Both support a remote HTTP server with a custom header directly. Add to
   "mcpServers": {
     "genug": {
       "type": "http",
-      "url": "https://analytics.your-domain.com/mcp",
+      "url": "https://data.your-domain.com/mcp",
       "headers": { "Authorization": "Bearer YOUR_MCP_API_KEY" }
     }
   }
@@ -188,7 +188,7 @@ Both support a remote HTTP server with a custom header directly. Add to
 Claude Code also has a one-line CLI form:
 
 ```sh
-claude mcp add --transport http genug https://analytics.your-domain.com/mcp \
+claude mcp add --transport http genug https://data.your-domain.com/mcp \
   --header "Authorization: Bearer YOUR_MCP_API_KEY"
 ```
 
@@ -205,7 +205,7 @@ header directly (as of writing) — it needs a local stdio bridge via
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://analytics.your-domain.com/mcp",
+        "https://data.your-domain.com/mcp",
         "--header",
         "Authorization: Bearer YOUR_MCP_API_KEY"
       ]
