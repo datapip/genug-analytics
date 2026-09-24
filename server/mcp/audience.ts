@@ -57,11 +57,16 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
     "get_new_vs_returning_visitors",
     {
       description:
-        'Get how many distinct visitors active in a given time period are new (their earliest-ever event falls within this period) vs returning (they were already active before it). Important caveat: consentless visitors (see the "consent" envelope field) get a new visitor_id every day by design (daily rotating hash, not a persistent id) — for a mostly-consentless deployment, a visitor returning on a later day looks "new" again here every time, so treat this as a soft signal rather than a precise retention number. It is meaningful for consentful visitors (a persistent cookie id) and for same-day returns either way. Call get_consent_breakdown to find out which case this deployment is actually in. "Earliest-ever" means the oldest event still stored: where a retention limit prunes old rows (see the cockpit), a visitor whose earlier visits were pruned looks new again. For "did the visitors from one period come back in another" use get_cohort_return.',
-      inputSchema: periodInput,
+        'Get how many distinct visitors active in a given time period are new (their earliest-ever event falls within this period) vs returning (they were already active before it). Important caveat: consentless visitors (see the "consent" envelope field) get a new visitor_id every day by design (daily rotating hash, not a persistent id) — for a mostly-consentless deployment, a visitor returning on a later day looks "new" again here every time, so treat this as a soft signal rather than a precise retention number. It is meaningful for consentful visitors (a persistent cookie id) and for same-day returns either way. Call get_consent_breakdown to find out which case this deployment is actually in. "Earliest-ever" means the oldest event still stored: where a retention limit prunes old rows (see the cockpit), a visitor whose earlier visits were pruned looks new again. For "did the visitors from one period come back in another" use get_cohort_return. A segment narrows which visitors are counted, not which earlier visits make one returning: any earlier event counts. ' +
+        SEGMENT_HINT,
+      inputSchema: { ...periodInput, ...segmentInput },
     },
-    async ({ from, to }) => {
-      return jsonContent(getNewVsReturningVisitors(db, { from, to }));
+    async ({ from, to, segment }) => {
+      const resolved = resolveSegment(db, segment, { from, to });
+      if ("error" in resolved) return resolved.error;
+      return jsonContent(
+        getNewVsReturningVisitors(db, { from, to }, resolved.clause),
+      );
     },
   );
 
@@ -148,11 +153,16 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
     "get_consent_breakdown",
     {
       description:
-        "Get how much of the data collected in a period was recorded with the visitor's consent: event and distinct-visitor counts for consentful (a persistent cookie id was used) versus consentless (a cookieless, daily-rotating hash). Use this to interpret get_new_vs_returning_visitors and get_cohort_return, whose accuracy depends entirely on this mix — a mostly-consentless deployment can't reliably tell a returning visitor from a new one across days. Event counts are exact; a visitor who accepts a consent banner mid-period legitimately appears under both modes, so the two visitor counts can sum to more than the true total.",
-      inputSchema: periodInput,
+        "Get how much of the data collected in a period was recorded with the visitor's consent: event and distinct-visitor counts for consentful (a persistent cookie id was used) versus consentless (a cookieless, daily-rotating hash). Use this to interpret get_new_vs_returning_visitors and get_cohort_return, whose accuracy depends entirely on this mix — a mostly-consentless deployment can't reliably tell a returning visitor from a new one across days. Event counts are exact; a visitor who accepts a consent banner mid-period legitimately appears under both modes, so the two visitor counts can sum to more than the true total. " +
+        SEGMENT_HINT,
+      inputSchema: { ...periodInput, ...segmentInput },
     },
-    async ({ from, to }) => {
-      return jsonContent(getConsentBreakdown(db, { from, to }));
+    async ({ from, to, segment }) => {
+      const resolved = resolveSegment(db, segment, { from, to });
+      if ("error" in resolved) return resolved.error;
+      return jsonContent(
+        getConsentBreakdown(db, { from, to }, resolved.clause),
+      );
     },
   );
 };

@@ -12,6 +12,7 @@ import {
   getNewVsReturningVisitors,
   getTopLanguages,
 } from "./audience.js";
+import { buildSegment } from "./segment.js";
 
 function setupDb() {
   const db = new Database(":memory:");
@@ -262,6 +263,58 @@ test("getNewVsReturningVisitors returns zeroes for a period with no events", () 
     to: "2026-01-01T23:59:59.999Z",
   });
   assert.deepEqual(result, { newVisitors: 0, returningVisitors: 0 });
+});
+
+// Both tools used to take no segment, and the SDK drops an unknown
+// argument, so a segmented question got whole-site numbers back.
+test("getConsentBreakdown and getNewVsReturningVisitors apply a segment", () => {
+  const db = setupDb();
+  // m1: mobile, consentful, visited before the period — returning.
+  // m2: mobile, consentless, first seen in the period — new.
+  // d1: desktop, consentful, visited before — outside the segment.
+  for (const [visitor, device, consent, earlier] of [
+    ["m1", "mobile", "consentful", true],
+    ["m2", "mobile", "consentless", false],
+    ["d1", "desktop", "consentful", true],
+  ] as const) {
+    if (earlier) {
+      // On desktop even for m1: the segment picks who is counted, not
+      // which earlier visits make them returning.
+      insertEvent(db, {
+        ...event({ visitorId: visitor, ts: "2025-12-01T10:00:00.000Z" }),
+        sessionId: `old-${visitor}`,
+        deviceType: "desktop",
+      });
+    }
+    insertEvent(db, {
+      ...event({
+        visitorId: visitor,
+        ts: "2026-01-01T10:00:00.000Z",
+        consentMode: consent,
+      }),
+      deviceType: device,
+    });
+  }
+  const mobile = buildSegment(
+    db,
+    [{ kind: "deviceType", value: "mobile" }],
+    PERIOD,
+    "page_view",
+  );
+
+  assert.deepEqual(getConsentBreakdown(db, PERIOD, mobile), {
+    consentful: { events: 1, visitors: 1 },
+    consentless: { events: 1, visitors: 1 },
+  });
+  assert.deepEqual(getNewVsReturningVisitors(db, PERIOD, mobile), {
+    newVisitors: 1,
+    returningVisitors: 1,
+  });
+  // And unsegmented, d1 is back in both.
+  assert.deepEqual(getNewVsReturningVisitors(db, PERIOD), {
+    newVisitors: 1,
+    returningVisitors: 2,
+  });
 });
 
 const CHROME_WINDOWS =

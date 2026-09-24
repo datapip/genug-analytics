@@ -74,12 +74,16 @@ visibly broken, which is the failure mode this project cares most about.
   take an `isList` flag for this. A query over a list left
   unimplemented must say so — never return the zero that comparing a
   serialized array produces.
-- Every query that takes a period also takes a `SegmentClause`
-  (`lib/segment.ts`, built by `buildSegment` from validated
-  conditions), pasted into its WHERE. A new period-taking query takes
-  one too, and its tool spreads `segmentInput` and calls
+- Every query over `events` that takes a period also takes a
+  `SegmentClause` (`lib/segment.ts`, built by `buildSegment` from
+  validated conditions), pasted into its WHERE. A new period-taking
+  query takes one too, and its tool spreads `segmentInput` and calls
   `resolveSegment` — that is what makes "where did buyers of X come
-  from" one call rather than a tool of its own.
+  from" one call rather than a tool of its own. A tool without one
+  does not fail on its own: the SDK drops the argument and returns
+  whole-site numbers. So the server refuses to start instead
+  (`requireSegment` in `mcp/tools.ts`), except for the tools listed
+  there that read other tables.
 - Events are read from **one** directory: `EVENTS_PATH` (default
   `/data/events`), seeded from the image's
   `packages/schema-registry/events/` whenever it holds no event files —

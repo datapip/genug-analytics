@@ -496,6 +496,112 @@ test("a segment narrows a ranked tool", async () => {
   await client.close();
 });
 
+// The test above proves one tool. This one catches a handler that
+// declares `segment` and then never passes resolved.clause on — the lib
+// queries all default to NO_SEGMENT, so that compiles and returns
+// whole-site numbers. Mobile is one quiet session; desktop is two busier
+// ones with different consent, entry, referrer and a download, so every
+// tool's answer changes when narrowed to mobile.
+test("every segment-taking tool gives a different answer for a segment", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(
+      db,
+      pageView({
+        visitorId: "m1",
+        sessionId: "m1",
+        deviceType: "mobile",
+        browser: "Safari",
+        visitorLanguage: "de",
+        url: "https://example.com/m?utm_campaign=m",
+        referrer: "https://www.google.com/",
+        props: { page_title: "M", document_language: "de" },
+      }),
+    );
+    for (const id of ["d1", "d2"]) {
+      insertEvent(
+        db,
+        pageView({
+          visitorId: id,
+          sessionId: id,
+          deviceType: "desktop",
+          browser: "Chrome",
+          visitorLanguage: "en",
+          consentMode: "consentful",
+          ts: "2026-01-01T14:00:00.000Z",
+          url: "https://example.com/d?utm_campaign=d",
+          referrer: "https://bing.com/",
+          props: { page_title: "D", document_language: "en" },
+        }),
+      );
+      insertEvent(
+        db,
+        pageView({
+          visitorId: id,
+          sessionId: id,
+          deviceType: "desktop",
+          browser: "Chrome",
+          visitorLanguage: "en",
+          consentMode: "consentful",
+          event: "file_download",
+          ts: "2026-01-01T14:05:00.000Z",
+          url: "https://example.com/d",
+          props: {
+            file_url: "https://example.com/a.pdf",
+            file_extension: "pdf",
+            link_text: "a",
+          },
+        }),
+      );
+    }
+  });
+
+  // No built-in event has a numeric prop to sum; its segment splice is
+  // tested in lib/events.test.ts instead.
+  const skipped = new Set(["get_property_sum"]);
+  const segmented = (await listTools(client)).filter(
+    (tool) =>
+      takesPeriod(tool) &&
+      "segment" in tool.inputSchema!.properties! &&
+      !skipped.has(tool.name),
+  );
+  assert.ok(segmented.length > 20, "expected most tools to take a segment");
+  for (const tool of segmented) {
+    const args = { ...PERIOD, ...EXTRA_ARGS[tool.name] };
+    const whole = await callRaw(client, tool.name, args);
+    const mobile = await callRaw(client, tool.name, {
+      ...args,
+      segment: [{ deviceType: "mobile" }],
+    });
+    assert.equal(whole.isError, false, `${tool.name}: ${whole.text}`);
+    assert.equal(mobile.isError, false, `${tool.name}: ${mobile.text}`);
+    assert.notEqual(
+      mobile.text,
+      whole.text,
+      `${tool.name} ignored its segment`,
+    );
+  }
+  await client.close();
+});
+
+// Pins the exempt list in mcp/tools.ts from both sides: a new tool
+// cannot hide there, and a renamed one cannot leave a stale entry that
+// the startup check then silently never needs.
+test("only the tools over other tables take a period without a segment", async () => {
+  const { client } = await connect();
+  const unsegmented = (await listTools(client))
+    .filter(
+      (tool) =>
+        takesPeriod(tool) && !("segment" in tool.inputSchema!.properties!),
+    )
+    .map((tool) => tool.name)
+    .sort();
+  assert.deepEqual(unsegmented, [
+    "get_bot_activity",
+    "get_top_rejected_events",
+  ]);
+  await client.close();
+});
+
 test("get_top_entry_params refuses a parameter ingestion strips", async () => {
   const { client } = await connect();
   const result = await call(client, "get_top_entry_params", {

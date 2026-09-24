@@ -111,6 +111,7 @@ export interface ConsentBreakdown {
 export function getConsentBreakdown(
   db: Database.Database,
   period: Period,
+  segment: SegmentClause = NO_SEGMENT,
 ): ConsentBreakdown {
   const rows = db
     .prepare(
@@ -118,10 +119,10 @@ export function getConsentBreakdown(
               COUNT(*) AS events,
               COUNT(DISTINCT visitor_id) AS visitors
        FROM events
-       WHERE ts BETWEEN @from AND @to
+       WHERE ts BETWEEN @from AND @to${segment.sql}
        GROUP BY consent_mode`,
     )
-    .all({ from: period.from, to: period.to }) as {
+    .all({ from: period.from, to: period.to, ...segment.params }) as {
     mode: string;
     events: number;
     visitors: number;
@@ -262,28 +263,35 @@ export interface NewVsReturningVisitors {
 // visitors (a persistent id) and for same-day returns either way; for a
 // mostly-consentless deployment, treat it as a soft signal, not a hard
 // retention number.
+//
+// The segment narrows who is active in the period, never the earlier
+// events that decide "returning": a visitor who arrives from a campaign
+// today returns because of any earlier visit, not an earlier one from
+// that campaign. The lookback is one index seek per active visitor
+// (idx_events_visitor_ts), not a pass over every visitor ever stored —
+// that shape grew with the whole table, not with the period asked about.
 export function getNewVsReturningVisitors(
   db: Database.Database,
   period: Period,
+  segment: SegmentClause = NO_SEGMENT,
 ): NewVsReturningVisitors {
   const rows = db
     .prepare(
       `SELECT
-         CASE WHEN overall.min_ts < @from THEN 'returning' ELSE 'new' END AS bucket,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM events earlier
+           WHERE earlier.visitor_id = active.visitor_id
+             AND earlier.ts < @from
+         ) THEN 'returning' ELSE 'new' END AS bucket,
          COUNT(*) AS count
        FROM (
-         SELECT visitor_id, MIN(ts) AS min_ts
-         FROM events
-         GROUP BY visitor_id
-       ) overall
-       JOIN (
          SELECT DISTINCT visitor_id
          FROM events
-         WHERE ts BETWEEN @from AND @to
-       ) active ON active.visitor_id = overall.visitor_id
+         WHERE ts BETWEEN @from AND @to${segment.sql}
+       ) active
        GROUP BY bucket`,
     )
-    .all({ from: period.from, to: period.to }) as {
+    .all({ from: period.from, to: period.to, ...segment.params }) as {
     bucket: "new" | "returning";
     count: number;
   }[];

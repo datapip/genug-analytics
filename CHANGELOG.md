@@ -22,6 +22,12 @@ how a version is cut.
   before this update are unchanged. The built-in event descriptions say
   so; a deployment keeps its own copies in `EVENTS_PATH`, so update
   them there if you want the agent to read the new wording.
+- **`get_consent_breakdown` and `get_new_vs_returning_visitors` ignored
+  a segment.** They now accept one, like every other period tool.
+  Before, a segmented question got whole-site numbers. The server now
+  refuses to start if a period tool lacks a segment.
+- `get_new_vs_returning_visitors` no longer reads every stored visitor
+  on each call, so it stays fast as history grows.
 
 ## 0.7.0 — 2026-09-22
 

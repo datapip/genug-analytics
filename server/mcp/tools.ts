@@ -76,6 +76,29 @@ function guardPeriod(
   };
 }
 
+// Every period-taking query over `events` takes a segment (AGENTS.md),
+// and a tool that leaves it out does not fail: the SDK drops the unknown
+// argument, and the agent gets whole-site numbers it reads as the
+// segment's. Two tools slipped through that way, so this fails the
+// server at startup instead. The exempt ones read tables with no
+// session_id to narrow by.
+const PERIOD_WITHOUT_SEGMENT = new Set([
+  "get_top_rejected_events", // rejected_events
+  "get_bot_activity", // bot_activity
+]);
+
+function requireSegment(
+  name: string,
+  config: { inputSchema?: Record<string, unknown> },
+): void {
+  const shape = config.inputSchema;
+  if (!shape || !("from" in shape) || !("to" in shape)) return;
+  if ("segment" in shape || PERIOD_WITHOUT_SEGMENT.has(name)) return;
+  throw new Error(
+    `MCP tool "${name}" takes a period but no segment. Spread segmentInput into its inputSchema and call resolveSegment, or add it to PERIOD_WITHOUT_SEGMENT in mcp/tools.ts with the reason.`,
+  );
+}
+
 export interface ToolSummary {
   name: string;
   description: string;
@@ -129,6 +152,7 @@ export function createMcpServer(
       extra: unknown,
     ) => Promise<unknown>,
   ) => {
+    requireSegment(name, config);
     manifest.push({ name, description: config.description ?? "" });
     return (
       originalRegisterTool as unknown as (
