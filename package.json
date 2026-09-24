@@ -1,7 +1,7 @@
 {
   "name": "genug",
   "description": "Self-hosted, AI-native web analytics queried through an AI agent instead of a dashboard.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "license": "MIT",
   "type": "module",
