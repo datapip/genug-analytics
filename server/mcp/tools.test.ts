@@ -289,6 +289,31 @@ test("a tool with no period is left alone by that guard", async () => {
   await client.close();
 });
 
+test("get_recent_events adds a note when rows were dropped to fit the budget", async () => {
+  // insertEvent skips the registry's prop caps, so a row this size can
+  // only come from before them — which is what the budget is for.
+  const { client } = await connect((db) => {
+    for (let i = 0; i < 5; i++) {
+      insertEvent(
+        db,
+        pageView({
+          ts: `2026-01-01T10:0${i}:00.000Z`,
+          props: { page_title: "x".repeat(20_000) },
+        }),
+      );
+    }
+  });
+  const result = (await client.callTool({
+    name: "get_recent_events",
+    arguments: { limit: 5 },
+  })) as { content: { type: string; text: string }[] };
+
+  const rows = JSON.parse(result.content[0]!.text) as unknown[];
+  assert.equal(rows.length, 3);
+  assert.match(result.content[1]!.text, /newest 3 of the 5 requested/);
+  await client.close();
+});
+
 // The bug that started all of this: SQLite compares ts as a string, so a
 // bare "2026-01-01" as `to` sorts below every real timestamp that day
 // and silently drops it. A wrong number an agent reports confidently is

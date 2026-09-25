@@ -38,7 +38,7 @@ test("getRecentEvents returns rows newest-first with props parsed back to an obj
     },
   });
 
-  const result = getRecentEvents(db, 1);
+  const result = getRecentEvents(db, 1).rows;
 
   assert.deepEqual(result, [
     {
@@ -57,4 +57,43 @@ test("getRecentEvents returns rows newest-first with props parsed back to an obj
       browser: "Firefox",
     },
   ]);
+});
+
+test("getRecentEvents stops at the character budget and says so, newest rows first", () => {
+  const db = setupDb();
+  for (let i = 0; i < 5; i++) {
+    insertEvent(db, {
+      event: "page_view",
+      visitorId: "v1",
+      sessionId: "s1",
+      ts: `2026-01-01T10:0${i}:00.000Z`,
+      url: "https://example.com/",
+      props: { page_title: "x".repeat(1000) },
+    });
+  }
+
+  const { rows, truncated } = getRecentEvents(db, 5, 2500);
+
+  assert.equal(truncated, true);
+  assert.deepEqual(
+    rows.map((r) => r.ts),
+    ["2026-01-01T10:04:00.000Z", "2026-01-01T10:03:00.000Z"],
+  );
+});
+
+test("getRecentEvents keeps the newest row even when it alone is over budget", () => {
+  const db = setupDb();
+  insertEvent(db, {
+    event: "page_view",
+    visitorId: "v1",
+    sessionId: "s1",
+    ts: "2026-01-01T10:00:00.000Z",
+    url: "https://example.com/",
+    props: { page_title: "x".repeat(1000) },
+  });
+
+  const { rows, truncated } = getRecentEvents(db, 5, 100);
+
+  assert.equal(rows.length, 1);
+  assert.equal(truncated, false);
 });

@@ -7,6 +7,20 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Changed**
+
+- **`get_recent_events` answers are capped at 64,000 characters.** At
+  `limit: 100`, rows near the 16KB request-body limit could add up to
+  ~1.6MB, more than any model's context holds. Past the cap, the newest
+  rows that fit come back, and a second text block tells the agent how
+  many were dropped. 100 ordinary rows still fit.
+
+**Docs**
+
+- `docs/mcp.md` has a VS Code config snippet.
+
 ## 0.8.0 — 2026-09-24
 
 **Breaking**

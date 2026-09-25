@@ -5098,3 +5098,21 @@ tool is a noted, deliberately deferred follow-up rather than done here.
 
 Verified with a test that calls the new tool and asserts its text is
 identical to the resource's.
+
+### `get_recent_events`: a size budget, not a lower `limit`
+
+A review asked for token budgets on raw-data tools. Most were already
+bounded: `limit` stops at 100, the trend tools at 731 days, and there is
+no raw-SQL or export tool. `get_recent_events` was the gap. Each prop
+is capped, but a row as a whole is only bounded by the 16KB request
+body, so 100 rows could be ~1.6MB.
+
+Lowering `limit`'s maximum would have cut ordinary use too: a normal
+row is ~500 characters, so 100 of them are harmless. So the cap is on
+the characters of the answer instead: 64,000, newest rows first, and
+always at least one row, so an oversized row isn't hidden as an empty
+list. When rows are dropped, the tool adds a second text block saying
+so rather than wrapping the array in an object. That keeps the shape
+agents already parse, and a result with fewer rows than `limit` would
+otherwise look the same as a quiet site. The cockpit uses the same
+function and gets the same cap, which at its limit of 5 never applies.

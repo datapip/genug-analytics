@@ -149,7 +149,10 @@ Most tools return aggregates — counts, rankings, breakdowns.
 URLs and whatever your events put in `props`. Query strings are already
 filtered down to campaign parameters before anything is stored (see
 [privacy.md](privacy.md)), so the usual accidents are covered, but your
-own event props are yours to keep clean. If your deployment holds data
+own event props are yours to keep clean. An answer is capped at
+64,000 characters of JSON, which still fits 100 ordinary rows: when
+unusually large rows would push past it, fewer rows come back and a
+second text block tells the agent so. If your deployment holds data
 you would not hand to a third party, that is the tool to think about.
 `READ_ONLY=true` unregisters it along with every writing tool, so a
 deployment whose key is meant to be public — a demo, for instance —
@@ -191,6 +194,36 @@ Claude Code also has a one-line CLI form:
 claude mcp add --transport http genug https://data.your-domain.com/mcp \
   --header "Authorization: Bearer YOUR_MCP_API_KEY"
 ```
+
+## VS Code
+
+VS Code (with GitHub Copilot's agent mode) supports a remote HTTP
+server with a custom header too, but its config uses a `servers` key
+rather than `mcpServers`. Add to `.vscode/mcp.json` in the workspace,
+or run **MCP: Open User Configuration** for every workspace:
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "genug-key",
+      "description": "Genug MCP API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "genug": {
+      "type": "http",
+      "url": "https://data.your-domain.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:genug-key}" }
+    }
+  }
+}
+```
+
+The `inputs` entry makes VS Code ask for the key once and store it
+itself, so a `.vscode/mcp.json` you commit doesn't carry it.
 
 ## Claude Desktop
 

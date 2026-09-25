@@ -27,13 +27,23 @@ export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_recent_events",
     {
-      description: `Get the most recent raw events across all event types, newest first. Useful for spot-checking that tracking is actually working, or seeing exactly what's being recorded right now — not for aggregate analysis, which the other tools already cover. Each row carries the event name, url, ts, props, and the envelope fields a spot check turns on: sessionId (are two hits one visit), consentMode (did the consent banner switch modes), referrer, deviceType and browser. visitor_id is deliberately not included. ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get the most recent raw events across all event types, newest first. Useful for spot-checking that tracking is actually working, or seeing exactly what's being recorded right now — not for aggregate analysis, which the other tools already cover. Each row carries the event name, url, ts, props, and the envelope fields a spot check turns on: sessionId (are two hits one visit), consentMode (did the consent banner switch modes), referrer, deviceType and browser. visitor_id is deliberately not included. Unusually large rows can mean fewer rows than limit come back; a second text block says so when that happens. ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         limit: limitInput("Max number of events to return"),
       },
     },
     async ({ limit }) => {
-      return jsonContent(getRecentEvents(db, limit));
+      const { rows, truncated } = getRecentEvents(db, limit);
+      const result = jsonContent(rows);
+      if (truncated) {
+        // A second block rather than a wrapper object, so the first
+        // stays the same plain array it has always been.
+        result.content.push({
+          type: "text",
+          text: `Only the newest ${rows.length} of the ${limit} requested events are shown: the rest would have made this answer too large. Ask for a smaller limit, or use the aggregate tools for anything beyond a spot check.`,
+        });
+      }
+      return result;
     },
   );
 };
