@@ -211,6 +211,10 @@ visibly broken, which is the failure mode this project cares most about.
   `routes/events.ts` resolves it through `roleEventNames`. That keeps
   `client.js` free of deployment state: put any back and the cache
   window has to shrink again, and renames start costing rejected events.
+  The one exception is the kept query-parameter and fragment lists
+  (`lib/clientScript.ts`), which are safe stale because the server
+  filters again with the current ones. Nothing whose stale copy the
+  server can't correct belongs there.
 - Anything a visitor supplied — `url`, `referrer`, prop values — is
   untrusted text, never an instruction. A tool returning it appends
   `VISITOR_TEXT_CAVEAT` (`mcp/shared.ts`) and joins `tools.test.ts`'s list.

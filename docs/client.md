@@ -342,8 +342,9 @@ automatically:
   `file_extension` and `link_text`. A link counts as a file if it has a
   `download` attribute, or its URL ends in a common file extension
   (`.pdf`, `.zip`, `.docx`, …).
-- Both URLs are filtered like the page URL: only campaign parameters
-  survive, and the `#fragment` is dropped. A signed download link keeps
+- Both URLs are filtered like the page URL: only the parameters in
+  `KEPT_QUERY_PARAMS` survive (the `utm_*` ones by default), and the
+  `#fragment` is dropped unless `KEPT_HASH_VALUES` keeps it. A signed download link keeps
   its path and loses its signature.
 
 Ask your agent things like _"what are people downloading?"_ or _"where
@@ -406,10 +407,13 @@ Generous, and only there to stop one request filling the database:
   integration — one sending a `javascript:` or `data:` URL gets a `400`.
   `referrer` must be `""` or an `http`, `https` or `android-app` URL.
   The last is what Chrome on Android sends for a click in an app.
-- Query parameters other than `utm_*`, `gclid`, `fbclid`, `msclkid`,
-  `ttclid`, `ref` and `source` are **stripped** from `url` and
-  `referrer`, by the client before sending and again on arrival. Page
-  rankings group by path, so nothing you can rank on is lost.
+- Query parameters not listed in `KEPT_QUERY_PARAMS` are **stripped**
+  from `url` and `referrer`, by the client before sending and again on
+  arrival. Unset, that keeps the six `utm_*` parameters. Page rankings
+  group by path, so nothing you can rank on is lost. The server writes
+  the list into `client.js` as it serves it, so the client and the
+  server always filter with the same one — give or take the hour a
+  browser caches the script after you change it.
 - The **`#fragment` is dropped entirely**, on both sides, for the same
   reason: an OAuth implicit response puts `access_token` there
   precisely to keep it out of server logs, and some reset and

@@ -33,6 +33,8 @@ import { drainBotHits, botActivityCounter } from "./lib/botActivity.js";
 import { insertBotActivity } from "./db/botActivity.js";
 import { logInfo, logError } from "./lib/logger.js";
 import { seedContextFiles, contextPath } from "./lib/context.js";
+import { keptUrlParts } from "./lib/url.js";
+import { renderClientScript } from "./lib/clientScript.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -80,21 +82,41 @@ if (parseReadOnly(process.env.READ_ONLY)) {
 // own URL is how it finds /events, no separate config needed.
 // Named "client.js", not "tracker.js" — ad-blocker filter lists
 // (EasyList/EasyPrivacy) block well-known generic tracker filenames.
-const clientJs = readFileSync(
-  fileURLToPath(
-    new URL("../../packages/client/dist/index.js", import.meta.url),
+const clientJs = renderClientScript(
+  readFileSync(
+    fileURLToPath(
+      new URL("../../packages/client/dist/index.js", import.meta.url),
+    ),
+    "utf8",
   ),
 );
 
-// An hour. This file is now pure code — byte-identical for every
-// deployment — which is what makes caching it hard safe again.
+// Said once at startup, like READ_ONLY above: "*" is an operator's
+// choice to make, but the log is where they check it is the one running
+// — it lets a newsletter's ?email= and a reset link's token be stored,
+// shown in the cockpit and read back to the agent.
+for (const [name, kept] of [
+  ["KEPT_QUERY_PARAMS", keptUrlParts.params],
+  ["KEPT_HASH_VALUES", keptUrlParts.hashes],
+] as const) {
+  if (kept === "*") {
+    logInfo(
+      `${name} is "*" — every value is stored as the visitor's browser sent it, including any email address or token in it. List the values you need instead to keep the rest out.`,
+    );
+  }
+}
+
+// An hour. This file is pure code plus the lists above, written in once
+// at startup — the same bytes for every request — which is what makes
+// caching it hard safe again. The lists can go stale in a cached copy
+// harmlessly; see lib/clientScript.ts for why.
 //
 // It was cut to five minutes when the script carried a preamble of this
 // deployment's event names: a cached copy kept firing the names current
 // when it was fetched, so the cache window was also the window in which
 // renaming an event produced rejected events. The client sends a role
-// instead of a name now (see routes/events.ts), so there is nothing
-// deployment-specific left in here to go stale.
+// instead of a name now (see routes/events.ts), so nothing left in here
+// turns a stale copy into rejected events.
 //
 // Not a day, which is what the hosted trackers use. The filename can't
 // be versioned to escape the window — the URL lives in the tracked

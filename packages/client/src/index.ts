@@ -98,25 +98,40 @@ function collapseLinkText(text: string | null): string {
     .slice(0, MAX_LINK_TEXT_LENGTH);
 }
 
-// Query parameters worth keeping. Everything else is dropped before the
-// URL leaves the browser at all: a newsletter link's ?email=, a magic
-// link's single-use token, a search page's typed query. The server drops
-// the same set again for anything POSTing to /events directly (see
+// Query parameters and fragments worth keeping. Everything else is
+// dropped before the URL leaves the browser at all: a newsletter link's
+// ?email=, a magic link's single-use token, a search page's typed query,
+// an OAuth response's access_token in the fragment. The server drops the
+// same set again for anything POSTing to /events directly (see
 // server/lib/url.ts) — this copy is what keeps it out of the request in
-// the first place. The two lists can't be shared: this file is an
-// import-free classic script.
-const KEPT_QUERY_PARAMS =
-  /^(utm_(?:source|medium|campaign|term|content|id)|gclid|fbclid|msclkid|ttclid|ref|source)$/i;
+// the first place.
+//
+// This file is an import-free classic script, so it can't read the
+// server's lists. The server writes them in instead, replacing the
+// placeholder string below as it serves the file (server/lib/
+// clientScript.ts). "*" keeps everything; a list keeps only those
+// values. Served without that step, the placeholder is neither, so
+// every parameter and fragment is dropped: fails closed.
+interface KeptUrlParts {
+  params: "*" | string[];
+  hashes: "*" | string[];
+}
+const KEPT_URL_PARTS = "__GENUG_KEPT_URL_PARTS__" as unknown as KeptUrlParts;
+
+function keeps(kept: KeptUrlParts["params"] | undefined, value: string) {
+  return kept === "*" || (Array.isArray(kept) && kept.includes(value));
+}
 
 function strippedUrl(href: string): string {
   const url = new URL(href);
   for (const key of [...url.searchParams.keys()]) {
-    if (!KEPT_QUERY_PARAMS.test(key)) url.searchParams.delete(key);
+    // Held lowercased by the server: a hand-typed utm_Source is plainly
+    // the same parameter. Fragments are matched exactly.
+    if (!keeps(KEPT_URL_PARTS.params, key.toLowerCase())) {
+      url.searchParams.delete(key);
+    }
   }
-  // Dropped for the same reason as the parameters above, and kept in
-  // step with server/lib/url.ts: an OAuth implicit response, and some
-  // reset and unsubscribe links, carry their token in the fragment.
-  url.hash = "";
+  if (!keeps(KEPT_URL_PARTS.hashes, url.hash.slice(1))) url.hash = "";
   return url.toString();
 }
 

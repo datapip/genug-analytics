@@ -9,6 +9,25 @@ how a version is cut.
 
 ## Unreleased
 
+**Breaking**
+
+- **Only the six `utm_*` query parameters are kept by default.**
+  `gclid`, `fbclid`, `msclkid`, `ttclid`, `ref` and `source` are now
+  stripped unless you list them. To keep the old behaviour, set
+  `KEPT_QUERY_PARAMS=utm_source,utm_medium,utm_campaign,utm_term,utm_content,utm_id,gclid,fbclid,msclkid,ttclid,ref,source`.
+  If you do, check that your privacy policy says so. If you instead let
+  the new default apply and your privacy policy or Art. 30 record
+  currently discloses collecting `gclid`, `fbclid`, `msclkid`, `ttclid`,
+  `ref` or `source` — update it. It's no longer true.
+
+**Added**
+
+- **`KEPT_QUERY_PARAMS` and `KEPT_HASH_VALUES`** choose which query
+  parameters and `#fragments` survive on stored URLs — comma-separated
+  exact values, or `*` for all of them. The server writes the lists into
+  `client.js`, so the browser and the server filter with the same ones.
+  See `docs/deploying.md`.
+
 **Changed**
 
 - **`get_recent_events` answers are capped at 64,000 characters.** At

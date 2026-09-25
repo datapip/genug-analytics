@@ -2286,3 +2286,77 @@ test("add_history_note writes into the same file the resource serves", async (t)
     /\*\*2026-07-01\*\* — Moved the/,
   );
 });
+
+// keptUrlParts is parsed at module load in lib/url.ts, same timing as
+// TRUST_PROXY and READ_ONLY above — this pins that against the real
+// entrypoint, the same reasoning as those tests.
+test("fails fast on an invalid KEPT_QUERY_PARAMS and never starts listening", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), 4229),
+    KEPT_QUERY_PARAMS: "utm_*",
+  });
+  stopAndCleanUp(t, dir, server);
+
+  const { code } = await new Promise<{ code: number | null }>((resolve) => {
+    server.process.once("exit", (code) => resolve({ code }));
+  });
+
+  assert.notEqual(code, 0);
+  assert.equal(
+    server.rawLines.some((line) => line.includes("listening")),
+    false,
+  );
+  assert.ok(
+    server.rawLines.some((line) => line.includes("KEPT_QUERY_PARAMS")),
+    "the failure should name the variable that's misconfigured",
+  );
+});
+
+test('logs a warning when KEPT_QUERY_PARAMS or KEPT_HASH_VALUES is "*"', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const port = 4230;
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    KEPT_QUERY_PARAMS: "*",
+    KEPT_HASH_VALUES: "*",
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  assert.equal(
+    server.rawLines.filter((line) =>
+      line.includes("every value is stored as the visitor"),
+    ).length,
+    2,
+    "one warning per variable set to *",
+  );
+});
+
+// The one thing this feature actually promises: whatever a deployment
+// configures is what ships to the browser, not just what the server
+// enforces on its own — a mismatch here would mean the client strips
+// a parameter the operator meant to keep, or keeps one they meant to
+// drop, invisibly.
+test("serves /client.js with this deployment's own kept-parameter list embedded", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const port = 4231;
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), port),
+    KEPT_QUERY_PARAMS: "gclid,utm_source",
+    KEPT_HASH_VALUES: "pricing",
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const res = await fetch(`http://localhost:${port}/client.js`);
+  const body = await res.text();
+  assert.equal(res.status, 200);
+  assert.ok(!body.includes("__GENUG_KEPT_URL_PARTS__"));
+  assert.ok(
+    body.includes('{"params":["gclid","utm_source"],"hashes":["pricing"]}'),
+  );
+});

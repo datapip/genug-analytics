@@ -12,6 +12,27 @@ const clientScriptSource = readFileSync(
   "utf8",
 );
 
+// What server/lib/clientScript.ts writes over the placeholder for a
+// deployment with no KEPT_QUERY_PARAMS or KEPT_HASH_VALUES set. A copy,
+// since this package can't import the server; the server's own test
+// checks the placeholder is still there to replace.
+interface KeptUrlParts {
+  params: "*" | string[];
+  hashes: "*" | string[];
+}
+
+const DEFAULT_KEPT_URL_PARTS: KeptUrlParts = {
+  params: [
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+  ],
+  hashes: [],
+};
+
 interface BeaconCall {
   url: string;
   blob: Blob;
@@ -42,6 +63,8 @@ function loadClient(
     // would have left it: calls made before this script finished
     // loading, waiting to be replayed.
     queued?: [string, unknown[]][];
+    // The lists the server writes in; null serves the file unrendered.
+    keptUrlParts?: KeptUrlParts | null;
   } = {},
 ) {
   const html = `<!doctype html><html ${options.htmlAttrs ?? ""}><head></head><body></body></html>`;
@@ -94,7 +117,18 @@ function loadClient(
     },
   });
 
-  window.eval(clientScriptSource);
+  const kept =
+    options.keptUrlParts === undefined
+      ? DEFAULT_KEPT_URL_PARTS
+      : options.keptUrlParts;
+  window.eval(
+    kept === null
+      ? clientScriptSource
+      : clientScriptSource.replace(
+          '"__GENUG_KEPT_URL_PARTS__"',
+          JSON.stringify(kept),
+        ),
+  );
 
   return { window, beaconCalls, fetchCalls, warnings };
 }
@@ -516,6 +550,42 @@ test("track() strips non-campaign query parameters from the url", async () => {
   assert.equal(body!.url, "http://site.example/checkout?utm_source=news");
 });
 
+async function trackedUrl(
+  keptUrlParts: KeptUrlParts | null,
+  path: string,
+): Promise<string> {
+  const { window, beaconCalls } = loadClient({ keptUrlParts });
+  window.history.replaceState({}, "", path);
+  (
+    window as unknown as { genugAnalytics: { track: (e: string) => void } }
+  ).genugAnalytics.track("page_view");
+  const [body] = (await beaconBodies(beaconCalls)) as { url: string }[];
+  return body!.url;
+}
+
+test("the lists the server writes in decide what the client keeps", async () => {
+  assert.equal(
+    await trackedUrl(
+      { params: ["gclid"], hashes: ["pricing"] },
+      "/p?gclid=a&utm_source=b&GCLID=c#pricing",
+    ),
+    "http://site.example/p?gclid=a&GCLID=c#pricing",
+  );
+  assert.equal(
+    await trackedUrl({ params: "*", hashes: "*" }, "/p?email=x&q=y#t=1"),
+    "http://site.example/p?email=x&q=y#t=1",
+  );
+});
+
+// Served without the server's rendering step, the script must not fall
+// back to keeping everything.
+test("an unrendered script drops every parameter and fragment", async () => {
+  assert.equal(
+    await trackedUrl(null, "/p?utm_source=a&token=b#pricing"),
+    "http://site.example/p",
+  );
+});
+
 test("a second copy of the script on the same page changes nothing", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoPageTracking: true },
@@ -629,7 +699,7 @@ test("link and download URLs keep only campaign parameters and no fragment", asy
     href: "https://files.example/invoice.pdf?token=secret&utm_source=mail#sig=x",
   });
   clickLink(window, {
-    href: "https://partner.example/signup?email=a%40b.example&ref=us#access_token=y",
+    href: "https://partner.example/signup?email=a%40b.example&utm_medium=us#access_token=y",
   });
 
   const [download, outbound] = (await beaconBodies(beaconCalls)) as {
@@ -641,7 +711,7 @@ test("link and download URLs keep only campaign parameters and no fragment", asy
   );
   assert.equal(
     outbound!.props.target_url,
-    "https://partner.example/signup?ref=us",
+    "https://partner.example/signup?utm_medium=us",
   );
 });
 

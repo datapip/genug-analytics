@@ -532,7 +532,42 @@ identity fields are derived server-side, never trusted from the client:
   for a hosted assistant they left the server entirely. An allowlist
   rather than a denylist of dangerous names, because forgetting to allow
   a parameter loses analytics data visibly and recoverably, while
-  forgetting to deny one leaks a secret silently and permanently. What is parsed, at query time, not ingestion (`lib/url.ts`'s
+  forgetting to deny one leaks a secret silently and permanently.
+
+  **Both lists are configurable** (`KEPT_QUERY_PARAMS`,
+  `KEPT_HASH_VALUES`, parsed in `lib/url.ts`). Which campaign
+  parameters a site uses is the operator's call, not the project's,
+  and the hardcoded list kept three copies in step by hand (the
+  server's regex, its names array for the MCP tools, the client's
+  regex) with nothing checking them. Now one parsed value feeds all
+  three. Decided along the way:
+  - The default is the six `utm_*` names only. Click ids (`gclid`
+    and friends) and the free-text `ref`/`source` were dropped from it:
+    a click id ties a visit to one ad click on the platform's side,
+    and `ref=` stores whatever a link writes there. Opting in is one
+    env var; being opted in unknowingly is not visible at all.
+  - Exact names, no globs. `utm_*` would keep `utm_email=` too, which
+    newsletter tools do generate. `*` alone is the one wildcard, meant
+    literally, and logged at startup so an operator can see it is on.
+  - Fragments match the whole fragment exactly, not `key=value`
+    pairs: a fragment is usually an anchor id (`#pricing`), and the
+    `key=value` case is precisely the OAuth token the default exists to
+    drop. Unset still keeps none.
+  - The client gets the lists by the server writing them over a
+    placeholder in `client.js` once at startup (`lib/clientScript.ts`).
+    That puts deployment state back into the script, which the event
+    names section above says to avoid — but the reason there was that
+    a stale cached copy caused rejected events. A stale list can't: the
+    server filters again with the current one, so the worst a cached
+    copy does is drop a newly kept parameter for up to an hour. The
+    alternatives were worse: dropping client-side filtering sends
+    tokens over the wire and into proxy logs, and a `data-` attribute
+    on the script tag splits the config across two deploys. The
+    placeholder fails closed — served unrendered, the client keeps
+    nothing — and a missing placeholder refuses to start, since failing
+    closed there would silently drop every campaign parameter.
+
+  What is parsed, at query time, not ingestion (`lib/url.ts`'s
   `parseUrl`, used by `getTopPages`): the structural split into `path`,
   `params` (the raw query string, still unopinionated about individual
   params), and `hash` — needed so e.g. `/blog/post-1?utm_source=x` and

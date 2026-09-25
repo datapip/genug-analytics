@@ -49,15 +49,35 @@ analytics vendor to sign an Art. 28 DPA with. Your hosting provider is
 still a processor, and so is the model vendor behind whatever agent you
 point at the MCP endpoint — see [What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask).
 
-Query strings are filtered rather than stored whole. Only campaign and
-click-id parameters survive (`utm_*`, `gclid`, `fbclid`, `msclkid`,
-`ttclid`, `ref`, `source`); everything else is dropped by the client
-before it sends and again at ingestion, and the `#fragment` is dropped
-entirely — an OAuth implicit response puts an access token there. Note
-that `ref` and `source` are kept, so a link written `?ref=a-person's-name`
-does store that name. That keeps a newsletter link's
-`?email=`, a password reset's token and a site search's typed query out
-of the database, and out of whatever you point at the MCP endpoint. The
+Query strings are filtered rather than stored whole. By default only the
+six `utm_*` campaign parameters survive (`utm_source`, `utm_medium`,
+`utm_campaign`, `utm_term`, `utm_content`, `utm_id`); everything else is
+dropped by the client before it sends and again at ingestion, and the
+`#fragment` is dropped entirely — an OAuth implicit response puts an
+access token there. That keeps a newsletter link's `?email=`, a password
+reset's token and a site search's typed query out of the database, and
+out of whatever you point at the MCP endpoint.
+
+Both lists are yours to change (`KEPT_QUERY_PARAMS`, `KEPT_HASH_VALUES`
+in [deploying.md](deploying.md)), and **your privacy policy has to
+describe the lists you run, not the defaults** — including the "What we
+record" line in the [template below](#text-for-your-privacy-policy),
+which is worded for the default and needs your own values filled in if
+you change either list. Three things to weigh before widening them. Ad
+click ids (`gclid`, `fbclid`, `msclkid`, `ttclid`) tie a visit to one ad
+click on the ad platform's side, which is why they are no longer kept by
+default. A free-text parameter such as `ref` or `source` stores whatever
+a link writes there — a link written `?ref=a-person's-name` stores that
+name. And `*` (for either list) keeps everything, emails and tokens
+included: the filter above stops protecting anyone, and whatever it lets
+through is not just stored — it is also read back verbatim to the agent
+you point at the MCP endpoint (see
+[What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask))
+and shown in the cockpit. Storing that is a materially more intrusive
+kind of processing than the rest of this section is arguing is
+low-risk, so if you're relying on legitimate interest (below) rather
+than consent, widening either list is worth redoing that balancing
+test — or asking an actual lawyer, not this document. The
 same filter applies to the clicked link on `outbound_link_click` and
 `file_download` (`target_url`, `file_url`), however they are sent.
 Props on your own events are stored as sent, so don't put a raw URL in
@@ -166,9 +186,12 @@ browser, and then both are dropped. The only place an address appears
 at all is the server log, once a minute, when the rate limiter refuses
 traffic.
 
-**Query strings are filtered before they are stored** — only campaign
-and click-id parameters survive. A newsletter link's `?email=`, a
-password reset token and a site-search query never reach the database.
+**Query strings are filtered before they are stored** — by default only
+the `utm_*` campaign parameters survive, and the `#fragment` is dropped
+entirely. A newsletter link's `?email=`, a password reset token and a
+site-search query never reach the database. (Unless you set
+`KEPT_QUERY_PARAMS=*` or `KEPT_HASH_VALUES=*`, which let query strings or
+fragments through unfiltered.)
 
 **A working opt-out**, which is what an Art. 21 objection needs:
 
@@ -275,11 +298,12 @@ supervisory authority) belong elsewhere in the policy.
 > country]. No third-party analytics service receives the data.
 >
 > **What we record.** For each page view or action: the page address
-> without personal query parameters, the address of the page you came
-> from, the time, the device type (e.g. mobile), the browser family,
-> the browser's preferred language, [the page title and the page's
-> language,] [links you click to other sites and files you download,]
-> [further events: list them].
+> [with only utm_source, utm_medium, utm_campaign, utm_term, utm_content
+> and utm_id kept from its query string, and no `#fragment`], the
+> address of the page you came from, the time, the device type (e.g.
+> mobile), the browser family, the browser's preferred language, [the
+> page title and the page's language,] [links you click to other sites
+> and files you download,] [further events: list them].
 >
 > **How we tell visits apart.** We do not store your IP address in
 > the analytics data, and we set no cookie for this. Instead we shorten
@@ -337,6 +361,12 @@ supervisory authority) belong elsewhere in the policy.
 
 Notes on the brackets:
 
+- **The page address.** The bracketed list is this deployment's
+  `KEPT_QUERY_PARAMS` and `KEPT_HASH_VALUES` — the defaults are filled
+  in above, but if you changed either (see
+  [Query strings are filtered](#privacy-by-architecture)), list what you
+  actually run instead, or say "with its query string and fragment kept
+  in full" if either is `*`.
 - **Page title and links.** Only if `enableAutoPageTracking` or
   `enableAutoLinkTracking` is on. List your own events by what they
   record, not by their names.
@@ -362,7 +392,10 @@ Notes on the brackets:
   yourself under Recipients.
 - **The AI provider.** Only if you point an agent at the MCP endpoint.
   What it receives is in
-  [What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask).
-  Its terms decide whether it is a processor with a DPA; check them,
-  and use a plan that offers one. The Data Privacy Framework applies
-  only if the provider is listed at dataprivacyframework.gov.
+  [What leaves your server when you ask](mcp.md#what-leaves-your-server-when-you-ask)
+  — if you widened `KEPT_QUERY_PARAMS` or `KEPT_HASH_VALUES` beyond the
+  default, that now includes whatever those parameters or fragments
+  carry, not just the six `utm_*` values. Its terms decide whether it is
+  a processor with a DPA; check them, and use a plan that offers one.
+  The Data Privacy Framework applies only if the provider is listed at
+  dataprivacyframework.gov.

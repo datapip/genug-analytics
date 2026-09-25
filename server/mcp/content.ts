@@ -8,7 +8,7 @@ import {
   getExitPages,
   getBouncePages,
 } from "../lib/content.js";
-import { isKeptQueryParam, KEPT_QUERY_PARAM_NAMES } from "../lib/url.js";
+import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
 import {
   periodInput,
   segmentInput,
@@ -155,12 +155,12 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_top_entry_params",
     {
-      description: `Get sessions ranked by the value of one query parameter on the page they entered on — the read side of campaign-tagged links: utm_campaign, utm_source, utm_medium and the like, or an ad click id. Counted in SESSIONS that STARTED in the period, each attributed once to its entry page's value. Only the parameters kept when a URL is stored can be asked for (${KEPT_QUERY_PARAM_NAMES.join(", ")}); anything else is stripped at ingestion for privacy and the tool says so. Sessions whose entry page carried no such parameter are not a row, so groups and total describe tagged sessions only — compare total against get_traffic_summary's sessions to see how much traffic is tagged at all. No attribution model is applied: this reads one parameter as stored, and combining several (source + medium) is two calls. ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get sessions ranked by the value of one query parameter on the page they entered on — the read side of campaign-tagged links: utm_campaign, utm_source, utm_medium and the like, or an ad click id. Counted in SESSIONS that STARTED in the period, each attributed once to its entry page's value. Only the parameters kept when a URL is stored can be asked for (${describeKeptQueryParams()}); anything else is stripped at ingestion for privacy and the tool says so. The deployment chooses that list, so a parameter it started keeping recently has no values on sessions stored before the change — a short history there is not low traffic. Sessions whose entry page carried no such parameter are not a row, so groups and total describe tagged sessions only — compare total against get_traffic_summary's sessions to see how much traffic is tagged at all. No attribution model is applied: this reads one parameter as stored, and combining several (source + medium) is two calls. ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         param: z
           .string()
           .describe(
-            `The query parameter to rank by, e.g. "utm_campaign". One of: ${KEPT_QUERY_PARAM_NAMES.join(", ")}.`,
+            `The query parameter to rank by, e.g. "utm_campaign". One of: ${describeKeptQueryParams()}.`,
           ),
         ...periodInput,
         ...segmentInput,
@@ -170,7 +170,7 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
     async ({ param, from, to, segment, limit }) => {
       if (!isKeptQueryParam(param)) {
         return toolError(
-          `Query parameter "${param}" is not kept when a URL is stored, so nothing can match it. Parameters that are kept: ${KEPT_QUERY_PARAM_NAMES.join(", ")}.`,
+          `Query parameter "${param}" is not kept when a URL is stored, so nothing can match it. Parameters that are kept: ${describeKeptQueryParams()}.`,
         );
       }
       const resolved = resolveSegment(db, segment, { from, to });

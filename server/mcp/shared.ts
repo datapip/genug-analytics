@@ -11,7 +11,7 @@ import {
   type SegmentClause,
   type SegmentCondition,
 } from "../lib/segment.js";
-import { isKeptQueryParam, KEPT_QUERY_PARAM_NAMES } from "../lib/url.js";
+import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
 
 // What every tool module exports: it registers its own tools onto the
 // shared server. Nothing is returned — createMcpServer's registerTool
@@ -262,7 +262,7 @@ const segmentCondition = z
       .string()
       .optional()
       .describe(
-        `Sessions whose entry page URL carried this query parameter with entryParamValue, e.g. utm_campaign. Only these exist to match on: ${KEPT_QUERY_PARAM_NAMES.join(", ")}.`,
+        `Sessions whose entry page URL carried this query parameter with entryParamValue, e.g. utm_campaign. Only these exist to match on: ${describeKeptQueryParams()}.`,
       ),
     entryParamValue: z
       .string()
@@ -449,7 +449,7 @@ export function resolveSegment(
         if (!isKeptQueryParam(name)) {
           return {
             error: toolError(
-              `Query parameter "${name}" is not kept when a URL is stored, so nothing can match it. Parameters that are kept: ${KEPT_QUERY_PARAM_NAMES.join(", ")}.`,
+              `Query parameter "${name}" is not kept when a URL is stored, so nothing can match it. Parameters that are kept: ${describeKeptQueryParams()}.`,
             ),
           };
         }
