@@ -40,10 +40,11 @@ domain, not a hosting provider's shared one. Get this wrong and nothing
 looks broken, but consenting visitors are forgotten every day.
 → [The hostname](deploying.md#the-hostname)
 
-Add the DNS record now: an `A` record pointing at your server's
-address, **unproxied** — on Cloudflare that means DNS-only rather than
-the orange cloud, or step 4's certificate request never completes. It
-needs a few minutes to propagate, and step 4 needs it already working.
+Add the DNS record now: an `A` record for the subdomain (e.g. `data`)
+pointing at your server's IP address (e.g. `1.23.45.67`), **unproxied**
+— on Cloudflare that means DNS-only rather than the orange cloud, or
+step 4's certificate request never completes. It needs a few minutes
+to propagate, and step 4 needs it already working.
 
 ## 2. Generate your secrets
 
@@ -179,7 +180,7 @@ what leaves your server when you do
 
 ## Before you go live
 
-Two things the software cannot do for you:
+Three things the software cannot do for you:
 
 - **Say what you collect** in your privacy notice, and name a legal
   basis. The field table and the checklist are written for exactly
@@ -187,6 +188,11 @@ Two things the software cannot do for you:
 - **Say how long you keep it, if 13 months isn't right.** `RETENTION_DAYS`
   defaults to 396 days; set it if you want a different period, or `-1`
   to keep everything. Your notice should say which. → [Retention](operations.md#retention)
+- **Decide whether consentless mode actually fits your case.** It
+  defaults to on, and the architecture makes it a defensible question
+  to ask — not a settled yes for every deployment. Whether it holds
+  depends on your use case and your local law; check it yourself,
+  ideally with your own counsel, before relying on it. → [Running without a consent banner](privacy.md#running-without-a-consent-banner)
 
 ## Next
 

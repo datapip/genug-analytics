@@ -51,7 +51,12 @@ The full walk-through with a screenshot is
 [docs/getting-started.md](docs/getting-started.md). The short version:
 
 1. **Pick a hostname on a subdomain of the site you track**, such as
-   `data.your-domain.com`. The consent cookie is host-only, so a
+   `data.your-domain.com`, and point it at your server before you run
+   anything: add an `A` record for the subdomain (e.g. `data`) with
+   your server's IP as the value (e.g. `1.23.45.67`), **unproxied** —
+   on Cloudflare that means DNS-only, not the orange cloud, or the
+   certificate request in step 2 never completes. Give it a few
+   minutes to propagate. The consent cookie is host-only, so a
    different domain silently degrades consentful tracking. Details in
    [deploying](docs/deploying.md#the-hostname).
 2. **Run it.** On a fresh Ubuntu server, one command installs Docker,
@@ -88,10 +93,15 @@ The full walk-through with a screenshot is
    Then ask: _"What were my top pages this week, and where did that
    traffic come from?"_
 
-Before going live on an EU site, two things the software cannot do for
-you: name what you collect in your privacy notice, and state your
-retention period there (it defaults to 396 days, 13 months — a real period, not
-forever — but your notice still has to say so). Both are laid out in
+Before going live, three things the software cannot decide for you:
+name what you collect in your privacy notice; state your retention
+period there (it defaults to 396 days, 13 months — a real period, not
+forever — but your notice still has to say so); and decide whether the
+default consentless mode is actually usable without a banner for
+**your** site. Genug's architecture makes that a defensible question to
+ask, not a settled yes — whether it holds depends on your use case and
+your local law, and is yours to check, ideally with your own counsel,
+not something the software decides for you. All three are laid out in
 [privacy](docs/privacy.md).
 
 ## What you can ask
