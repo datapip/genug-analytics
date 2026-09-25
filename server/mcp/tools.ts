@@ -1,6 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type Database from "better-sqlite3";
-import { invertedPeriodError, type ToolRegistrar } from "./shared.js";
+import {
+  invertedPeriodError,
+  SERVER_INSTRUCTIONS,
+  type ToolRegistrar,
+} from "./shared.js";
 import { registerRegistryTools } from "./registry.js";
 import { registerContextResources } from "./context.js";
 import { registerTrafficTools } from "./traffic.js";
@@ -128,10 +132,10 @@ export function createMcpServer(
   options: McpServerOptions = {},
 ): McpServer {
   const readOnly = options.readOnly === true;
-  const server = new McpServer({
-    name: "genug",
-    version: VERSION,
-  });
+  const server = new McpServer(
+    { name: "genug", version: VERSION },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   // Wraps registerTool once, before any module runs, so every tool they
   // register (unchanged) is both recorded in the manifest and given the

@@ -861,6 +861,23 @@ test("the deployment-context resource is reachable and is markdown", async () =>
   await client.close();
 });
 
+// The protocol's own instructions field: sent at initialize, before the
+// agent has decided to call anything, so it is the one guaranteed path
+// (for clients that honor it) to "read deployment context first" — the
+// resource and the fallback tool below both still require the agent to
+// act. Only checks it mentions the two ways to reach that context, not
+// its exact wording, so this doesn't become the second place the
+// sentence has to be edited.
+test("server instructions point the agent at deployment context", async () => {
+  const { client } = await connect();
+
+  const instructions = client.getInstructions();
+
+  assert.match(instructions ?? "", /deployment-context/);
+  assert.match(instructions ?? "", /get_deployment_context/);
+  await client.close();
+});
+
 // The tool fallback for clients that don't surface MCP resources to
 // the model — same content, reached a different way.
 test("get_deployment_context returns the same markdown as the resource", async () => {

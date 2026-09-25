@@ -113,7 +113,12 @@ visibly broken, which is the failure mode this project cares most about.
   served as the `get_deployment_context` tool, word-for-word the same
   text — a client that never calls `resources/read` (several
   connector UIs don't) otherwise has no path to this document at all.
-  Unlike
+  The server's own MCP `instructions` (`SERVER_INSTRUCTIONS` in
+  `mcp/shared.ts`) point at both, since that field reaches the agent
+  before it has decided to call anything — the one guaranteed delivery
+  of the three, for clients that honor it. It names the resource and the
+  tool, never repeats their content, so there is still exactly one place
+  this document's text lives. Unlike
   visitor text, it is instruction the agent may act on — which is why
   the cockpit must not gain an edit box for it without deciding who may
   write there, and why `READ_ONLY` (a published key) makes it public.
