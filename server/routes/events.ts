@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { db, dbPath } from "../db/index.js";
 import { insertEvent, findLastEventForVisitor } from "../db/events.js";
 import { insertRejectedEvent } from "../db/rejectedEvents.js";
-import { consentlessVisitorId, isIssuedVisitorId } from "../lib/identity.js";
+import { resolveVisitorIdentity } from "../lib/identity.js";
 import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
 import { requireEnv } from "../lib/env.js";
@@ -33,6 +33,14 @@ const VISITOR_ID_COOKIE = "genug_vid";
 // identifier. Chrome would allow 400 days; the shorter one is what's
 // defensible for the EU deployments this is built for.
 const VISITOR_ID_COOKIE_MAX_AGE_MS = 396 * 24 * 60 * 60 * 1000;
+// One object for setting and for clearing: a clear only removes the
+// cookie the browser actually holds if its attributes match the ones it
+// was set with, so these must not be allowed to drift apart.
+const VISITOR_ID_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "lax",
+} as const;
 
 // A comma-separated list, because one site legitimately has more than
 // one origin: an apex plus a `www.` host that doesn't redirect, or a
@@ -199,11 +207,7 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   // event name nor a role and would be rejected as malformed.
   if (optOutSchema.safeParse(req.body).success) {
     if (parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE]) {
-      res.clearCookie(VISITOR_ID_COOKIE, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-      });
+      res.clearCookie(VISITOR_ID_COOKIE, VISITOR_ID_COOKIE_OPTIONS);
     }
     res.status(204).end();
     return;
@@ -328,60 +332,25 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
     userAgent === undefined ? undefined : classifyUserAgent(userAgent);
   const visitorLanguage = parsePrimaryLanguage(req.headers["accept-language"]);
 
-  const salt = dailySalt.saltFor(now);
+  // Who this request belongs to, and what that means for their cookie.
+  // The decision is lib/identity.ts's; applying it is this route's,
+  // because the cookie's name and lifetime are deployment surface that
+  // the identity rules themselves have no business knowing.
+  const { visitorId, consentful, cookie } = resolveVisitorIdentity({
+    consent: envelope.consent,
+    visitorCookie: parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE],
+    ip,
+    userAgent,
+    salt: dailySalt.saltFor(now),
+  });
 
-  const cookies = parseCookies(req.headers.cookie);
-
-  const rawCookie = cookies[VISITOR_ID_COOKIE];
-  // A cookie that doesn't look like one this server issued is ignored
-  // rather than trusted — see isIssuedVisitorId.
-  const existingCookie =
-    rawCookie && isIssuedVisitorId(rawCookie) ? rawCookie : undefined;
-
-  let visitorId: string;
-  let consentful: boolean;
-
-  if (envelope.consent === false) {
-    // An explicit "no" — not merely absent. A cookie is never trusted
-    // here even if one was sent, and is removed if present: Art. 7(3)
-    // ("as easy to withdraw as to give") requires actually removing the
-    // identifier, and since the cookie is httpOnly, the tracked site's
-    // own JavaScript cannot delete it — only this response can.
-    visitorId = consentlessVisitorId(ip, userAgent ?? "", salt);
-    consentful = false;
-    if (cookies[VISITOR_ID_COOKIE]) {
-      res.clearCookie(VISITOR_ID_COOKIE, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-      });
-    }
-  } else {
-    // consent === true, or not sent at all (a consent manager that
-    // hasn't answered yet on this particular request, or a deployment
-    // with no banner). Either way, a cookie already on the request
-    // wins: its mere presence already proves this browser consented
-    // before, and only an explicit `false` above removes that trust.
-    // This is what closes the race an unanswered auto page-view used to
-    // lose — it no longer clears a returning, already-consented
-    // visitor's cookie just because this one request doesn't (yet)
-    // confirm it. See "Visitor identification" in docs/decisions.md.
-    visitorId =
-      existingCookie ?? consentlessVisitorId(ip, userAgent ?? "", salt);
-    // A visitor with no cookie who also hasn't answered gets the
-    // ordinary ephemeral hash and nothing is set below. One who just
-    // said yes gets a fresh persistent cookie frozen from today's hash
-    // rather than a random UUID (see "Consentless → consentful
-    // transition").
-    consentful = existingCookie !== undefined || envelope.consent === true;
-    if (consentful) {
-      res.cookie(VISITOR_ID_COOKIE, visitorId, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        maxAge: VISITOR_ID_COOKIE_MAX_AGE_MS,
-      });
-    }
+  if (cookie === "set") {
+    res.cookie(VISITOR_ID_COOKIE, visitorId, {
+      ...VISITOR_ID_COOKIE_OPTIONS,
+      maxAge: VISITOR_ID_COOKIE_MAX_AGE_MS,
+    });
+  } else if (cookie === "clear") {
+    res.clearCookie(VISITOR_ID_COOKIE, VISITOR_ID_COOKIE_OPTIONS);
   }
 
   const lastEvent = findLastEventForVisitor(db, visitorId);

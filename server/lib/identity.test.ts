@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { consentlessVisitorId, isIssuedVisitorId } from "./identity.js";
+import {
+  consentlessVisitorId,
+  isIssuedVisitorId,
+  resolveVisitorIdentity,
+} from "./identity.js";
 import { truncateIp } from "./ip.js";
 
 test("consentlessVisitorId is deterministic for the same inputs", () => {
@@ -68,4 +72,122 @@ test("truncated addresses collide within a block and not across one", () => {
   assert.notEqual(id("203.0.113.5"), id("203.0.114.5"));
   assert.equal(id("2001:db8:1:2::5"), id("2001:db8:1:9::5"));
   assert.notEqual(id("2001:db8:1:2::5"), id("2001:db8:2:2::5"));
+});
+
+// resolveVisitorIdentity decides three things at once — which id, which
+// consent_mode the row is stored under, and what happens to the cookie —
+// from three inputs that can each be in three states. routes/events.ts
+// proves the decisions reach a real response; these prove the decisions
+// themselves, including the combinations a request is awkward to force
+// into.
+const SALT = "resolve-salt";
+const IP = "203.0.113.0";
+const UA = "Mozilla/5.0";
+const hashed = consentlessVisitorId(IP, UA, SALT);
+const issuedCookie = consentlessVisitorId("198.51.100.0", UA, SALT);
+
+const resolve = (
+  consent: boolean | undefined,
+  visitorCookie: string | undefined,
+) =>
+  resolveVisitorIdentity({
+    consent,
+    visitorCookie,
+    ip: IP,
+    userAgent: UA,
+    salt: SALT,
+  });
+
+test("an explicit no gets the ephemeral hash and asks for no cookie", () => {
+  assert.deepEqual(resolve(false, undefined), {
+    visitorId: hashed,
+    consentful: false,
+    cookie: "none",
+  });
+});
+
+// Withdrawal has to actually remove the identifier (Art. 7(3)), and the
+// row it arrives with is consentless even though a valid cookie was sent.
+test("an explicit no clears a cookie it refuses to identify by", () => {
+  assert.deepEqual(resolve(false, issuedCookie), {
+    visitorId: hashed,
+    consentful: false,
+    cookie: "clear",
+  });
+});
+
+// Keyed on the raw value rather than the validated one: a cookie this
+// server would never trust as an id is still a cookie on the device, and
+// leaving it there means the next withdrawal has nothing left to remove.
+test("an explicit no clears a cookie value it would not trust", () => {
+  assert.equal(resolve(false, "not-a-real-id").cookie, "clear");
+});
+
+test("consenting freezes today's hash into a cookie", () => {
+  assert.deepEqual(resolve(true, undefined), {
+    visitorId: hashed,
+    consentful: true,
+    cookie: "set",
+  });
+});
+
+// The race: an automatic page-view that fires before the site's consent
+// manager answers sends no consent field, but does carry the visitor's
+// real cookie. Treating that as a rejection is what used to lose them.
+test("an unanswered request keeps a returning visitor's cookie id", () => {
+  assert.deepEqual(resolve(undefined, issuedCookie), {
+    visitorId: issuedCookie,
+    consentful: true,
+    cookie: "set",
+  });
+});
+
+test("an unanswered request with no cookie stays consentless", () => {
+  assert.deepEqual(resolve(undefined, undefined), {
+    visitorId: hashed,
+    consentful: false,
+    cookie: "none",
+  });
+});
+
+// A cookie outranks even an explicit yes: re-hashing here instead of
+// carrying it over would hand a returning, consented visitor a new
+// visitor_id at every salt rotation, so one person becomes many and
+// every reach number inflates while still reading as plausible. The
+// fixture is derived from a different IP than `hashed`, so carrying over
+// and re-hashing cannot look the same.
+test("an existing cookie wins over an explicit yes", () => {
+  assert.deepEqual(resolve(true, issuedCookie), {
+    visitorId: issuedCookie,
+    consentful: true,
+    cookie: "set",
+  });
+});
+
+// A forged cookie must not become the visitor_id, on any consent path —
+// otherwise a client can mint unlimited "visitors" by inventing values.
+// Nor may it buy a consentful row: with consent unanswered the forgery
+// leaves the visitor exactly where an absent cookie would. With an
+// explicit yes it is overwritten with a real id instead.
+test("a forged cookie is never adopted as the visitor id", () => {
+  const forged = "x".repeat(200);
+  assert.deepEqual(resolve(true, forged), {
+    visitorId: hashed,
+    consentful: true,
+    cookie: "set",
+  });
+  assert.deepEqual(resolve(undefined, forged), {
+    visitorId: hashed,
+    consentful: false,
+    cookie: "none",
+  });
+});
+
+// Same identity, one consent signal apart: consenting must not mint a new
+// id, or every deployment silently orphans its pre-consent events.
+test("consenting does not change the id the visitor already had", () => {
+  assert.equal(
+    resolve(undefined, undefined).visitorId,
+    resolve(true, undefined).visitorId,
+  );
 });
