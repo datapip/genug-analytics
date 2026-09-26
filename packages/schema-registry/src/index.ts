@@ -25,6 +25,10 @@ export {
   type PropScalar,
 } from "./checkEvent.js";
 export {
+  readLoadableEventFile,
+  type LoadedEventFile,
+} from "./readEventFile.js";
+export {
   eventRegistry,
   eventsPath,
   eventsSource,

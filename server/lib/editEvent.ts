@@ -1,12 +1,14 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import {
   checkEvent,
   EVENT_NAME_RULE,
   isValidEventName,
+  readLoadableEventFile,
   type PropRule,
 } from "@genug/schema-registry";
+import { countStored } from "./events.js";
 
 // Applies an edit made in the cockpit to one event file.
 //
@@ -65,40 +67,23 @@ export function editEventFile(
     );
   }
 
-  const currentPath = join(directory, `${currentName}.json`);
-  if (!existsSync(currentPath)) {
-    return failed(`There is no ${currentName}.json in ${directory}.`);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(currentPath, "utf8"));
-  } catch (cause) {
-    return failed(
-      `${currentName}.json could not be read: ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
-
   // A file that does not load has something wrong with it that this
   // editor cannot reach — a bad rule string, a missing example, a
   // malformed tag. Rewriting two of its fields would leave it just as
   // broken while implying it had been fixed.
-  const before = checkEvent(parsed);
-  if (!before.ok) {
-    return failed(
-      `${currentName}.json is not currently loading, so it cannot be edited ` +
-        `here. Fix the file itself first: ${before.errors.join("; ")}`,
-    );
-  }
+  const loaded = readLoadableEventFile(
+    directory,
+    currentName,
+    "it cannot be edited here.",
+  );
+  if (!loaded.ok) return failed(loaded.error);
+  const { path: currentPath, parsed, event: before } = loaded;
 
-  const updated: Record<string, unknown> = {
-    ...(parsed as Record<string, unknown>),
-  };
+  const updated: Record<string, unknown> = { ...parsed };
   updated._description = edit.description;
 
   for (const [propName, words] of Object.entries(edit.props)) {
-    const known = before.event.props[propName];
+    const known = before.props[propName];
     if (known === undefined) {
       return failed(
         `"${propName}" is not a prop of ${currentName}. Props can be ` +
@@ -167,13 +152,6 @@ export function editEventFile(
       : 0;
 
   return { ok: true, name: edit.name, movedRows };
-}
-
-function countStored(db: Database.Database, event: string): number {
-  const row = db
-    .prepare(`SELECT COUNT(*) AS count FROM events WHERE event = ?`)
-    .get(event) as { count: number };
-  return row.count;
 }
 
 type ParsedExample =

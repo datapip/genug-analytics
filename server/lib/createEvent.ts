@@ -6,6 +6,7 @@ import {
   EVENT_NAME_RULE,
   isValidEventName,
 } from "@genug/schema-registry";
+import { countStored } from "./events.js";
 
 // Creates one event file from the cockpit's New event form.
 //
@@ -139,13 +140,6 @@ export function createEventFile(
     name: create.name,
     adoptedRows: countStored(db, create.name),
   };
-}
-
-function countStored(db: Database.Database, event: string): number {
-  const row = db
-    .prepare(`SELECT COUNT(*) AS count FROM events WHERE event = ?`)
-    .get(event) as { count: number };
-  return row.count;
 }
 
 export type ParsedExample =

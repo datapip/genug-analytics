@@ -2431,12 +2431,13 @@
       const button = document.getElementById("reset-database");
       const message = document.getElementById("reset-message");
 
-      message.hidden = false;
-      message.classList.remove("is-critical", "is-success");
-      message.textContent = "Resetting…";
-      button.disabled = true;
-      try {
-        const res = await cockpitFetch("/cockpit/reset", {
+      message.classList.remove("is-success");
+      const result = await submitContextWrite(
+        button,
+        message,
+        "Resetting…",
+        "/cockpit/reset",
+        {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -2445,37 +2446,26 @@
             "X-Genug-Cockpit": "1",
           },
           body: JSON.stringify({ password: passwordInput.value }),
-        });
-        const result = await readJson(res);
-        if (!result.ok) {
-          message.classList.add("is-critical");
-          message.textContent = result.error || "HTTP " + res.status;
-          return;
-        }
-        passwordInput.value = "";
-        message.classList.add("is-success");
-        const noun = (n, word) => (n === 1 ? word : word + "s");
-        message.textContent =
-          "Deleted " +
-          fullNumber.format(result.eventsDeleted) +
-          " " +
-          noun(result.eventsDeleted, "event") +
-          ", " +
-          fullNumber.format(result.rejectedEventsDeleted) +
-          " rejected " +
-          noun(result.rejectedEventsDeleted, "event") +
-          " and " +
-          fullNumber.format(result.botActivityDeleted) +
-          " bot-activity " +
-          noun(result.botActivityDeleted, "row") +
-          ".";
-        await load();
-      } catch (err) {
-        message.classList.add("is-critical");
-        message.textContent = err.message;
-      } finally {
-        button.disabled = false;
-      }
+        },
+      );
+      if (!result) return;
+      passwordInput.value = "";
+      message.classList.add("is-success");
+      const noun = (n, word) => (n === 1 ? word : word + "s");
+      message.textContent =
+        "Deleted " +
+        fullNumber.format(result.eventsDeleted) +
+        " " +
+        noun(result.eventsDeleted, "event") +
+        ", " +
+        fullNumber.format(result.rejectedEventsDeleted) +
+        " rejected " +
+        noun(result.rejectedEventsDeleted, "event") +
+        " and " +
+        fullNumber.format(result.botActivityDeleted) +
+        " bot-activity " +
+        noun(result.botActivityDeleted, "row") +
+        ".";
     });
 
   document
@@ -2486,12 +2476,13 @@
       const button = document.getElementById("reset-events");
       const message = document.getElementById("reset-events-message");
 
-      message.hidden = false;
-      message.classList.remove("is-critical", "is-success");
-      message.textContent = "Resetting…";
-      button.disabled = true;
-      try {
-        const res = await cockpitFetch("/cockpit/events/reset", {
+      message.classList.remove("is-success");
+      const result = await submitContextWrite(
+        button,
+        message,
+        "Resetting…",
+        "/cockpit/events/reset",
+        {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -2500,53 +2491,39 @@
             "X-Genug-Cockpit": "1",
           },
           body: JSON.stringify({ password: passwordInput.value }),
-        });
-        const result = await readJson(res);
-        if (!result.ok) {
-          message.classList.add("is-critical");
-          message.textContent = result.error || "HTTP " + res.status;
-          return;
-        }
-        passwordInput.value = "";
-        message.classList.add("is-success");
-        message.textContent =
-          "Replaced " +
-          fullNumber.format(result.removed) +
-          " event " +
-          (result.removed === 1 ? "file" : "files") +
-          " with " +
-          fullNumber.format(result.eventCount) +
-          " built-in " +
-          (result.eventCount === 1 ? "event" : "events") +
-          ".";
-        // Said here rather than left to the orphaned-events panel alone:
-        // this is the moment the rows were stranded, and the only one
-        // where the person can still connect the two.
-        if (result.stranded && result.stranded.length > 0) {
-          const total = result.stranded.reduce(
-            (sum, row) => sum + row.count,
-            0,
-          );
-          message.classList.remove("is-success");
-          message.classList.add("is-critical");
-          message.textContent +=
-            " " +
-            fullNumber.format(total) +
-            " stored " +
-            (total === 1 ? "row" : "rows") +
-            " now belong to no registered event (" +
-            result.stranded
-              .map((row) => row.event + ": " + fullNumber.format(row.count))
-              .join(", ") +
-            ") — they still count toward totals but match no question " +
-            "asked by name.";
-        }
-        await load();
-      } catch (err) {
+        },
+      );
+      if (!result) return;
+      passwordInput.value = "";
+      message.classList.add("is-success");
+      message.textContent =
+        "Replaced " +
+        fullNumber.format(result.removed) +
+        " event " +
+        (result.removed === 1 ? "file" : "files") +
+        " with " +
+        fullNumber.format(result.eventCount) +
+        " built-in " +
+        (result.eventCount === 1 ? "event" : "events") +
+        ".";
+      // Said here rather than left to the orphaned-events panel alone:
+      // this is the moment the rows were stranded, and the only one
+      // where the person can still connect the two.
+      if (result.stranded && result.stranded.length > 0) {
+        const total = result.stranded.reduce((sum, row) => sum + row.count, 0);
+        message.classList.remove("is-success");
         message.classList.add("is-critical");
-        message.textContent = err.message;
-      } finally {
-        button.disabled = false;
+        message.textContent +=
+          " " +
+          fullNumber.format(total) +
+          " stored " +
+          (total === 1 ? "row" : "rows") +
+          " now belong to no registered event (" +
+          result.stranded
+            .map((row) => row.event + ": " + fullNumber.format(row.count))
+            .join(", ") +
+          ") — they still count toward totals but match no question " +
+          "asked by name.";
       }
     });
 

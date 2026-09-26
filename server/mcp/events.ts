@@ -12,7 +12,7 @@ import { getStepsFunnel } from "../lib/funnel.js";
 import {
   periodInput,
   segmentInput,
-  resolveSegment,
+  withSegment,
   trendLengthError,
   MAX_TREND_DAYS,
   limitInput,
@@ -44,10 +44,8 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTopEvents(db, { from, to }, limit, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getTopEvents(db, { from, to }, limit, clause)),
       );
     },
   );
@@ -70,10 +68,8 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       if (!isRegisteredEvent(event)) return unknownEventError(event);
       const tooLong = trendLengthError(from, to, "get_event_trend");
       if (tooLong) return tooLong;
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getEventTrend(db, event, { from, to }, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getEventTrend(db, event, { from, to }, clause)),
       );
     },
   );
@@ -89,10 +85,8 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getEntryEvents(db, { from, to }, limit, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getEntryEvents(db, { from, to }, limit, clause)),
       );
     },
   );
@@ -108,10 +102,8 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getExitEvents(db, { from, to }, limit, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getExitEvents(db, { from, to }, limit, clause)),
       );
     },
   );
@@ -141,17 +133,17 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       if (!hasDeclaredProp(event, property)) {
         return unknownPropError(event, property);
       }
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getEventsByProperty(
-          db,
-          event,
-          property,
-          { from, to },
-          limit,
-          eventProps(event)[property]!.list,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getEventsByProperty(
+            db,
+            event,
+            property,
+            { from, to },
+            limit,
+            eventProps(event)[property]!.list,
+            clause,
+          ),
         ),
       );
     },
@@ -192,16 +184,9 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
         );
       }
 
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getPropertySum(
-          db,
-          event,
-          property,
-          { from, to },
-          prop.list,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getPropertySum(db, event, property, { from, to }, prop.list, clause),
         ),
       );
     },
@@ -235,24 +220,24 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
           `Unknown event type(s): ${unknownSteps.join(", ")}. Valid event types: ${Object.keys(eventRegistry).join(", ")}`,
         );
       }
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      // The lib returns one shape for both scopes; the agent gets the
-      // field named for its unit, per the rule that a count says what
-      // it counts.
-      const unit = scope === "session" ? "sessions" : "visitors";
-      const steps_ = getStepsFunnel(
-        db,
-        steps,
-        { from, to },
-        scope,
-        resolved.clause,
-      ).map(({ event, reached, conversionRate }) => ({
-        event,
-        [unit]: reached,
-        conversionRate,
-      }));
-      return jsonContent({ scope, steps: steps_ });
+      return withSegment(db, segment, { from, to }, (clause) => {
+        // The lib returns one shape for both scopes; the agent gets the
+        // field named for its unit, per the rule that a count says what
+        // it counts.
+        const unit = scope === "session" ? "sessions" : "visitors";
+        const steps_ = getStepsFunnel(
+          db,
+          steps,
+          { from, to },
+          scope,
+          clause,
+        ).map(({ event, reached, conversionRate }) => ({
+          event,
+          [unit]: reached,
+          conversionRate,
+        }));
+        return jsonContent({ scope, steps: steps_ });
+      });
     },
   );
 };

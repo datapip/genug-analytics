@@ -10,7 +10,7 @@ import {
 import {
   periodInput,
   segmentInput,
-  resolveSegment,
+  withSegment,
   trendLengthError,
   MAX_TREND_DAYS,
   jsonContent,
@@ -33,27 +33,27 @@ export const registerTrafficTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      const summary = getTrafficSummary(
-        db,
-        { from, to },
-        pageViewEventType,
-        resolved.clause,
-      );
-      // A zero-everywhere summary is ambiguous to an agent — genuinely quiet
-      // period, or has the client script never actually reached this server?
-      // Only the latter case gets a note; a quiet period within otherwise-
-      // present data is a normal, correct answer. sessions === 0 already
-      // implies no events matched at all, so it alone is enough to check.
-      const result =
-        summary.sessions === 0 && !hasAnyEvents(db)
-          ? {
-              ...summary,
-              note: "No events have ever been recorded on this server. This usually means the client script isn't installed on the tracked site yet, or ALLOWED_ORIGIN doesn't match its origin (the browser would silently block the request as a CORS error).",
-            }
-          : summary;
-      return jsonContent(result);
+      return withSegment(db, segment, { from, to }, (clause) => {
+        const summary = getTrafficSummary(
+          db,
+          { from, to },
+          pageViewEventType,
+          clause,
+        );
+        // A zero-everywhere summary is ambiguous to an agent — genuinely quiet
+        // period, or has the client script never actually reached this server?
+        // Only the latter case gets a note; a quiet period within otherwise-
+        // present data is a normal, correct answer. sessions === 0 already
+        // implies no events matched at all, so it alone is enough to check.
+        const result =
+          summary.sessions === 0 && !hasAnyEvents(db)
+            ? {
+                ...summary,
+                note: "No events have ever been recorded on this server. This usually means the client script isn't installed on the tracked site yet, or ALLOWED_ORIGIN doesn't match its origin (the browser would silently block the request as a CORS error).",
+              }
+            : summary;
+        return jsonContent(result);
+      });
     },
   );
 
@@ -66,10 +66,10 @@ export const registerTrafficTools: ToolRegistrar = (server, db) => {
     async ({ from, to, segment }) => {
       const tooLong = trendLengthError(from, to, "get_traffic_by_day");
       if (tooLong) return tooLong;
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTrafficByDay(db, { from, to }, pageViewEventType, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTrafficByDay(db, { from, to }, pageViewEventType, clause),
+        ),
       );
     },
   );
@@ -81,14 +81,9 @@ export const registerTrafficTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTrafficByDayOfWeek(
-          db,
-          { from, to },
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTrafficByDayOfWeek(db, { from, to }, pageViewEventType, clause),
         ),
       );
     },
@@ -101,10 +96,10 @@ export const registerTrafficTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTrafficByHour(db, { from, to }, pageViewEventType, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTrafficByHour(db, { from, to }, pageViewEventType, clause),
+        ),
       );
     },
   );
@@ -116,10 +111,10 @@ export const registerTrafficTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getSessionSummary(db, { from, to }, pageViewEventType, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getSessionSummary(db, { from, to }, pageViewEventType, clause),
+        ),
       );
     },
   );

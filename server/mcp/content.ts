@@ -12,7 +12,7 @@ import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
 import {
   periodInput,
   segmentInput,
-  resolveSegment,
+  withSegment,
   limitInput,
   jsonContent,
   toolError,
@@ -38,15 +38,9 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTopPages(
-          db,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTopPages(db, { from, to }, limit, pageViewEventType, clause),
         ),
       );
     },
@@ -63,15 +57,9 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getEntryPages(
-          db,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getEntryPages(db, { from, to }, limit, pageViewEventType, clause),
         ),
       );
     },
@@ -88,15 +76,9 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getExitPages(
-          db,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getExitPages(db, { from, to }, limit, pageViewEventType, clause),
         ),
       );
     },
@@ -113,15 +95,9 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getBouncePages(
-          db,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getBouncePages(db, { from, to }, limit, pageViewEventType, clause),
         ),
       );
     },
@@ -138,15 +114,9 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTopReferrers(
-          db,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTopReferrers(db, { from, to }, limit, pageViewEventType, clause),
         ),
       );
     },
@@ -173,16 +143,16 @@ export const registerContentTools: ToolRegistrar = (server, db) => {
           `Query parameter "${param}" is not kept when a URL is stored, so nothing can match it. Parameters that are kept: ${describeKeptQueryParams()}.`,
         );
       }
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTopEntryParams(
-          db,
-          param,
-          { from, to },
-          limit,
-          pageViewEventType,
-          resolved.clause,
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(
+          getTopEntryParams(
+            db,
+            param,
+            { from, to },
+            limit,
+            pageViewEventType,
+            clause,
+          ),
         ),
       );
     },

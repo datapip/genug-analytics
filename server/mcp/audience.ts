@@ -10,7 +10,7 @@ import {
   periodInput,
   periodBound,
   segmentInput,
-  resolveSegment,
+  withSegment,
   invertedPeriodError,
   limitInput,
   jsonContent,
@@ -39,17 +39,12 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent({
-        deviceTypes: getDeviceTypeBreakdown(
-          db,
-          { from, to },
-          limit,
-          resolved.clause,
-        ),
-        browsers: getBrowserBreakdown(db, { from, to }, limit, resolved.clause),
-      });
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent({
+          deviceTypes: getDeviceTypeBreakdown(db, { from, to }, limit, clause),
+          browsers: getBrowserBreakdown(db, { from, to }, limit, clause),
+        }),
+      );
     },
   );
 
@@ -62,10 +57,8 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getNewVsReturningVisitors(db, { from, to }, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getNewVsReturningVisitors(db, { from, to }, clause)),
       );
     },
   );
@@ -108,18 +101,19 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
           `The return period (from ${returnFrom}) must start after the cohort period ends (${cohortTo}); otherwise a cohort visitor "returns" by merely being in the cohort.`,
         );
       }
-      const resolved = resolveSegment(db, segment, {
-        from: cohortFrom,
-        to: cohortTo,
-      });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getCohortReturn(
-          db,
-          { from: cohortFrom, to: cohortTo },
-          { from: returnFrom, to: returnTo },
-          resolved.clause,
-        ),
+      return withSegment(
+        db,
+        segment,
+        { from: cohortFrom, to: cohortTo },
+        (clause) =>
+          jsonContent(
+            getCohortReturn(
+              db,
+              { from: cohortFrom, to: cohortTo },
+              { from: returnFrom, to: returnTo },
+              clause,
+            ),
+          ),
       );
     },
   );
@@ -141,10 +135,8 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       },
     },
     async ({ from, to, segment, limit }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getTopLanguages(db, { from, to }, limit, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getTopLanguages(db, { from, to }, limit, clause)),
       );
     },
   );
@@ -158,10 +150,8 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       inputSchema: { ...periodInput, ...segmentInput },
     },
     async ({ from, to, segment }) => {
-      const resolved = resolveSegment(db, segment, { from, to });
-      if ("error" in resolved) return resolved.error;
-      return jsonContent(
-        getConsentBreakdown(db, { from, to }, resolved.clause),
+      return withSegment(db, segment, { from, to }, (clause) =>
+        jsonContent(getConsentBreakdown(db, { from, to }, clause)),
       );
     },
   );

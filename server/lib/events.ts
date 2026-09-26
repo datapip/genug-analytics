@@ -317,3 +317,13 @@ export function getStoredEventCounts(
   for (const { event, events } of rows) counts[event] = events;
   return counts;
 }
+
+// One event name's count, all time — the single-name counterpart to
+// getStoredEventCounts, for callers (create/edit) that only ever need
+// to know about the one name they're about to touch.
+export function countStored(db: Database.Database, event: string): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) AS count FROM events WHERE event = ?`)
+    .get(event) as { count: number };
+  return row.count;
+}

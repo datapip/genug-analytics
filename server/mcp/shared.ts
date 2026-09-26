@@ -487,6 +487,21 @@ export function resolveSegment(
   return { clause: buildSegment(db, conditions, period, pageViewEventType) };
 }
 
+// Every period-taking tool resolves its segment and short-circuits on
+// error before it can use the clause; this does both in one call so the
+// handler goes straight from its arguments to its query. `fn` runs only
+// once resolution succeeded.
+export function withSegment<T>(
+  db: Database.Database,
+  segment: RawSegmentCondition[] | undefined,
+  period: Period,
+  fn: (clause: SegmentClause) => T,
+): T | ReturnType<typeof toolError> {
+  const resolved = resolveSegment(db, segment, period);
+  if ("error" in resolved) return resolved.error;
+  return fn(resolved.clause);
+}
+
 // The one sentence a tool's description adds to say it takes a segment;
 // the argument's own description carries the detail.
 export const SEGMENT_HINT =

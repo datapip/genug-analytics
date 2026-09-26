@@ -1,6 +1,9 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { checkEvent, isValidEventName } from "@genug/schema-registry";
+import { writeFileSync } from "node:fs";
+import {
+  checkEvent,
+  isValidEventName,
+  readLoadableEventFile,
+} from "@genug/schema-registry";
 import { composeRule, parseExample, type PropSpec } from "./createEvent.js";
 
 // Adds one prop to an event that already has traffic — the one shape
@@ -37,31 +40,15 @@ export function addEventProp(
     );
   }
 
-  const path = join(directory, `${eventName}.json`);
-  if (!existsSync(path)) {
-    return failed(`There is no ${eventName}.json in ${directory}.`);
-  }
+  const loaded = readLoadableEventFile(
+    directory,
+    eventName,
+    "a prop cannot be added to it here.",
+  );
+  if (!loaded.ok) return failed(loaded.error);
+  const { path, parsed, event: before } = loaded;
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
-  } catch (cause) {
-    return failed(
-      `${eventName}.json could not be read: ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
-
-  const before = checkEvent(parsed);
-  if (!before.ok) {
-    return failed(
-      `${eventName}.json is not currently loading, so a prop cannot be ` +
-        `added to it here. Fix the file itself first: ` +
-        `${before.errors.join("; ")}`,
-    );
-  }
-
-  if (Object.hasOwn(before.event.props, spec.name)) {
+  if (Object.hasOwn(before.props, spec.name)) {
     return failed(`"${spec.name}" is already a prop of ${eventName}.`);
   }
 
@@ -73,7 +60,7 @@ export function addEventProp(
   }
 
   const updated: Record<string, unknown> = {
-    ...(parsed as Record<string, unknown>),
+    ...parsed,
     [spec.name]: composeRule(optionalSpec),
     [`${spec.name}_description`]: spec.description,
     [`${spec.name}_example`]: example.value,
