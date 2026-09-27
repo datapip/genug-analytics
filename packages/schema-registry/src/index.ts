@@ -2,6 +2,7 @@ export {
   envelopeSchema,
   AUTO_EVENT_ROLES,
   MAX_EVENT_NAME_LENGTH,
+  MAX_URL_LENGTH,
   type Envelope,
 } from "./envelope.js";
 export {

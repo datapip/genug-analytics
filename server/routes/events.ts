@@ -11,6 +11,7 @@ import {
   eventRegistry,
   roleEventNames,
   MAX_EVENT_NAME_LENGTH,
+  MAX_URL_LENGTH,
 } from "@genug/schema-registry";
 import { dirname, join } from "node:path";
 import { db, dbPath } from "../db/index.js";
@@ -239,6 +240,32 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   }
   const envelope = envelopeResult.data;
 
+  // Stripped here as well as in the client: /events is public, so a
+  // caller that isn't the client script reaches this line with whatever
+  // query string it likes. See lib/url.ts.
+  //
+  // The envelope capped the raw value, but stripping re-serializes the
+  // URL, and that percent-encodes what the sender left bare — a query of
+  // 2,000 "(" comes out three times as long. Checked again afterwards,
+  // since the cap is what bounds the text a stranger can put in front of
+  // the agent.
+  const url = stripUnknownParams(envelope.url);
+  const referrer =
+    envelope.referrer === undefined
+      ? undefined
+      : stripUnknownParams(envelope.referrer);
+  if (url.length > MAX_URL_LENGTH || (referrer?.length ?? 0) > MAX_URL_LENGTH) {
+    insertRejectedEvent(
+      db,
+      "invalid_envelope",
+      now.toISOString(),
+      envelope.event,
+      `url or referrer is over ${MAX_URL_LENGTH} characters once re-encoded`,
+    );
+    res.status(400).json({ error: "invalid envelope" });
+    return;
+  }
+
   // The client script sends a role rather than a name for the three
   // events it fires itself, because it does not know what this
   // deployment calls them — so the name is decided here, from the
@@ -361,14 +388,8 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
     visitorId,
     sessionId,
     ts: now.toISOString(),
-    // Stripped here as well as in the client: /events is public, so a
-    // caller that isn't the client script reaches this line with whatever
-    // query string it likes. See lib/url.ts.
-    url: stripUnknownParams(envelope.url),
-    referrer:
-      envelope.referrer === undefined
-        ? undefined
-        : stripUnknownParams(envelope.referrer),
+    url,
+    referrer,
     deviceType: device?.deviceType,
     browser: device?.browser,
     visitorLanguage,

@@ -404,6 +404,34 @@ test("strips non-campaign query parameters from url and referrer", async () => {
   assert.equal(row!.referrer, "https://site.example/inbox");
 });
 
+// Stripping re-serializes the query and percent-encodes what the sender
+// left bare, so a URL under the envelope's cap could come out three
+// times over it and be read back to the agent verbatim.
+test("rejects a url that stripping pushes over the length cap", async () => {
+  const ua = "test-strip-growth";
+  const url = "https://site.example/?utm_source=" + "(".repeat(2000) + "&x=1";
+  assert.ok(url.length <= 2048, "the raw url must pass the envelope's cap");
+
+  const res = await post(
+    {
+      event: "page_view",
+      url,
+      props: { page_title: "Home", document_language: "en" },
+    },
+    { "user-agent": ua },
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal(newRows().length, 0);
+  const rejected = db
+    .prepare(
+      "SELECT reason, detail FROM rejected_events ORDER BY id DESC LIMIT 1",
+    )
+    .get() as { reason: string; detail: string };
+  assert.equal(rejected.reason, "invalid_envelope");
+  assert.match(rejected.detail, /re-encoded/);
+});
+
 test("returns CORS headers only for configured origins", async () => {
   const allowed = await post(
     {

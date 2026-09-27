@@ -9,7 +9,7 @@ import { z } from "zod";
 // generous on purpose: they exist to stop abuse, not to second-guess
 // real data. `props` is bounded instead by the request body as a whole
 // (routes/events.ts), since prop shapes are the deployment's business.
-const MAX_URL_LENGTH = 2048; // the de facto browser/CDN URL ceiling
+export const MAX_URL_LENGTH = 2048; // the de facto browser/CDN URL ceiling
 export const MAX_EVENT_NAME_LENGTH = 128;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 const REFERRER_PROTOCOLS = new Set(["http:", "https:", "android-app:"]);
