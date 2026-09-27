@@ -27,6 +27,12 @@ how a version is cut.
   exact values, or `*` for all of them. The server writes the lists into
   `client.js`, so the browser and the server filter with the same ones.
   See `docs/deploying.md`.
+- **The MCP server now sends `instructions` at initialize**, pointing
+  the agent at the deployment-context resource (or the
+  `get_deployment_context` tool, for clients that don't surface
+  resources) before it answers anything. Previously that context was
+  only ever read if the agent chose to look; this is the one channel
+  the protocol delivers before any tool call, for clients that honor it.
 
 **Changed**
 
@@ -36,9 +42,18 @@ how a version is cut.
   rows that fit come back, and a second text block tells the agent how
   many were dropped. 100 ordinary rows still fit.
 
+**Fixed**
+
+- **The cockpit's dates are pinned to `en-GB`**, regardless of the
+  browser's own locale. Before, date formatting followed whichever
+  language the browser was set to, which could mix formats with the
+  cockpit's own English text.
+
 **Docs**
 
 - `docs/mcp.md` has a VS Code config snippet.
+- `docs/operations.md` explains exporting your data out of the SQLite
+  file directly — there was never an export API, but nothing said so.
 
 ## 0.8.0 — 2026-09-24
 
