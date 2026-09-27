@@ -64,6 +64,15 @@ how a version is cut.
   the Deployment context card, which had been left rendering raw `YYYY-MM-DD` strings. The
   two native `<input type="date">` pickers still follow the OS locale —
   browsers give no way to override that.
+- **A stored `url` or `referrer` can no longer exceed the 2,048-character
+  cap.** The cap was checked before query parameters were stripped, and
+  stripping re-encodes the URL, so a crafted request to `/events` could
+  get about three times that much text stored and read back to the
+  agent. Such a request is now rejected as `invalid_envelope` and shows
+  up with the other rejected events. Real browser URLs aren't affected.
+- **`KEPT_HASH_VALUES` entries with non-ASCII characters now match.**
+  `über` never matched `#über`, because the browser percent-encodes the
+  fragment. An entry can be written plain or already encoded.
 
 **Docs**
 

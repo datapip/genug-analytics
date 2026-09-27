@@ -282,6 +282,12 @@ visibly broken, which is the failure mode this project cares most about.
   the next one, and the counter bounds nothing.
 - Don't add a new field that identifies a visitor more precisely
   without saying so in `docs/decisions.md` and in the README.
+- The default kept URL parts are the six `utm_*` parameters and no
+  fragment (`lib/url.ts`). A click id or free-text parameter like `ref`
+  identifies a visitor, so widening that default is the same kind of
+  change as the line above: it goes in `docs/decisions.md`, the README
+  and the CHANGELOG. A deployment widens its own list in
+  `KEPT_QUERY_PARAMS`, never the default.
 
 ## Dependencies
 
