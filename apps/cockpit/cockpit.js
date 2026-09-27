@@ -23,6 +23,11 @@
     maximumFractionDigits: 1,
   });
   const fullNumber = new Intl.NumberFormat("en");
+  // Every date and time on the page uses this, never the browser's
+  // locale: the UI's own words are English, so a German browser would
+  // otherwise put "vor 1 Minute" beside "just now". en-GB rather than
+  // "en" for the 24-hour clock and day-first dates.
+  const DATE_LOCALE = "en-GB";
 
   // Every request this page makes goes through here, so a session that
   // ran out has one place to be noticed. Without it a 401 arrives as
@@ -258,8 +263,8 @@
   }
 
   function renderPeriod(period) {
-    const from = new Date(period.from).toLocaleDateString();
-    const to = new Date(period.to).toLocaleDateString();
+    const from = new Date(period.from).toLocaleDateString(DATE_LOCALE);
+    const to = new Date(period.to).toLocaleDateString(DATE_LOCALE);
     document.getElementById("period").textContent = from + " – " + to;
   }
 
@@ -370,7 +375,7 @@
     // dateStr is "YYYY-MM-DD" (UTC) — pin the parse to midnight UTC
     // so the label can't shift a day depending on the viewer's
     // timezone.
-    return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(undefined, {
+    return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
       month: "numeric",
       day: "numeric",
       timeZone: "UTC",
@@ -387,7 +392,7 @@
     day: {
       getLabel: (row) => formatDayLabel(row.date),
       getFullLabel: (row) =>
-        new Date(`${row.date}T00:00:00Z`).toLocaleDateString(undefined, {
+        new Date(`${row.date}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
           weekday: "short",
           month: "short",
           day: "numeric",
@@ -843,7 +848,7 @@
             // in a week is either a live breakage or something already
             // fixed on Monday, and those want opposite responses.
             el("span", { className: "detail-when" }, [
-              "Last seen " + new Date(row.lastSeen).toLocaleString(),
+              "Last seen " + new Date(row.lastSeen).toLocaleString(DATE_LOCALE),
             ]),
           ]),
         ]),
@@ -856,14 +861,14 @@
   // today. The clock time stays in the text, not only in a title, which
   // a phone, a keyboard or a screen reader never reaches. Computed at
   // render, so it is as fresh as the "Updated" time in the header.
-  const relativeFormat = new Intl.RelativeTimeFormat(undefined, {
+  const relativeFormat = new Intl.RelativeTimeFormat(DATE_LOCALE, {
     numeric: "auto",
   });
-  const clockFormat = new Intl.DateTimeFormat(undefined, {
+  const clockFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const dateFormat = new Intl.DateTimeFormat(undefined, {
+  const dateFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
     dateStyle: "medium",
   });
   function localMidnight(date) {
@@ -894,7 +899,11 @@
     } else {
       text = dateFormat.format(when) + ", " + clockFormat.format(when);
     }
-    return el("time", { dateTime: ts, title: when.toLocaleString() }, [text]);
+    return el(
+      "time",
+      { dateTime: ts, title: when.toLocaleString(DATE_LOCALE) },
+      [text],
+    );
   }
 
   function renderRecentEvents(recentEvents) {
@@ -2288,7 +2297,7 @@
       data.history || { entries: [], skipped: [], dropped: 0, error: null },
     );
     document.getElementById("updated-at").textContent =
-      "Updated " + new Date().toLocaleTimeString();
+      "Updated " + new Date().toLocaleTimeString(DATE_LOCALE);
   }
 
   function showError(message) {
