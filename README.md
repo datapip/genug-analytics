@@ -189,6 +189,8 @@ that are plausible while wrong. The reasoning behind every rule is in
 - **Erasure** goes through the agent's one write tool, which previews
   before it deletes. A consentless visitor cannot be looked up, by
   design — read that section before promising anyone erasure.
+- **Your data** is one SQLite file on your server. Export it with any
+  SQLite tool: no export API, no lock-in.
 - **Health** is `GET /healthz`.
 - **Capacity**, measured rather than guessed: about 2,300 events a
   second in Docker behind a reverse proxy, and 0.4 KB stored per event.
@@ -196,7 +198,7 @@ that are plausible while wrong. The reasoning behind every rule is in
   2 vCPU / 2 GB VPS is enough and 4 GB is headroom —
   `scripts/load-events.mjs` re-runs the test on your own hardware.
 
-Capacity, retention, backups, restore, erasure and migrations: [docs/operations.md](docs/operations.md).
+Capacity, retention, backups, restore, erasure, export and migrations: [docs/operations.md](docs/operations.md).
 
 ## Project
 

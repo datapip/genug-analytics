@@ -1,6 +1,6 @@
 # Operating a deployment
 
-How much traffic it takes, retention, opt-out and erasure, backups and restore, and the one kind of change that needs a database migration.
+How much traffic it takes, retention, opt-out and erasure, backups and restore, exporting your data, and the one kind of change that needs a database migration.
 
 ## How much traffic it handles
 
@@ -347,6 +347,62 @@ restore — your image already carries them.
 
 **Test this once, on a spare machine, before you need it.** An untested
 restore is a guess, not a backup.
+
+## Your data
+
+Everything Genug stores is in one SQLite file on your own server. There
+is no export button and no export API because none is needed: any
+SQLite tool can read the file directly, and so can pandas, DuckDB, a BI
+tool or a spreadsheet import.
+
+Work from a backup, not the live `genug.db`. It is the same point as
+[copying backups off the host](#copying-backups-off-the-host): a
+snapshot is a finished file, while the live database is open and in WAL
+mode. The runtime image has no `sqlite3` binary, so copy the file out
+first and query it on the host:
+
+```sh
+docker cp genug:/data/backups/genug-2026-09-10.db ./genug-export.db
+
+sqlite3 -header -csv genug-export.db "SELECT * FROM events" > events.csv
+```
+
+Need something fresher than last night's snapshot? A restart takes one
+immediately (see Backups above).
+
+Three tables hold data:
+
+| Table             | One row per                                                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `events`          | Stored event, with the fixed envelope: `event`, `visitor_id`, `session_id`, `ts`, `url`, `referrer`, `device_type`, `browser`, `visitor_language`, `consent_mode`, `props`. |
+| `rejected_events` | Request `/events` refused, with the reason. It has no visitor or session.                                                                                                   |
+| `bot_activity`    | Hour, with a count of bot requests dropped. It has no individual hits.                                                                                                      |
+
+`ts` is an ISO 8601 UTC string. `props` is JSON text, so read a single
+prop with `json_extract`. For a `list` prop, use `json_each`, because
+`json_extract` returns the whole array as one string:
+
+```sh
+sqlite3 -header -csv genug-export.db \
+  "SELECT ts, url, json_extract(props, '$.value') AS value
+     FROM events WHERE event = 'purchase'" > purchases.csv
+```
+
+The event files in the dated `-events` folder next to each backup
+describe what every event and prop means. Keep them with the export.
+
+Before you pass an export on, two things:
+
+- **It is personal data.** In consented mode, `visitor_id` comes from a
+  cookie and stays the same across visits. In consentless mode it is a
+  hash that changes daily, so it cannot link one day to the next, but it
+  is still per-visitor. `url` and `props` hold whatever your pages and
+  visitors sent. Handle the export like the database, under the same
+  privacy notice.
+- **Retention and erasure do not reach copies.** Both act on the live
+  database only. Rows you exported stay in the export after the server
+  deletes them, just as they do in backups. Delete an export you no
+  longer need.
 
 ## Migrating the database
 
