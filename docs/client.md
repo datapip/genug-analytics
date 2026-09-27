@@ -414,8 +414,9 @@ Generous, and only there to stop one request filling the database:
   the list into `client.js` as it serves it, so the client and the
   server always filter with the same one — give or take the hour a
   browser caches the script after you change it.
-- The **`#fragment` is dropped entirely**, on both sides, for the same
-  reason: an OAuth implicit response puts `access_token` there
+- The **`#fragment` is dropped** unless it is listed in
+  `KEPT_HASH_VALUES`, which is empty by default, on both sides, for the
+  same reason: an OAuth implicit response puts `access_token` there
   precisely to keep it out of server logs, and some reset and
   unsubscribe links do the same. Nothing Genug reports reads a
   fragment. The one thing this costs is hash-routed apps — see the note

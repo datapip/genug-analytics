@@ -147,9 +147,10 @@ history) — since a client reads both before it calls anything.
 Most tools return aggregates — counts, rankings, breakdowns.
 `get_recent_events` is the exception: it returns raw rows, including
 URLs and whatever your events put in `props`. Query strings are already
-filtered down to campaign parameters before anything is stored (see
-[privacy.md](privacy.md)), so the usual accidents are covered, but your
-own event props are yours to keep clean. An answer is capped at
+filtered before anything is stored, by default down to the six `utm_*`
+parameters (see [privacy.md](privacy.md)), so the usual accidents are
+covered. Widening `KEPT_QUERY_PARAMS`, or setting it to `*`, widens what
+reaches the agent too. Your own event props are yours to keep clean. An answer is capped at
 64,000 characters of JSON, which still fits 100 ordinary rows: when
 unusually large rows would push past it, fewer rows come back and a
 second text block tells the agent so. If your deployment holds data

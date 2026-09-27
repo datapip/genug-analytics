@@ -154,7 +154,7 @@ event end to end is [a recipe](docs/recipe-add-event.md).
 
 Every event is one row: the event name, a server-assigned visitor and
 session id, a UTC timestamp, the URL and referrer with query strings
-filtered down to campaign parameters, the device type and browser the
+filtered down to the parameters you keep (the six `utm_*` by default), the device type and browser the
 User-Agent classified to, the visitor's language, the consent mode,
 and the props your event declares. No raw address, no User-Agent
 string, no profile. In consentless mode nothing is written to the

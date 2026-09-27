@@ -15,10 +15,23 @@ how a version is cut.
   `gclid`, `fbclid`, `msclkid`, `ttclid`, `ref` and `source` are now
   stripped unless you list them. To keep the old behaviour, set
   `KEPT_QUERY_PARAMS=utm_source,utm_medium,utm_campaign,utm_term,utm_content,utm_id,gclid,fbclid,msclkid,ttclid,ref,source`.
-  If you do, check that your privacy policy says so. If you instead let
-  the new default apply and your privacy policy or Art. 30 record
-  currently discloses collecting `gclid`, `fbclid`, `msclkid`, `ttclid`,
-  `ref` or `source` — update it. It's no longer true.
+  If you do, check that your privacy notice says so, and redo the
+  balancing test in `docs/privacy.md`: a click id is a per-click
+  identifier the ad platform can link to a person.
+
+  If you let the new default apply, **don't narrow your privacy notice
+  yet.** Only URLs stored from now on are filtered. Rows from before the
+  upgrade keep those parameters until retention removes them (396 days
+  by default), so a notice that drops them straight away says less than
+  you hold. Narrow it once those rows have aged out. An Art. 30 record
+  usually lists kinds of data rather than parameter names, and may need
+  no change at all.
+
+- **The built-in `outbound_link_click` and `file_download` descriptions
+  are corrected** for the new default. Your events directory is never
+  re-seeded, so an existing deployment keeps the old wording (which
+  names `gclid` as kept) until you edit those two files or use Reset
+  events.
 
 **Added**
 
