@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { isValidEventName } from "@genug/schema-registry";
+import { countStored } from "./events.js";
 
 // Deletes one event's file from the cockpit's Schema registry card — a
 // scoped version of the danger zone's whole-directory Reset. Rows
@@ -71,11 +72,4 @@ export function deleteEventFile(
     // delete never having happened.
     restore: () => writeFileSync(path, original, "utf8"),
   };
-}
-
-function countStored(db: Database.Database, event: string): number {
-  const row = db
-    .prepare(`SELECT COUNT(*) AS count FROM events WHERE event = ?`)
-    .get(event) as { count: number };
-  return row.count;
 }
