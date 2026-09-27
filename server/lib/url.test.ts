@@ -186,6 +186,22 @@ test("a fragment list keeps exactly those fragments", () => {
   );
 });
 
+// The parser percent-encodes a fragment, so a list compared raw would
+// never keep #über however it was written down.
+test("a non-ASCII fragment matches whether written plain or encoded", () => {
+  for (const written of ["über", "%C3%BCber"]) {
+    const parts: KeptUrlParts = {
+      params: [],
+      hashes: parseKeptHashValues(written),
+    };
+    assert.equal(
+      stripUnknownParams("https://example.com/#über", parts),
+      "https://example.com/#%C3%BCber",
+      written,
+    );
+  }
+});
+
 // A bare `NAME=` in a compose file means unset, as for TRUST_PROXY.
 test("an empty value falls back to the default", () => {
   assert.deepEqual(parseKeptQueryParams(""), DEFAULTS.params);
@@ -199,6 +215,7 @@ test("a glob, an empty entry or a space inside a value refuses to start", () => 
     assert.throws(() => parseKeptQueryParams(bad), /KEPT_QUERY_PARAMS/, bad);
   }
   assert.throws(() => parseKeptHashValues("#"), /KEPT_HASH_VALUES/);
+  assert.throws(() => parseKeptHashValues("pricing faq"), /KEPT_HASH_VALUES/);
 });
 
 test("describeKeptQueryParams names the list, or says everything is kept", () => {

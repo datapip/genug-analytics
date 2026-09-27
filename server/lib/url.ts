@@ -69,10 +69,19 @@ export function parseKeptQueryParams(value: string | undefined): KeptValues {
 // precisely so they stay out of server logs, and some reset and
 // unsubscribe flows do the same. A leading "#" is accepted and dropped,
 // since that is how an anchor is usually written down.
+//
+// Each entry goes through the URL parser, because that is what encoded
+// the fragment it is compared against: #über arrives as #%C3%BCber, so a
+// hand-written "über" would otherwise never match. The parser leaves an
+// existing %XX alone, so an entry already written encoded still works.
+// Whitespace is left raw so the list check still refuses it: "pricing
+// faq" is a missing comma, not a fragment to encode as pricing%20faq.
 export function parseKeptHashValues(value: string | undefined): KeptValues {
-  return parseKeptList("KEPT_HASH_VALUES", value, [], (e) =>
-    e.startsWith("#") ? e.slice(1) : e,
-  );
+  return parseKeptList("KEPT_HASH_VALUES", value, [], (e) => {
+    const bare = e.startsWith("#") ? e.slice(1) : e;
+    if (/\s/.test(bare)) return bare;
+    return new URL("http://x/#" + bare).hash.slice(1);
+  });
 }
 
 // Read once at startup: a bad value throws on import, which stops the
