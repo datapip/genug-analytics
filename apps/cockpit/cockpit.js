@@ -982,6 +982,18 @@
     counter.classList.toggle("is-critical", bytes > proseFieldMaxBytes);
   }
 
+  function formatHistoryDate(dateStr) {
+    // Same UTC-midnight pin as formatDayLabel, and the same DATE_LOCALE
+    // as the rest of the page — these were rendering as raw
+    // "YYYY-MM-DD" while everything else already read en-GB.
+    return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
   // Newest first, as the server already sorted them. A note the reader
   // could not trust is named rather than silently missing — the same
   // "say why, don't go quiet" rule the schema errors panel follows.
@@ -1002,7 +1014,9 @@
     }
 
     for (const entry of history.entries) {
-      const when = entry.to ? entry.from + " – " + entry.to : entry.from;
+      const when = entry.to
+        ? formatHistoryDate(entry.from) + " – " + formatHistoryDate(entry.to)
+        : formatHistoryDate(entry.from);
       list.append(
         el("li", { className: "history-item" }, [
           el("time", { dateTime: entry.from }, [when]),
