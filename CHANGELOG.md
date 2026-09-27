@@ -47,8 +47,8 @@ how a version is cut.
 - **The cockpit's dates are pinned to `en-GB`**, regardless of the
   browser's own locale. Before, date formatting followed whichever
   language the browser was set to, which could mix formats with the
-  cockpit's own English text. This includes the danger zone's history
-  notes, which had been left rendering raw `YYYY-MM-DD` strings. The
+  cockpit's own English text. This includes the history notes in
+  the Deployment context card, which had been left rendering raw `YYYY-MM-DD` strings. The
   two native `<input type="date">` pickers still follow the OS locale —
   browsers give no way to override that.
 
