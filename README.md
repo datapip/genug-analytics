@@ -31,15 +31,15 @@ what changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 2. **Install Genug Analytics.** One command builds it, puts HTTPS in
    front, and starts it.
 3. **Define your events**, if the three built in — page views, outbound
-   clicks, file downloads — aren't the whole story. One JSON file per
-   event, or the cockpit's form; no database change either way.
+   clicks, file downloads — aren't the whole story.
 4. **Add your business context**, in your own words — what the site is
    for, so the agent isn't left guessing at it.
-5. **Add the tracking script to your website.** One `<script>` tag; no
-   consent banner needed by default.
+5. **Add the tracking script to your website.** One `<script>` tag and
+   the decision whether to enable automatic tracking or not.
 6. **Connect your preferred AI agent** — Claude, Cursor, or any MCP
    client, with one API key.
-7. **Ask your analytics questions.**
+7. **Ask your analytics questions.** No more login to tools or
+   creating dashboards, just chat.
 
 The [quick start](#quick-start) below walks through 1, 2, 5 and 6;
 [tracking your own events](#tracking-your-own-events) and
