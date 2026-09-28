@@ -262,10 +262,17 @@
     document.getElementById("version-pill").hidden = !latestVersion;
   }
 
+  // Pinned to UTC like formatDayLabel and the chart captions below it —
+  // 7d/30d are now fixed UTC calendar boundaries (see windowPeriod on
+  // the server), so formatting them in the browser's local zone would
+  // print a date the chart directly underneath disagrees with for any
+  // viewer not at UTC+0.
   function renderPeriod(period) {
-    const from = new Date(period.from).toLocaleDateString(DATE_LOCALE);
-    const to = new Date(period.to).toLocaleDateString(DATE_LOCALE);
-    document.getElementById("period").textContent = from + " – " + to;
+    const opts = { timeZone: "UTC" };
+    const from = new Date(period.from).toLocaleDateString(DATE_LOCALE, opts);
+    const to = new Date(period.to).toLocaleDateString(DATE_LOCALE, opts);
+    document.getElementById("period").textContent =
+      from + " – " + to + " (UTC)";
   }
 
   // Read-only mode hides every write control rather than disabling it:
@@ -686,10 +693,15 @@
         el("td", null, [String(totalEvents(row))]),
       ]),
     );
-    return el("table", { className: "visually-hidden" }, [
-      el("caption", null, [caption]),
-      el("thead", null, [head]),
-      el("tbody", null, body),
+    // Hidden through a wrapper, not on the table itself: a table box
+    // ignores `overflow`, so its cells kept their width and widened the
+    // page on a 320px phone, which then scrolled sideways.
+    return el("div", { className: "visually-hidden" }, [
+      el("table", null, [
+        el("caption", null, [caption]),
+        el("thead", null, [head]),
+        el("tbody", null, body),
+      ]),
     ]);
   }
 
@@ -2342,14 +2354,14 @@
     document.getElementById("error-banner").classList.remove("visible");
   }
 
-  let windowDays = 7;
+  let windowRange = "7d";
 
   async function load() {
     const button = document.getElementById("refresh");
     button.disabled = true;
     button.classList.add("is-loading");
     try {
-      const res = await cockpitFetch(`/cockpit/data?days=${windowDays}`);
+      const res = await cockpitFetch(`/cockpit/data?range=${windowRange}`);
       if (!res.ok) throw new Error("HTTP " + res.status);
       render(await readJson(res));
     } catch (err) {
@@ -2650,9 +2662,9 @@
   document
     .getElementById("window-picker")
     .addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-days]");
+      const button = event.target.closest("button[data-range]");
       if (!button) return;
-      windowDays = Number(button.dataset.days);
+      windowRange = button.dataset.range;
       for (const b of event.currentTarget.querySelectorAll("button")) {
         b.classList.toggle("active", b === button);
         // Selection is otherwise conveyed by a class alone, which a

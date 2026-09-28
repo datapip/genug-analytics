@@ -5134,6 +5134,47 @@ tool is a noted, deliberately deferred follow-up rather than done here.
 Verified with a test that calls the new tool and asserts its text is
 identical to the resource's.
 
+### Cockpit period picker: "7d" and "30d" stopped being rolling windows
+
+Reported by the maintainer, from the demo deployment: the cockpit's 7d
+card read 144 sessions; an MCP `get_traffic_summary` call for what
+looked like the same nominal period ("last 7 days") answered 146.
+Nothing was wrong — the cockpit's 7d button computed `now − 7 days` to
+`now`, captured at page load, and the MCP call was made a few minutes
+later, so it legitimately covered more live traffic. But a rolling
+window that changes between one reload and the next, and disagrees with
+an MCP query for what reads as the same period, is exactly the
+plausible-but-wrong shape this project tries hardest to avoid — the
+numbers looked like a discrepancy in the data rather than two different
+questions.
+
+Fixed by splitting the four period options on whether "changes during
+the day" is the promise or the bug. Today and 24h keep the old rolling
+behaviour — `now − 24h` to `now`, or UTC midnight to `now` — because a
+partial, live period is what those labels mean. 7d and 30d became the
+N complete UTC calendar days *before* today, fixed the moment the day
+turns over: reloading at 9am and at 5pm on the same day now gives the
+same 7d number, and that number stops moving once the day it covers is
+over. The cost is real — a 7d card no longer shows anything from the
+still-open today — accepted because stability was the whole point of
+the complaint, and Today already covers the partial day on its own.
+
+`server/lib/windowPeriod.ts` computes all four, with a test pinning
+the boundaries. The header's date line is now formatted in UTC and
+says so: it used the browser's zone, which was harmless while `to` was
+always "now", but with a fixed UTC end it printed today's date above a
+chart that correctly stopped at yesterday.
+
+The query parameter changed from `?days=<number>` to `?range=<key>`,
+since the value is no longer a day count. That is a breaking change for
+scripts, which `docs/deploying.md` documents. The old route fell back
+to 7d for any value it didn't know — noticed once already, when a load
+test asked for `days=365` and measured the 7-day window without
+noticing. So a wrong `range`, or a leftover `days`, is now a 400 naming
+the valid values. A _missing_ `range` still means 7d, because that
+answer is the one the caller asked for by asking for nothing.
+`docs/recipe-change-cockpit.md` has the mechanics for adding an option.
+
 ### `get_recent_events`: a size budget, not a lower `limit`
 
 A review asked for token budgets on raw-data tools. Most were already

@@ -7,6 +7,42 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Breaking**
+
+- **`/cockpit/data` takes `range`, not `days`.** Use
+  `?range=today|24h|7d|30d`. A script still sending `days`, or an
+  unknown `range`, now gets a 400 naming the valid values. Before, any
+  unknown value quietly returned the 7-day answer. Leaving the
+  parameter out still means `7d`. Only matters if you call the route
+  from a script (`docs/deploying.md`); the cockpit page is updated.
+
+**Added**
+
+- **A Today button in the cockpit**, from midnight UTC until now. On a
+  phone it reads "T" so the controls stay on one line down to 320px.
+
+**Changed**
+
+- **The cockpit's 7d and 30d are now complete UTC days, not rolling
+  windows.** They cover the 7 or 30 days before today and leave today
+  out, so the number no longer changes between two reloads on the same
+  day. It can also be compared with an MCP query for the same dates.
+  Expect lower numbers than before, since today's partial day is no
+  longer included. Use Today or 24h for what is happening now. Hover a
+  button to see which kind it is.
+- **The cockpit's date line is shown in UTC and says so**, matching the
+  charts under it. It used the browser's time zone.
+
+**Fixed**
+
+- **The cockpit no longer scrolls sideways on a 320px phone.** The
+  trend chart's hidden data table for screen readers was a few pixels
+  wider than the screen.
+- **No stray "·" at the start of a line** when the cockpit's date line
+  wraps on a phone.
+
 ## 0.9.0 — 2026-09-27
 
 **Breaking**

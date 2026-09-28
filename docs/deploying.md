@@ -336,8 +336,13 @@ curl -s -c genug-cookies.txt -X POST https://data.your-domain.com/cockpit/sessio
   -H 'content-type: application/json' -H 'x-genug-cockpit: 1' \
   -d '{"password":"<COCKPIT_PASSWORD>"}'
 
-curl -s -b genug-cookies.txt 'https://data.your-domain.com/cockpit/data?days=7'
+curl -s -b genug-cookies.txt 'https://data.your-domain.com/cockpit/data?range=7d'
 ```
+
+`range` is one of `today`, `24h`, `7d` or `30d`, the same as the
+cockpit's buttons, and defaults to `7d`. `today` and `24h` end now.
+`7d` and `30d` are complete UTC days and leave out today. Any other
+value, or the old `days` parameter, gets a 400 naming the valid ones.
 
 `curl -u` no longer works — the cockpit used to take HTTP Basic Auth and
 does not any more.

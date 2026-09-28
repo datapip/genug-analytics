@@ -39,6 +39,7 @@ import { createEventFile } from "../lib/createEvent.js";
 import { addEventProp } from "../lib/addEventProp.js";
 import { deleteEventFile } from "../lib/deleteEvent.js";
 import { parseRetentionDays } from "../lib/retention.js";
+import { parseWindowRange, windowPeriod } from "../lib/windowPeriod.js";
 import {
   getRejectedEventCount,
   getTopRejectedEvents,
@@ -88,21 +89,11 @@ import { latestVersion } from "../lib/updateCheck.js";
 const cockpitPassword = requireEnv("COCKPIT_PASSWORD");
 const readOnly = parseReadOnly(process.env.READ_ONLY);
 
-const DEFAULT_WINDOW_DAYS = 7;
-// Only these three are offered — a full custom date range is analysis,
-// which is the AI agent's job (see docs/decisions.md's "Core design
-// principle"); the cockpit's job is a quick, bounded glance.
-const ALLOWED_WINDOW_DAYS = new Set([1, 7, 30]);
 const RECENT_EVENTS_LIMIT = 5;
 const TOP_PAGES_LIMIT = 5;
 const TOP_REFERRERS_LIMIT = 5;
 const DEVICE_BREAKDOWN_LIMIT = 6;
 const REJECTED_EVENTS_LIMIT = 5;
-
-function parseWindowDays(value: unknown): number {
-  const days = Number(value);
-  return ALLOWED_WINDOW_DAYS.has(days) ? days : DEFAULT_WINDOW_DAYS;
-}
 
 export const cockpitRouter: Router = Router();
 
@@ -146,14 +137,12 @@ cockpitRouter.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 cockpitRouter.get("/data", (req: Request, res: Response) => {
-  const windowDays = parseWindowDays(req.query.days);
-  const now = new Date();
-  const period = {
-    from: new Date(
-      now.getTime() - windowDays * 24 * 60 * 60 * 1000,
-    ).toISOString(),
-    to: now.toISOString(),
-  };
+  const parsed = parseWindowRange(req.query);
+  if (!parsed.ok) {
+    res.status(400).json({ ok: false, error: parsed.error });
+    return;
+  }
+  const period = windowPeriod(parsed.range, new Date());
 
   res.json({
     period,

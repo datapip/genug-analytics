@@ -55,18 +55,38 @@
               role="group"
               aria-label="Time period"
             >
-              <button type="button" data-days="1" aria-pressed="false">
+              <button
+                type="button"
+                data-range="today"
+                aria-pressed="false"
+                title="Since midnight UTC — updates continuously"
+              >
+                <span class="range-long">Today</span
+                ><span class="range-short" aria-hidden="true">T</span>
+              </button>
+              <button
+                type="button"
+                data-range="24h"
+                aria-pressed="false"
+                title="Rolling last 24 hours — updates continuously"
+              >
                 24h
               </button>
               <button
                 type="button"
-                data-days="7"
+                data-range="7d"
                 class="active"
                 aria-pressed="true"
+                title="7 complete UTC days before today — not today itself"
               >
                 7d
               </button>
-              <button type="button" data-days="30" aria-pressed="false">
+              <button
+                type="button"
+                data-range="30d"
+                aria-pressed="false"
+                title="30 complete UTC days before today — not today itself"
+              >
                 30d
               </button>
             </div>

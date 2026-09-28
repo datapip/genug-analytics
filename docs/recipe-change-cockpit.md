@@ -216,10 +216,21 @@ therefore takes rows, never `null`.
 
 ## Changing the period options
 
-The picker offers 24h / 7d / 30d, validated server-side in
-`parseWindowDays` (`server/routes/cockpit.ts`) — an unlisted value
-falls back to the default rather than being honoured. To change the
-options, edit `ALLOWED_WINDOW_DAYS` _and_ the buttons in `index.html`.
+The picker offers Today / 24h / 7d / 30d, sent as `?range=` and
+validated server-side by `parseWindowRange` (`server/lib/windowPeriod.ts`).
+A missing value is the default; an unlisted one is refused with a 400,
+because scripts call this route too and a silent default would answer
+a different question. To change the options, edit `windowRangeSchema`,
+`windowPeriod` and its test, _and_ the buttons in `index.html`.
+
+Today and 24h are rolling windows ending now — a partial, still-moving
+period is what those labels promise. 7d and 30d are not: they are the
+N complete UTC calendar days before today, fixed at the moment the day
+turns over. That split exists because a rolling 7d window read as "the
+last 7 days" but changed on every reload, including against numbers an
+MCP query for the same nominal period had already returned — plausible
+but different answers to what looked like the same question. See
+`docs/decisions.md` if you're weighing changing it back.
 
 A free-form date range is deliberately not offered: that is analysis,
 which is the agent's job.

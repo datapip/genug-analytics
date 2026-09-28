@@ -864,7 +864,7 @@ test("refuses event writes while events are read from the image", async (t) => {
   const auth = await signInToCockpit(port);
 
   const page = (await (
-    await fetch(`${base}/cockpit/data?days=7`, { headers: { cookie: auth } })
+    await fetch(`${base}/cockpit/data?range=7d`, { headers: { cookie: auth } })
   ).json()) as { readOnly: boolean; schemaEditable: boolean };
   assert.equal(page.readOnly, false);
   assert.equal(page.schemaEditable, false);
@@ -1520,6 +1520,14 @@ test("answers /cockpit/data on a database with nothing in it", async (t) => {
   ]) {
     assert.ok(key in data, `/cockpit/data is missing ${key}`);
   }
+
+  // A script still on the old parameter gets told, not 7-day numbers.
+  // 400, not 401: cockpitFetch treats 401 as "session ran out".
+  const old = await fetch(`http://localhost:${port}/cockpit/data?days=30`, {
+    headers: { cookie: auth },
+  });
+  assert.equal(old.status, 400);
+  assert.match(((await old.json()) as { error: string }).error, /range/);
 });
 
 // End to end: a real save reaches the file CONTEXT_PATH points at, and
@@ -1592,7 +1600,7 @@ test("saves ground rules, business context and adds a history note from the cock
   // /cockpit/data reflects both, read fresh rather than from a cache
   // the writes above would have to know to invalidate.
   const page = (await (
-    await fetch(`${base}/cockpit/data?days=7`, { headers: { cookie: auth } })
+    await fetch(`${base}/cockpit/data?range=7d`, { headers: { cookie: auth } })
   ).json()) as {
     groundRules: { text: string; usingDefault: boolean };
     businessContext: { text: string };
@@ -1840,7 +1848,7 @@ test("resets the events directory to the built-ins and reports what it stranded"
   // The registry is live again without a restart, and the orphaned row
   // is reported where the cockpit shows it.
   const data = (await (
-    await fetch(`${base}/cockpit/data?days=7`, {
+    await fetch(`${base}/cockpit/data?range=7d`, {
       headers: { cookie: auth },
     })
   ).json()) as {
@@ -1963,7 +1971,7 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
 
   // Reads still work, and the page is told which mode it is in.
   const page = (await (
-    await fetch(`${base}/cockpit/data?days=7`, {
+    await fetch(`${base}/cockpit/data?range=7d`, {
       headers: { cookie: auth },
     })
   ).json()) as {
