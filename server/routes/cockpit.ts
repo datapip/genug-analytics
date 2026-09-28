@@ -115,6 +115,15 @@ function strandedAfterReload(name: string, candidates: number): number {
   return Math.max(0, candidates);
 }
 
+// These answers carry visitors' URLs and prop values: no cache may keep
+// them, shared or the browser's own on a shared machine after sign-out.
+// Requests that fall through to the pages and files below get their own
+// header there, which replaces this one.
+cockpitRouter.use((_req: Request, res: Response, next: NextFunction) => {
+  res.set("Cache-Control", "private, no-store");
+  next();
+});
+
 // Read-only mode closes every write on this router in one place, by
 // method rather than by route: an edit, a new event, a reload and both
 // danger-zone resets are all POST or PUT, and so will be the next write

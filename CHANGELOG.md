@@ -11,6 +11,17 @@ how a version is cut.
 
 **Fixed**
 
+- **The cockpit no longer breaks for a few hours after an upgrade
+  behind a CDN.** Cloudflare, by default, lets browsers keep scripts
+  for four hours but not the page, so a returning browser ran the new
+  page with the old script. After 0.10.0 that showed as "HTTP 400" and
+  period buttons that did nothing. Script, stylesheet and icon
+  addresses now carry a version, so a new release always loads new
+  files. If you are on 0.10.0 behind Cloudflare, a hard reload fixes
+  it until you upgrade.
+- **Cockpit responses are marked `private`**, so a CDN no longer keeps
+  copies of files that need a sign-in. The data the page loads is also
+  `no-store`, so it isn't left in a shared computer's browser cache.
 - **The last two labels on the traffic chart no longer overlap.** In
   30d and in the Hour view, the final date or hour was printed on top
   of the one before it.

@@ -263,6 +263,9 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   // needs its own check — guarding only one of them is a plausible slip.
   assert.equal((await fetch(`${base}/cockpit/data`)).status, 401);
   assert.equal((await fetch(`${base}/cockpit/index.html`)).status, 401);
+  // The page is rendered by its own handler, not express.static, so both
+  // of its addresses need the check.
+  assert.equal((await fetch(`${base}/cockpit/`)).status, 401);
   // Not a read: this one changes which events the server accepts.
   assert.equal(
     (
@@ -285,6 +288,37 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
     (await fetch(`${base}/cockpit/index.html`, { headers: { cookie } })).status,
     200,
   );
+
+  // Versioned addresses and cache headers, so a CDN in front can neither
+  // pair a new page with an old script nor keep a gated response.
+  const page = await fetch(`${base}/cockpit/`, { headers: { cookie } });
+  assert.equal(page.headers.get("cache-control"), "private, no-cache");
+  assert.match(await page.text(), /src="cockpit\.js\?v=[0-9a-f]{10}"/);
+  const script = await fetch(`${base}/cockpit/cockpit.js?v=x`, {
+    headers: { cookie },
+  });
+  assert.equal(script.status, 200);
+  assert.equal(script.headers.get("cache-control"), "private, no-cache");
+  const data = await fetch(`${base}/cockpit/data`, { headers: { cookie } });
+  assert.equal(data.headers.get("cache-control"), "private, no-store");
+  // The login page stays public, and so does every versioned file it
+  // loads: the gate matches the path without the query string.
+  const login = await fetch(`${base}/cockpit/login.html`);
+  assert.equal(login.status, 200);
+  const loginFiles = [
+    ...(await login.text()).matchAll(/(?:src|href)="([^"#]+\?v=[^"]+)"/g),
+  ].map((match) => match[1]!);
+  assert.equal(loginFiles.length, 4);
+  for (const file of loginFiles) {
+    assert.equal((await fetch(`${base}/cockpit/${file}`)).status, 200, file);
+  }
+  // Without the slash, still redirected, so relative addresses resolve.
+  const bare = await fetch(`${base}/cockpit`, {
+    headers: { cookie },
+    redirect: "manual",
+  });
+  assert.equal(bare.status, 301);
+  assert.equal(bare.headers.get("location"), "/cockpit/");
 
   const mcpBody = {
     method: "POST",

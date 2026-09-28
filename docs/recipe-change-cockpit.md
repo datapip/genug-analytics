@@ -3,7 +3,7 @@
 The cockpit is the page at `/cockpit`, behind `COCKPIT_PASSWORD`. It is
 mostly numbers to read, plus the Schema registry card, which writes:
 reloading, editing and registering events. Six static files, served
-exactly as they are on disk:
+as they are on disk, with one exception below:
 
 ```
 apps/cockpit/index.html    markup
@@ -21,6 +21,14 @@ file, add it there too, or it will 401.
 
 **There is no build step.** Edit the file, reload the page. Keep it
 that way.
+
+The exception: the server adds `?v=<hash>` to every script, stylesheet
+and icon address in the two HTML pages as it sends them
+(`server/lib/cockpitPage.ts`). The hash is of the files' contents, so a
+new release is a new address, and a CDN that keeps scripts for hours
+can't run an old one under a new page. A new file the pages load goes
+in `COCKPIT_ASSETS` there. A test reads both pages and fails on any
+local address left without a version.
 
 ## What the cockpit is for
 

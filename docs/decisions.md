@@ -5175,6 +5175,52 @@ the valid values. A _missing_ `range` still means 7d, because that
 answer is the one the caller asked for by asking for nothing.
 `docs/recipe-change-cockpit.md` has the mechanics for adding an option.
 
+### Cockpit files get a version in their address
+
+Found right after 0.10.0 went out on the demo. The cockpit was broken
+for a returning browser: the new page, with its four period buttons,
+ran the old `cockpit.js`, which asked for `?days=7`, and the new server
+answered 400. The demo sits behind Cloudflare, whose Browser Cache TTL
+turned Express's `max-age=0` on scripts and stylesheets into four
+hours, and left the HTML alone. So after any release that changes what
+the page and the script agree on, a CDN deployer's cockpit breaks for
+up to four hours. It was not a bug in 0.10.0; 0.10.0 was just the first
+release to change that agreement. An earlier review here had said
+browsers re-check the files after an upgrade — true of Genug's own
+headers, not of whatever sits in front of it.
+
+The server now adds `?v=<hash>` to every script, stylesheet and icon
+address in the two HTML pages as it sends them
+(`server/lib/cockpitPage.ts`). A new release is a new address, which no
+cache can hold back, whatever it does with headers. Choices, from an
+architect and a security review:
+
+- **A hash of the contents, not the release number.** A clone reports
+  `VERSION` as "dev" forever, and file times are not reliable across
+  Docker layers. One hash covers all five files; invalidating a little
+  more than needed costs nothing at a cockpit's traffic.
+- **Rewriting the real attributes, not a placeholder.** The file on
+  disk stays a working page, and "edit the file, reload the page" still
+  works: the page is read and hashed on every request. It is also
+  rendered once at startup, so a missing file stops the server rather
+  than the first visit.
+- **A test reads both real pages** and fails on any local address left
+  without a version. The rewrite matches exact names, so a new file
+  would otherwise slip through silently.
+- **`private` on everything past the session gate.** The pages get
+  `private, no-cache`, the files `private, no-cache`, the JSON
+  `private, no-store`. Express's `public` had let Cloudflare keep a copy
+  of the gated `cockpit.js` at its edge (`cf-cache-status: REVALIDATED`
+  on a signed-in request). The code is public anyway, but the gate
+  should mean what it says, and the JSON carries visitors' URLs and
+  props, which a shared computer's browser cache should not keep after
+  sign-out either.
+
+Not done: long-lived or `immutable` caching of the versioned files. It
+would now be safe, but nothing needs it. Whether Cloudflare's Browser
+Cache TTL also overrides `private` is not something its docs settle; the
+versioned address makes the fix independent of that.
+
 ### `get_recent_events`: a size budget, not a lower `limit`
 
 A review asked for token budgets on raw-data tools. Most were already

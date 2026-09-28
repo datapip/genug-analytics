@@ -8,6 +8,7 @@ import { eventsRouter } from "./routes/events.js";
 import { mcpRouter } from "./routes/mcp.js";
 import { cockpitRouter } from "./routes/cockpit.js";
 import { createCockpitAuth } from "./lib/cockpitAuth.js";
+import { renderCockpitPage, type CockpitPage } from "./lib/cockpitPage.js";
 import {
   parseRetentionDays,
   pruneOldEvents,
@@ -150,9 +151,46 @@ const cockpitAuth = createCockpitAuth(requireEnv("COCKPIT_PASSWORD"));
 app.use("/cockpit", cockpitSecurityHeaders, cockpitAuth.router);
 app.use("/cockpit", cockpitAuth.requireSession);
 app.use("/cockpit", cockpitRouter);
+
+// The two pages go out with every script and stylesheet address
+// versioned (lib/cockpitPage.ts), so a CDN keeping old scripts can't
+// pair them with a new page. Rendered once here so a missing file stops
+// startup, then again per request so an edit shows on reload.
+//
+// `private, no-cache` is what the fix rests on: the page must always be
+// fetched fresh, and never stored by a shared cache. Today Cloudflare
+// happens to leave HTML alone; this says so rather than relying on it.
+const cockpitDir = fileURLToPath(
+  new URL("../../apps/cockpit", import.meta.url),
+);
+renderCockpitPage(cockpitDir, "index.html");
+renderCockpitPage(cockpitDir, "login.html");
+const cockpitPages = express.Router({ strict: true, caseSensitive: true });
+function sendCockpitPage(page: CockpitPage) {
+  return (req: express.Request, res: express.Response, next: () => void) => {
+    // "/cockpit" with no slash arrives here as "/" too. Leave it to
+    // express.static's redirect, or the page's relative addresses would
+    // resolve against the site root.
+    if (req.path === "/" && !req.originalUrl.split("?")[0]!.endsWith("/")) {
+      next();
+      return;
+    }
+    res
+      .set("Cache-Control", "private, no-cache")
+      .type("html")
+      .send(renderCockpitPage(cockpitDir, page));
+  };
+}
+cockpitPages.get(["/", "/index.html"], sendCockpitPage("index.html"));
+cockpitPages.get("/login.html", sendCockpitPage("login.html"));
+app.use("/cockpit", cockpitPages);
 app.use(
   "/cockpit",
-  express.static(fileURLToPath(new URL("../../apps/cockpit", import.meta.url))),
+  express.static(cockpitDir, {
+    // Everything here is past the session gate, so no shared cache may
+    // keep a copy: `public` let Cloudflare store cockpit.js at its edge.
+    setHeaders: (res) => res.setHeader("Cache-Control", "private, no-cache"),
+  }),
 );
 
 // Puts the ground-rules and history files on the volume the first time,
