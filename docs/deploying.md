@@ -119,7 +119,7 @@ repo to Coolify at all. Every pushed `v*` tag is built and published to
 ```yaml
 services:
   genug:
-    image: "ghcr.io/datapip/genug-analytics:v0.10.0" # the latest released tag
+    image: "ghcr.io/datapip/genug-analytics:v0.10.1" # the latest released tag
     environment:
       - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
       - "MCP_API_KEY=${MCP_API_KEY}"
