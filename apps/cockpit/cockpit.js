@@ -597,8 +597,13 @@
       1,
       Math.ceil(rows.length / Math.max(1, Math.floor(innerWidth / 52))),
     );
+    // The last row is always labelled, so a regular label closer to it
+    // than one step is dropped: with 30 days at a step of 2, "26/09"
+    // and "27/09" otherwise printed on top of each other.
+    const lastIndex = rows.length - 1;
     rows.forEach((row, i) => {
-      if (i % labelStep !== 0 && i !== rows.length - 1) return;
+      const regular = i % labelStep === 0 && lastIndex - i >= labelStep;
+      if (!regular && i !== lastIndex) return;
       children.push(
         svgEl(
           "text",

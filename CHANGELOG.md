@@ -7,6 +7,14 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Fixed**
+
+- **The last two labels on the traffic chart no longer overlap.** In
+  30d and in the Hour view, the final date or hour was printed on top
+  of the one before it.
+
 ## 0.10.0 — 2026-09-28
 
 **Breaking**
