@@ -65,7 +65,7 @@ cover 3 and 4.
 
 A small cockpit is there for when you want to look rather than ask:
 
-![The Genug Analytics cockpit in dark mode: an Overview band with session, event, rejected and bot counts, then a 30-day traffic trend chart and cards ranking top pages, top referrers and device types](docs/assets/cockpit.png)
+![The Genug Analytics cockpit in dark mode: an Overview band with session, event, rejected and bot counts, then a 7-day traffic trend chart and cards ranking top pages, top referrers and device types](docs/assets/cockpit.png)
 
 ## Quick start
 
