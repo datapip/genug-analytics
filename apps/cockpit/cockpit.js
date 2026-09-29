@@ -2359,7 +2359,7 @@
     document.getElementById("error-banner").classList.remove("visible");
   }
 
-  let windowRange = "7d";
+  let windowRange = "today";
 
   async function load() {
     const button = document.getElementById("refresh");
