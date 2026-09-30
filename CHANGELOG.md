@@ -7,7 +7,7 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
-## Unreleased
+## 0.11.0 — 2026-09-30
 
 **Breaking**
 
@@ -48,6 +48,13 @@ how a version is cut.
   cards showing traffic. Today now opens in the Hour view, and leaving
   it brings back the view you had before. A line chart also marks each
   day with a dot, so a single day still shows.
+
+## 0.10.2 — 2026-09-29
+
+**Changed**
+
+- **The cockpit opens on Today, not 7d.** The period you pick is not
+  remembered between visits.
 
 ## 0.10.1 — 2026-09-28
 
