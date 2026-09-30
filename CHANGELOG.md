@@ -43,6 +43,11 @@ how a version is cut.
   it. Totals, page views and events are not affected, and days after
   the upgrade are exact.
 - **Automatic history notes are dated in your time zone.**
+- **The traffic chart is no longer blank on Today.** Today is one day,
+  and a line needs two points, so the default view drew nothing under
+  cards showing traffic. Today now opens in the Hour view, and leaving
+  it brings back the view you had before. A line chart also marks each
+  day with a dot, so a single day still shows.
 
 ## 0.10.1 — 2026-09-28
 

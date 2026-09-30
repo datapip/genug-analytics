@@ -573,6 +573,25 @@
             points: linePoints(get),
           }),
         );
+        // A dot on every point. One point alone has no line to draw —
+        // Today in the Daily view was a blank chart under cards saying
+        // 48 sessions, which reads as "no traffic today" — so a lone
+        // point is always drawn, and larger. Otherwise only where the
+        // points are far enough apart: 30 days on a phone would be a
+        // bead chain hiding the line.
+        if (rows.length === 1 || innerWidth / rows.length >= 16) {
+          rows.forEach((r, i) => {
+            children.push(
+              svgEl("circle", {
+                class: "trend-point",
+                style: `fill:${color}`,
+                cx: pointX(i),
+                cy: valueY(get(r)),
+                r: rows.length === 1 ? 5 : 3,
+              }),
+            );
+          });
+        }
       }
     } else {
       const barGap = 3;
@@ -2285,7 +2304,13 @@
   /* ---------- wiring ---------- */
 
   let latestData = null;
-  let trendMode = "day";
+  // Hour, matching the default range: Today is a single day, which the
+  // Daily view can only show as one point. The window picker below
+  // keeps the two in step.
+  let trendMode = "hour";
+  // The view to go back to on leaving Today. Daily when the page opened
+  // on Today and nothing was picked before it.
+  let trendModeBeforeToday = "day";
   const TREND_DATA_KEY = {
     day: "trafficByDay",
     weekday: "trafficByDayOfWeek",
@@ -2689,7 +2714,18 @@
     .addEventListener("click", (event) => {
       const button = event.target.closest("button[data-range]");
       if (!button) return;
+      // Only crossing Today moves the trend view. Into it, Hour is the
+      // useful picture of one day — Daily or Weekday would be a single
+      // point or bar. Out of it, the view from before Today comes back,
+      // so a round trip through Today leaves the owner's choice alone.
+      const previous = windowRange;
       windowRange = button.dataset.range;
+      if (windowRange === "today" && previous !== "today") {
+        trendModeBeforeToday = trendMode;
+        selectTrendMode("hour");
+      } else if (previous === "today" && windowRange !== "today") {
+        selectTrendMode(trendModeBeforeToday);
+      }
       for (const b of event.currentTarget.querySelectorAll("button")) {
         b.classList.toggle("active", b === button);
         // Selection is otherwise conveyed by a class alone, which a
@@ -2705,16 +2741,25 @@
     .addEventListener("click", (event) => {
       const button = event.target.closest("button[data-mode]");
       if (!button) return;
-      trendMode = button.dataset.mode;
-      for (const b of event.currentTarget.querySelectorAll("button")) {
-        b.classList.toggle("active", b === button);
-        // Selection is otherwise conveyed by a class alone, which a
-        // screen reader cannot see: it hears three plain buttons and
-        // nothing at all changing when one is pressed.
-        b.setAttribute("aria-pressed", String(b === button));
-      }
+      selectTrendMode(button.dataset.mode);
       renderCurrentTrend();
     });
+
+  // Sets the mode and its buttons together, for the owner's click and
+  // for the window picker's switch alike. Rendering is left to the
+  // caller: the window picker reloads the data first.
+  function selectTrendMode(mode) {
+    trendMode = mode;
+    const group = document.getElementById("trend-granularity");
+    for (const b of group.querySelectorAll("button[data-mode]")) {
+      const selected = b.dataset.mode === mode;
+      b.classList.toggle("active", selected);
+      // Selection is otherwise conveyed by a class alone, which a
+      // screen reader cannot see: it hears three plain buttons and
+      // nothing at all changing when one is pressed.
+      b.setAttribute("aria-pressed", String(selected));
+    }
+  }
 
   // The chart is drawn at real pixel dimensions, so it has to be
   // redrawn when its container's width changes — a plain

@@ -579,6 +579,10 @@ button.is-loading svg {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.trend-point {
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
 .trend-area {
   stroke: none;
   opacity: 0.09;

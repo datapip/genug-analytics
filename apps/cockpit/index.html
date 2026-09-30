@@ -252,18 +252,20 @@
               role="group"
               aria-label="Trend granularity"
             >
-              <button
-                type="button"
-                data-mode="day"
-                class="active"
-                aria-pressed="true"
-              >
+              <button type="button" data-mode="day" aria-pressed="false">
                 Daily
               </button>
               <button type="button" data-mode="weekday" aria-pressed="false">
                 Weekday
               </button>
-              <button type="button" data-mode="hour" aria-pressed="false">
+              <!-- Selected to match the default range, Today; the
+                   window picker switches it (see selectTrendMode). -->
+              <button
+                type="button"
+                data-mode="hour"
+                class="active"
+                aria-pressed="true"
+              >
                 Hour
               </button>
             </div>
