@@ -32,13 +32,14 @@ import {
 // "What happened, and in what order" — everything keyed on event types
 // and their props rather than on pages, so unlike content.ts none of
 // these need a page-view event to exist at all.
-export const registerEventTools: ToolRegistrar = (server, db) => {
+export const registerEventTools: ToolRegistrar = (server, db, { timezone }) => {
+  const period = periodInput(timezone);
   server.registerTool(
     "get_top_events",
     {
       description: `Get the most-frequent event types (any registered event, not just page_view) for a given time period, ranked by events descending. Use this for a general 'what's happening' overview; use get_top_pages specifically for page view rankings. ${rankedShape("events")} ${SEGMENT_HINT}`,
       inputSchema: {
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of event types to return"),
       },
@@ -53,14 +54,14 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_event_trend",
     {
-      description: `Get one event type over time: per UTC calendar day in the period, how many times it happened (events), in how many sessions, and by how many distinct visitors — zero-filled for days it didn't happen, so a quiet day reads as a dip. Use this for "did signups grow this month"; get_traffic_by_day is the same shape for all traffic together. Sessions and visitors are counted per day, so one spanning midnight is in both, and a consentless visitor is a new id each day by design. The period is limited to ${MAX_TREND_DAYS} days. ${SEGMENT_HINT}`,
+      description: `Get one event type over time: per calendar day in the site's time zone (${timezone}), how many times it happened (events), in how many sessions, and by how many distinct visitors — zero-filled for days it didn't happen, so a quiet day reads as a dip. Use this for "did signups grow this month"; get_traffic_by_day is the same shape for all traffic together. Sessions and visitors are counted per day, so one spanning midnight is in both, and a consentless visitor is a new id each day by design. The period is limited to ${MAX_TREND_DAYS} days. ${SEGMENT_HINT}`,
       inputSchema: {
         event: z
           .string()
           .describe(
             'Registered event type name to trend, e.g. "newsletter_signup"',
           ),
-        ...periodInput,
+        ...period,
         ...segmentInput,
       },
     },
@@ -69,7 +70,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
       const tooLong = trendLengthError(from, to, "get_event_trend");
       if (tooLong) return tooLong;
       return withSegment(db, segment, { from, to }, (clause) =>
-        jsonContent(getEventTrend(db, event, { from, to }, clause)),
+        jsonContent(getEventTrend(db, event, { from, to }, timezone, clause)),
       );
     },
   );
@@ -79,7 +80,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
     {
       description: `Get the event types that most often start a session, ranked by number of sessions, descending. Counts sessions that STARTED in the period, by their genuine first event — a session already under way when the period began is not counted. Unlike get_top_entry_pages, this ranks by event type rather than page, and works regardless of whether this deployment tracks page views at all — useful when the url barely varies (e.g. a single-page app that never updates the address bar), where a page-based breakdown wouldn't be meaningful. ${rankedShape("sessions")} ${SEGMENT_HINT}`,
       inputSchema: {
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of event types to return"),
       },
@@ -96,7 +97,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
     {
       description: `Get the event types that most often end a session, ranked by number of sessions, descending. Counts sessions that STARTED in the period, by their genuine last event even where it fell after the period's end. Same relationship to get_top_exit_pages as get_top_entry_events has to get_top_entry_pages. ${rankedShape("sessions")} ${SEGMENT_HINT}`,
       inputSchema: {
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of event types to return"),
       },
@@ -123,7 +124,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
           .describe(
             'Prop name to group by, as declared in that event type\'s schema, e.g. "product_id"',
           ),
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of distinct values to return"),
       },
@@ -164,7 +165,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
           .describe(
             'Numeric prop name to sum, as declared in that event type\'s schema, e.g. "value"',
           ),
-        ...periodInput,
+        ...period,
         ...segmentInput,
       },
     },
@@ -195,7 +196,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_steps_funnel",
     {
-      description: `See how many sessions (or visitors) reached each step of an ordered sequence of event types within a period, e.g. ["product_viewed", "added_to_cart", "checkout_completed"]. A step only counts if it happened after the previous step was reached. Steps can be any registered event types, in any order you choose — read the schema-registry resource first to see what this deployment actually tracks. \`scope\` decides what walks the funnel. "session" (the default) counts sessions that completed the steps within one visit, and is correct for every visitor. In either scope only events inside the period count, so a session that reached a later step after the period's end is not a conversion here. "visitor" follows a visitor across visits — but consentless visitors (see get_consent_breakdown) get a new visitor_id every UTC day by design, so in that scope one of them who viewed at 23:50 and bought at 00:10 is two people who each did half the funnel, and a funnel spanning days only ever counts consentful visitors. Use "visitor" for a mostly-consentful deployment and multi-visit questions; otherwise leave the default. Returns the scope, and per step the number of sessions or visitors that reached it (named for the unit) plus its conversion rate relative to the first step, 0-1. ${SEGMENT_HINT} The segment decides who enters the funnel at step one; in visitor scope the later steps then follow those visitors wherever they went, so a visitor who entered on mobile and completed on desktop still converts under a mobile segment.`,
+      description: `See how many sessions (or visitors) reached each step of an ordered sequence of event types within a period, e.g. ["product_viewed", "added_to_cart", "checkout_completed"]. A step only counts if it happened after the previous step was reached. Steps can be any registered event types, in any order you choose — read the schema-registry resource first to see what this deployment actually tracks. \`scope\` decides what walks the funnel. "session" (the default) counts sessions that completed the steps within one visit, and is correct for every visitor. In either scope only events inside the period count, so a session that reached a later step after the period's end is not a conversion here. "visitor" follows a visitor across visits — but consentless visitors (see get_consent_breakdown) get a new visitor_id every day by design, at midnight in the site's time zone (${timezone}), so in that scope one of them who viewed at 23:50 and bought at 00:10 is two people who each did half the funnel, and a funnel spanning days only ever counts consentful visitors. Use "visitor" for a mostly-consentful deployment and multi-visit questions; otherwise leave the default. Returns the scope, and per step the number of sessions or visitors that reached it (named for the unit) plus its conversion rate relative to the first step, 0-1. ${SEGMENT_HINT} The segment decides who enters the funnel at step one; in visitor scope the later steps then follow those visitors wherever they went, so a visitor who entered on mobile and completed on desktop still converts under a mobile segment.`,
       inputSchema: {
         steps: z
           .array(z.string())
@@ -209,7 +210,7 @@ export const registerEventTools: ToolRegistrar = (server, db) => {
           .describe(
             'What walks the funnel: "session" (default; all steps within one visit, correct for every visitor) or "visitor" (across visits; only reliable for consentful visitors, since consentless ids rotate daily)',
           ),
-        ...periodInput,
+        ...period,
         ...segmentInput,
       },
     },

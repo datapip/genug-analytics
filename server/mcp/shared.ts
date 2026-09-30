@@ -17,7 +17,20 @@ import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
 // shared server. Nothing is returned — createMcpServer's registerTool
 // wrapper records what was registered as a side effect, so a module
 // never has to declare its own tools twice.
-export type ToolRegistrar = (server: McpServer, db: Database.Database) => void;
+export type ToolRegistrar = (
+  server: McpServer,
+  db: Database.Database,
+  context: ToolContext,
+) => void;
+
+// Deployment settings a tool needs at registration, passed in rather
+// than read from the environment so a test can set them directly.
+// `timezone` is the site's zone (TIMEZONE, lib/timezone.ts): it decides
+// what a bare date in a period means, and a description names it so the
+// agent never has to assume UTC.
+export interface ToolContext {
+  timezone: string;
+}
 
 export const SCHEMA_REGISTRY_URI = "genug://schema-registry";
 
@@ -60,13 +73,17 @@ export const SERVER_INSTRUCTIONS =
 // as an ordinary tool validation error the agent can read and retry,
 // rather than as a silently short result. See lib/period.ts for why an
 // unnormalized bound is actively wrong instead of merely sloppy.
-export function periodBound(edge: PeriodEdge, description: string) {
+export function periodBound(
+  edge: PeriodEdge,
+  timezone: string,
+  description: string,
+) {
   return z
     .string()
     .describe(description)
     .transform((value, ctx) => {
       try {
-        return normalizePeriodBound(value, edge);
+        return normalizePeriodBound(value, edge, timezone);
       } catch (error) {
         ctx.addIssue({
           code: "custom",
@@ -77,16 +94,22 @@ export function periodBound(edge: PeriodEdge, description: string) {
     });
 }
 
-export const periodInput = {
-  from: periodBound(
-    "from",
-    "Start of the period, inclusive. ISO8601: either a bare date (2026-09-30, meaning from 00:00:00 UTC that day) or a full timestamp (2026-09-30T14:00:00Z).",
-  ),
-  to: periodBound(
-    "to",
-    "End of the period, inclusive. ISO8601: either a bare date (2026-09-30, which covers that entire day through 23:59:59.999 UTC) or a full timestamp (2026-09-30T14:00:00Z).",
-  ),
-};
+// A function of the zone, not a constant: the description names it, and
+// a constant would bake whatever zone was set when the module loaded.
+export function periodInput(timezone: string) {
+  return {
+    from: periodBound(
+      "from",
+      timezone,
+      `Start of the period, inclusive. ISO8601: either a bare date (2026-09-30, meaning from 00:00 that day in the site's time zone, ${timezone}) or a full timestamp (2026-09-30T14:00:00Z).`,
+    ),
+    to: periodBound(
+      "to",
+      timezone,
+      `End of the period, inclusive. ISO8601: either a bare date (2026-09-30, which covers that entire day in the site's time zone, ${timezone}) or a full timestamp (2026-09-30T14:00:00Z).`,
+    ),
+  };
+}
 
 // The bounds every ranked tool shares. Only the description differs
 // between them, so that's the only parameter.

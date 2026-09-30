@@ -20,12 +20,15 @@ import { VISITOR_TEXT_CAVEAT } from "./shared.js";
 // The lib/ modules already test the metric maths; these tests are about
 // the tool layer's own job — validation, gating, and the shape it
 // promises the agent.
-async function connect(seed?: (db: Database.Database) => void) {
+async function connect(
+  seed?: (db: Database.Database) => void,
+  timezone = "UTC",
+) {
   const db = new Database(":memory:");
   migrate(db);
   seed?.(db);
 
-  const server = createMcpServer(db);
+  const server = createMcpServer(db, { timezone });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -152,7 +155,9 @@ test("the manifest matches what is actually registered", async () => {
   }));
 
   assert.deepEqual(
-    [...getToolManifest(db)].sort((a, b) => a.name.localeCompare(b.name)),
+    [...getToolManifest(db, { timezone: "UTC" })].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    ),
     [...listed].sort((a, b) => a.name.localeCompare(b.name)),
   );
   await client.close();
@@ -166,7 +171,7 @@ test("the manifest matches what is actually registered", async () => {
 test("a read-only server registers no writing tool, and its manifest says so", async () => {
   const db = new Database(":memory:");
   migrate(db);
-  const server = createMcpServer(db, { readOnly: true });
+  const server = createMcpServer(db, { readOnly: true, timezone: "UTC" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -188,10 +193,14 @@ test("a read-only server registers no writing tool, and its manifest says so", a
   assert.ok(names.includes("get_schema_errors"));
   assert.ok(names.includes("get_bot_activity"));
 
-  const manifest = getToolManifest(db, { readOnly: true }).map((t) => t.name);
+  const manifest = getToolManifest(db, { readOnly: true, timezone: "UTC" }).map(
+    (t) => t.name,
+  );
   assert.deepEqual([...manifest].sort(), [...names].sort());
   // And the writable manifest is a different list, not the same cache.
-  const writableNames = getToolManifest(db).map((t) => t.name);
+  const writableNames = getToolManifest(db, { timezone: "UTC" }).map(
+    (t) => t.name,
+  );
   assert.ok(writableNames.includes("delete_visitor_data"));
   assert.ok(writableNames.includes("get_recent_events"));
   await client.close();
@@ -238,7 +247,9 @@ test("no writing tool declares a query period", async () => {
   const db = new Database(":memory:");
   migrate(db);
   const readOnlyNames = new Set(
-    getToolManifest(db, { readOnly: true }).map((tool) => tool.name),
+    getToolManifest(db, { readOnly: true, timezone: "UTC" }).map(
+      (tool) => tool.name,
+    ),
   );
 
   const { client } = await connect();
@@ -354,6 +365,36 @@ test("get_traffic_by_day refuses a period longer than its cap", async () => {
 
   assert.match(String(result.error), /731/);
   assert.match(String(result.error), /get_traffic_summary/, "offers a way out");
+  await client.close();
+});
+
+// Every other test here runs in UTC, where a bare date is the same day
+// either way — so a tool that dropped the zone would pass them all.
+// 22:30 UTC on the 29th is 00:30 on the 30th in Berlin.
+test("a bare date means the site's day, through the tool layer", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(db, {
+      event: "page_view",
+      visitorId: "v",
+      sessionId: "s",
+      ts: "2026-09-29T22:30:00.000Z",
+      url: "https://example.com/",
+      props: {},
+    });
+  }, "Europe/Berlin");
+
+  const result = (await call(client, "get_traffic_by_day", {
+    from: "2026-09-30",
+    to: "2026-09-30",
+  })) as unknown as { date: string; viewEvents: number }[];
+  assert.deepEqual(
+    result.map((row) => [row.date, row.viewEvents]),
+    [["2026-09-30", 1]],
+  );
+
+  const { tools } = await client.listTools();
+  const byDay = tools.find((tool) => tool.name === "get_traffic_by_day");
+  assert.match(byDay?.description ?? "", /Europe\/Berlin/);
   await client.close();
 });
 

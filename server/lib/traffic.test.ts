@@ -11,6 +11,8 @@ import {
   getTrafficSummary,
   hasAnyEvents,
 } from "./traffic.js";
+import { buildSegment } from "./segment.js";
+import { normalizePeriodBound } from "./period.js";
 
 // The bucketed shapes gained `visitors`; the older assertions here are
 // about the other three numbers, and a dedicated test below pins visitors.
@@ -188,6 +190,7 @@ test("getTrafficByDay splits interactionEvents/viewEvents per day and zero-fills
     db,
     { from: "2026-01-01T00:00:00.000Z", to: "2026-01-03T23:59:59.999Z" },
     "page_view",
+    "UTC",
   );
 
   assert.deepEqual(withoutVisitors(result), [
@@ -233,6 +236,7 @@ test("getTrafficByDayOfWeek groups by weekday (Monday-first), summed across ever
     db,
     { from: "2026-01-05T00:00:00.000Z", to: "2026-01-12T23:59:59.999Z" },
     "page_view",
+    "UTC",
   );
 
   assert.deepEqual(withoutVisitors(result), [
@@ -246,7 +250,7 @@ test("getTrafficByDayOfWeek groups by weekday (Monday-first), summed across ever
   ]);
 });
 
-test("getTrafficByHour groups by UTC hour, zero-filling all 24 hours", () => {
+test("getTrafficByHour groups by hour in the given zone, zero-filling all 24 hours", () => {
   const db = setupDb();
   insertEvent(db, {
     event: "page_view",
@@ -281,6 +285,7 @@ test("getTrafficByHour groups by UTC hour, zero-filling all 24 hours", () => {
     db,
     { from: "2026-01-01T00:00:00.000Z", to: "2026-01-01T23:59:59.999Z" },
     "page_view",
+    "UTC",
   );
 
   assert.equal(result.length, 24);
@@ -452,7 +457,7 @@ test("getTrafficSummary and getTrafficByDay count distinct visitors", () => {
 
   assert.equal(getTrafficSummary(db, period, "page_view").visitors, 1);
   assert.deepEqual(
-    getTrafficByDay(db, period, "page_view").map((row) => row.visitors),
+    getTrafficByDay(db, period, "page_view", "UTC").map((row) => row.visitors),
     [1, 1],
   );
 
@@ -461,7 +466,7 @@ test("getTrafficSummary and getTrafficByDay count distinct visitors", () => {
   // where the field says sessions passed everything.
   assert.equal(getTrafficSummary(db, period, "page_view").sessions, 3);
   assert.deepEqual(
-    getTrafficByDay(db, period, "page_view").map((row) => row.sessions),
+    getTrafficByDay(db, period, "page_view", "UTC").map((row) => row.sessions),
     [2, 1],
   );
 });
@@ -490,7 +495,7 @@ test("getTrafficByHour and getTrafficByDayOfWeek count sessions, not visitors", 
     to: "2026-01-02T23:59:59.999Z",
   };
 
-  const byHour = getTrafficByHour(db, period, "page_view");
+  const byHour = getTrafficByHour(db, period, "page_view", "UTC");
   assert.equal(
     byHour.reduce((sum, row) => sum + row.sessions, 0),
     3,
@@ -499,7 +504,7 @@ test("getTrafficByHour and getTrafficByDayOfWeek count sessions, not visitors", 
   assert.equal(byHour.find((row) => row.hour === 10)?.sessions, 2);
   assert.equal(byHour.find((row) => row.hour === 10)?.visitors, 1);
 
-  const byWeekday = getTrafficByDayOfWeek(db, period, "page_view");
+  const byWeekday = getTrafficByDayOfWeek(db, period, "page_view", "UTC");
   assert.equal(
     byWeekday.reduce((sum, row) => sum + row.sessions, 0),
     3,
@@ -553,5 +558,139 @@ test("getSessionSummary's bounce rate is over sessions that viewed a page", () =
       bounced: 1,
       bounceRate: 0.5,
     },
+  );
+});
+
+// Berlin, the week clocks go back (25 October 2026, 03:00 CEST becomes
+// 02:00 CET). One event an hour, every hour, from local midnight on the
+// 24th to local midnight on the 27th: 24 + 25 + 24 = 73 events.
+function berlinClockChangeDb() {
+  const db = setupDb();
+  const start = Date.parse("2026-10-23T22:00:00.000Z"); // 24th 00:00 CEST
+  const end = Date.parse("2026-10-26T23:00:00.000Z"); // 27th 00:00 CET
+  for (let t = start, i = 0; t < end; t += 3_600_000, i++) {
+    insertEvent(db, {
+      event: "page_view",
+      visitorId: `v${i}`,
+      sessionId: `s${i}`,
+      ts: new Date(t).toISOString(),
+      url: "https://example.com/",
+      deviceType: i % 2 === 0 ? "mobile" : "desktop",
+      props: {},
+    });
+  }
+  return db;
+}
+
+const BERLIN_PERIOD = {
+  from: "2026-10-23T22:00:00.000Z",
+  to: "2026-10-26T22:59:59.999Z",
+};
+
+// The invariant that catches a bad span: an overlap would count a row
+// twice, a gap would drop it, and a bucket the day list doesn't know
+// would vanish from the zero-filled result. Any of them breaks the sum.
+test("getTrafficByDay in a zone with a clock change: local days, every row counted once", () => {
+  const db = berlinClockChangeDb();
+  const byDay = getTrafficByDay(
+    db,
+    BERLIN_PERIOD,
+    "page_view",
+    "Europe/Berlin",
+  );
+
+  assert.deepEqual(
+    byDay.map((row) => [row.date, row.viewEvents]),
+    [
+      ["2026-10-24", 24],
+      ["2026-10-25", 25],
+      ["2026-10-26", 24],
+    ],
+  );
+  const summary = getTrafficSummary(db, BERLIN_PERIOD, "page_view");
+  assert.equal(
+    byDay.reduce((sum, row) => sum + row.viewEvents, 0),
+    summary.viewEvents,
+  );
+});
+
+test("getTrafficByHour in a zone with a clock change: the repeated hour holds both", () => {
+  const db = berlinClockChangeDb();
+  const byHour = getTrafficByHour(
+    db,
+    BERLIN_PERIOD,
+    "page_view",
+    "Europe/Berlin",
+  );
+
+  // Three days, one event per real hour: every local hour three times,
+  // except 02:00, which happened twice on the 25th.
+  assert.deepEqual(
+    byHour.map((row) => row.viewEvents),
+    Array.from({ length: 24 }, (_, hour) => (hour === 2 ? 4 : 3)),
+  );
+});
+
+test("getTrafficByDayOfWeek in a zone buckets by the local weekday", () => {
+  const db = berlinClockChangeDb();
+  const byWeekday = getTrafficByDayOfWeek(
+    db,
+    BERLIN_PERIOD,
+    "page_view",
+    "Europe/Berlin",
+  );
+  const views = Object.fromEntries(
+    byWeekday.map((row) => [row.day, row.viewEvents]),
+  );
+  // 24 October 2026 is a Saturday.
+  assert.equal(views.Saturday, 24);
+  assert.equal(views.Sunday, 25);
+  assert.equal(views.Monday, 24);
+  assert.equal(views.Tuesday, 0);
+});
+
+// The spans join adds columns to the outer query; a segment clause pasted
+// after it names events' columns unqualified and must still resolve.
+test("a segment still narrows the zone-bucketed queries", () => {
+  const db = berlinClockChangeDb();
+  const mobile = buildSegment(
+    db,
+    [{ kind: "deviceType", value: "mobile" }],
+    BERLIN_PERIOD,
+    "page_view",
+  );
+  const byDay = getTrafficByDay(
+    db,
+    BERLIN_PERIOD,
+    "page_view",
+    "Europe/Berlin",
+    mobile,
+  );
+  assert.equal(
+    byDay.reduce((sum, row) => sum + row.viewEvents, 0),
+    37, // every other one of 73, starting with the first
+  );
+});
+
+// The spans are found between the first and last stored rows, not the
+// bounds asked for. Bounds a whole year wide around the same rows must
+// give the same answer — a "simplification" to the bounds' offsets
+// would put the 25-hour day's last hour on the wrong date.
+test("wide bounds around a clock change bucket the same as tight ones", () => {
+  const db = berlinClockChangeDb();
+  const wide = {
+    from: normalizePeriodBound("2026-01-01", "from", "Europe/Berlin"),
+    to: normalizePeriodBound("2026-12-31", "to", "Europe/Berlin"),
+  };
+  const byDay = getTrafficByDay(db, wide, "page_view", "Europe/Berlin");
+  const views = Object.fromEntries(
+    byDay.map((row) => [row.date, row.viewEvents]),
+  );
+  assert.equal(views["2026-10-24"], 24);
+  assert.equal(views["2026-10-25"], 25);
+  assert.equal(views["2026-10-26"], 24);
+  assert.equal(
+    byDay.reduce((sum, row) => sum + row.viewEvents, 0),
+    73,
   );
 });

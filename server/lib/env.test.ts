@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   requireEnv,
   parsePort,
+  parseTimezone,
   parseTrustProxy,
   parseReadOnly,
 } from "./env.js";
@@ -74,4 +75,40 @@ test("parseReadOnly refuses anything that is not true or false", () => {
   for (const value of ["1", "yes", "TRUE", "ture"]) {
     assert.throws(() => parseReadOnly(value), /READ_ONLY must be/);
   }
+});
+
+test("parseTimezone accepts an IANA name and returns its canonical spelling", () => {
+  assert.equal(parseTimezone("Europe/Berlin"), "Europe/Berlin");
+  assert.equal(parseTimezone("europe/berlin"), "Europe/Berlin");
+  assert.equal(parseTimezone("UTC"), "UTC");
+});
+
+// A fixed offset would pass Intl but be wrong for half the year
+// wherever clocks change, so it is refused along with nonsense.
+test("parseTimezone refuses a fixed offset, an unknown name and an empty value", () => {
+  for (const value of ["+01:00", "CET+1", "Mars/Olympus", ""]) {
+    assert.throws(
+      () => parseTimezone(value),
+      /TIMEZONE must be an IANA/,
+      value,
+    );
+  }
+});
+
+// A city without its region is the likely mistake. The error names the
+// zone it probably meant, and always says where the full list is.
+test("parseTimezone suggests the zone for a bare city and links the list", () => {
+  assert.throws(() => parseTimezone("Berlin"), /Did you mean Europe\/Berlin\?/);
+  assert.throws(
+    () => parseTimezone("new york"),
+    /Did you mean America\/New_York\?/,
+  );
+  assert.throws(
+    () => parseTimezone("+01:00"),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, /Did you mean/);
+      assert.match(error.message, /List_of_tz_database_time_zones/);
+      return true;
+    },
+  );
 });

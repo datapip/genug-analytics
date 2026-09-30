@@ -23,7 +23,12 @@ import {
 
 // "Who is visiting" — the visitor-shaped questions, as opposed to
 // traffic volume (traffic.ts) or what they looked at (content.ts).
-export const registerAudienceTools: ToolRegistrar = (server, db) => {
+export const registerAudienceTools: ToolRegistrar = (
+  server,
+  db,
+  { timezone },
+) => {
+  const period = periodInput(timezone);
   server.registerTool(
     "get_device_breakdown",
     {
@@ -33,7 +38,7 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
         " " +
         SEGMENT_HINT,
       inputSchema: {
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of rows in each of the two rankings"),
       },
@@ -54,7 +59,7 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       description:
         'Get how many distinct visitors active in a given time period are new (their earliest-ever event falls within this period) vs returning (they were already active before it). Important caveat: consentless visitors (see the "consent" envelope field) get a new visitor_id every day by design (daily rotating hash, not a persistent id) — for a mostly-consentless deployment, a visitor returning on a later day looks "new" again here every time, so treat this as a soft signal rather than a precise retention number. It is meaningful for consentful visitors (a persistent cookie id) and for same-day returns either way. Call get_consent_breakdown to find out which case this deployment is actually in. "Earliest-ever" means the oldest event still stored: where a retention limit prunes old rows (see the cockpit), a visitor whose earlier visits were pruned looks new again. For "did the visitors from one period come back in another" use get_cohort_return. A segment narrows which visitors are counted, not which earlier visits make one returning: any earlier event counts. ' +
         SEGMENT_HINT,
-      inputSchema: { ...periodInput, ...segmentInput },
+      inputSchema: { ...period, ...segmentInput },
     },
     async ({ from, to, segment }) => {
       return withSegment(db, segment, { from, to }, (clause) =>
@@ -67,22 +72,28 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
     "get_cohort_return",
     {
       description:
-        'Get whether the visitors of one period came back in a later one: cohortVisitors (distinct visitors active in the cohort period — narrowed by `segment`, e.g. those who entered via utm_campaign=spring), returnedVisitors (how many of them have at least one event in the return period), returnRate (returned / cohort, 0-1) and consentfulVisitors. Read consentfulVisitors before the rate: a consentless visitor_id is a new hash every UTC day by design, so a cohort visitor who stays consentless can never be recognised on a later day, and a return rate over a mostly-consentless cohort is really a consent rate. consentfulVisitors is a floor on who could be followed, not a ceiling on returnedVisitors: a visitor who was consentless in the cohort and accepted the banner on a later visit keeps the id they had that day, so they can appear as returned without counting as consentful. Say it plainly: "of the N visitors identifiable in the cohort, M came back; the other K were consentless and cannot be followed across days unless they consented later". The return period must start after the cohort period ends. The segment\'s entry-based conditions (referrerHost, entryPath, entryParam) look at sessions that started in the cohort period.',
+        "Get whether the visitors of one period came back in a later one: cohortVisitors (distinct visitors active in the cohort period — narrowed by `segment`, e.g. those who entered via utm_campaign=spring), returnedVisitors (how many of them have at least one event in the return period), returnRate (returned / cohort, 0-1) and consentfulVisitors. Read consentfulVisitors before the rate: a consentless visitor_id is a new hash every day by design (the day turns at midnight in the site's time zone, " +
+        timezone +
+        '), so a cohort visitor who stays consentless can never be recognised on a later day, and a return rate over a mostly-consentless cohort is really a consent rate. consentfulVisitors is a floor on who could be followed, not a ceiling on returnedVisitors: a visitor who was consentless in the cohort and accepted the banner on a later visit keeps the id they had that day, so they can appear as returned without counting as consentful. Say it plainly: "of the N visitors identifiable in the cohort, M came back; the other K were consentless and cannot be followed across days unless they consented later". The return period must start after the cohort period ends. The segment\'s entry-based conditions (referrerHost, entryPath, entryParam) look at sessions that started in the cohort period.',
       inputSchema: {
         cohortFrom: periodBound(
           "from",
+          timezone,
           "Start of the cohort period, inclusive (ISO8601 date or timestamp) — the visitors active in this period, narrowed by segment, are the cohort.",
         ),
         cohortTo: periodBound(
           "to",
+          timezone,
           "End of the cohort period, inclusive (ISO8601 date or timestamp).",
         ),
         returnFrom: periodBound(
           "from",
+          timezone,
           "Start of the return period, inclusive; must be after cohortTo.",
         ),
         returnTo: periodBound(
           "to",
+          timezone,
           "End of the return period, inclusive (ISO8601 date or timestamp).",
         ),
         ...segmentInput,
@@ -129,7 +140,7 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
         " " +
         VISITOR_TEXT_CAVEAT,
       inputSchema: {
-        ...periodInput,
+        ...period,
         ...segmentInput,
         limit: limitInput("Max number of languages to return"),
       },
@@ -147,7 +158,7 @@ export const registerAudienceTools: ToolRegistrar = (server, db) => {
       description:
         "Get how much of the data collected in a period was recorded with the visitor's consent: event and distinct-visitor counts for consentful (a persistent cookie id was used) versus consentless (a cookieless, daily-rotating hash). Use this to interpret get_new_vs_returning_visitors and get_cohort_return, whose accuracy depends entirely on this mix — a mostly-consentless deployment can't reliably tell a returning visitor from a new one across days. Event counts are exact; a visitor who accepts a consent banner mid-period legitimately appears under both modes, so the two visitor counts can sum to more than the true total. " +
         SEGMENT_HINT,
-      inputSchema: { ...periodInput, ...segmentInput },
+      inputSchema: { ...period, ...segmentInput },
     },
     async ({ from, to, segment }) => {
       return withSegment(db, segment, { from, to }, (clause) =>

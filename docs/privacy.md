@@ -25,7 +25,8 @@ Two things worth stating plainly, because they shape what you have to
 tell your own users. Consent selects _how_ a visitor is identified,
 not _whether_ events are recorded: consentless events are still
 stored, under a daily-rotating ID. The salt behind that ID is random,
-kept only for its day, and replaced at midnight UTC. While it exists,
+kept only for its day, and replaced at midnight in the deployment's
+time zone (`TIMEZONE`). While it exists,
 anyone with access to the server can recompute today's ID from a known
 address and User-Agent. After midnight, nobody can. Genug ships no consent banner; wiring
 your own to `setConsent()` is your site's job. The full model is in
@@ -173,7 +174,8 @@ below, and only if a visitor asks for it.
 **A visitor ID that cannot follow anyone across days.** The hash is
 `truncated IP + User-Agent + today's salt`. The salt is random, and
 it is kept only for its day, in one file beside the database
-(`daily-salt.json`). At midnight UTC a new one replaces it, and the old
+(`daily-salt.json`). At midnight in the deployment's time zone
+(`TIMEZONE`) a new one replaces it, and the old
 one is gone: no backup copies that file. So the same visitor gets an
 unrelated ID tomorrow, and nobody can later work out which address was
 behind an old ID. The address going into it is a network block, not a
@@ -246,7 +248,8 @@ carries no visitor data, but GitHub sees your server's address. Set
   page view.
 - **Name a legal basis and write it down.** For consentless mode that
   is normally Art. 6(1)(f) legitimate interests, which means actually
-  doing the balancing test and keeping it. Until midnight UTC, the
+  doing the balancing test and keeping it. Until midnight (in your
+  `TIMEZONE`), the
   day's salt is on your server, so today's ID can be recomputed from a
   known address and User-Agent.
 - **Tell people, in your own privacy notice.** The field table under

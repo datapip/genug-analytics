@@ -5,7 +5,7 @@ import { NO_SEGMENT, type SegmentClause } from "./segment.js";
 
 // Whether a funnel is walked per session or per visitor. Session is
 // the default because it is the only scope that is correct for every
-// visitor: a consentless visitor_id rotates at UTC midnight (see
+// visitor: a consentless visitor_id rotates at the site's midnight (see
 // "Visitor identification" in docs/decisions.md), so a visitor-scoped
 // funnel silently loses anyone who viewed at 23:50 and bought at 00:10,
 // and can never span days at all. Visitor scope is for consentful

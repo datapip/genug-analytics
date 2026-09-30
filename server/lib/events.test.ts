@@ -543,10 +543,15 @@ test("getEventTrend counts one event per day, zero-filled, with sessions and vis
   });
 
   assert.deepEqual(
-    getEventTrend(db, "file_download", {
-      from: "2026-01-01T00:00:00.000Z",
-      to: "2026-01-03T23:59:59.999Z",
-    }),
+    getEventTrend(
+      db,
+      "file_download",
+      {
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-01-03T23:59:59.999Z",
+      },
+      "UTC",
+    ),
     [
       { date: "2026-01-01", events: 3, sessions: 2, visitors: 2 },
       { date: "2026-01-02", events: 0, sessions: 0, visitors: 0 },

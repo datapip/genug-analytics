@@ -2,7 +2,7 @@ import { Router, json, type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { db } from "../db/index.js";
 import { createMcpServer } from "../mcp/tools.js";
-import { parseReadOnly, requireEnv } from "../lib/env.js";
+import { parseReadOnly, parseTimezone, requireEnv } from "../lib/env.js";
 import { createMcpAuthMiddleware } from "../lib/mcpAuth.js";
 import { rateLimitMcp } from "../lib/rateLimit.js";
 import { logError } from "../lib/logger.js";
@@ -13,6 +13,7 @@ const mcpApiKey = requireEnv("MCP_API_KEY");
 // one whose throw stops startup, which is enough — a bad value cannot
 // reach a listening server through any of them.
 const readOnly = parseReadOnly(process.env.READ_ONLY);
+const timezone = parseTimezone(requireEnv("TIMEZONE"));
 
 const requireApiKey = createMcpAuthMiddleware(mcpApiKey);
 
@@ -62,7 +63,7 @@ mcpRouter.post("/", parseMcpBody, async (req: Request, res: Response) => {
   // Stateless mode (see mcp/tools.ts): a fresh server + transport per
   // request, no session tracking — this server only does simple one-shot
   // query tools, no long-running/streaming operations.
-  const server = createMcpServer(db, { readOnly });
+  const server = createMcpServer(db, { readOnly, timezone });
   try {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

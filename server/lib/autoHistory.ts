@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { contextPath } from "./context.js";
 import { appendHistoryEntry, HISTORY_FILE } from "./history.js";
 import { logError } from "./logger.js";
+import { localDate } from "./timezone.js";
 
 // The history log's second writer. `add_history_note` records what a
 // person says happened to the site; this records the handful of things
@@ -61,11 +62,13 @@ export function recordEventRenamed(
   from: string,
   to: string,
   rows: RenamedRows,
+  timezone: string,
   directory: string = contextPath,
 ): void {
   record(
     `the event "${from}" was renamed to "${to}". ${rowsClause(rows)}` +
       given(rows.reason),
+    timezone,
     directory,
   );
 }
@@ -81,6 +84,7 @@ export interface DeletedRows extends WithReason {
 export function recordEventDeleted(
   name: string,
   rows: DeletedRows,
+  timezone: string,
   directory: string = contextPath,
 ): void {
   const stored =
@@ -92,6 +96,7 @@ export function recordEventDeleted(
 
   record(
     `the event "${name}" was deleted. ${stored}` + given(rows.reason),
+    timezone,
     directory,
   );
 }
@@ -143,6 +148,7 @@ function verb(n: number, base: "stay" | "match"): string {
 export function recordEventsReset(
   removed: number,
   stranded: { event: string; count: number }[],
+  timezone: string,
   directory: string = contextPath,
 ): void {
   const named = stranded
@@ -160,19 +166,21 @@ export function recordEventsReset(
   record(
     `the events directory was reset to the built-ins, replacing ` +
       `${removed} ${removed === 1 ? "file" : "files"}. ${consequence}`,
+    timezone,
     directory,
   );
 }
 
-// Dated today, in UTC, like every other date this project stores.
+// Dated today in the site's zone: the history is the owner's calendar,
+// and the dates they write in it by hand are their own days too.
 //
 // Never throws, and never reports failure to the caller. The caller has
 // already renamed the event: a note that could not be written is worth
 // a line in the log an operator can read, not an error telling someone
 // their rename failed when it did not.
-function record(note: string, directory: string): void {
+function record(note: string, timezone: string, directory: string): void {
   const entry = {
-    from: new Date().toISOString().slice(0, 10),
+    from: localDate(new Date(), timezone),
     note: `${PREFIX}${note}`,
   };
 

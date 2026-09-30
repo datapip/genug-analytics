@@ -52,6 +52,54 @@ export function parseReadOnly(value: string | undefined): boolean {
   throw new Error(`READ_ONLY must be "true" or "false", got: ${value}`);
 }
 
+// The zone every day and hour boundary is cut in (lib/timezone.ts).
+// Required, with no default: a missing zone would quietly mean UTC,
+// which is the very plausible-while-wrong bucketing this setting exists
+// to end. Only named IANA zones pass. Intl also accepts a fixed offset
+// like "+01:00", but that is wrong for half the year wherever clocks
+// change — so it is refused here rather than obeyed. Returns the
+// canonical spelling, since Intl also takes "europe/berlin".
+export function parseTimezone(value: string): string {
+  let canonical: string;
+  try {
+    canonical = new Intl.DateTimeFormat("en", {
+      timeZone: value,
+    }).resolvedOptions().timeZone;
+  } catch {
+    canonical = "";
+  }
+  const zones = Intl.supportedValuesOf("timeZone");
+  if (canonical !== "UTC" && !zones.includes(canonical)) {
+    const suggestion = suggestTimezone(value, zones);
+    throw new Error(
+      `TIMEZONE must be an IANA time zone name such as Europe/Berlin or UTC, got: ${value}.` +
+        (suggestion ? ` Did you mean ${suggestion}?` : "") +
+        ` The full list is the "TZ identifier" column of ${TIMEZONE_LIST_URL}`,
+    );
+  }
+  return canonical;
+}
+
+export const TIMEZONE_LIST_URL =
+  "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
+
+// The likely mistake is a city without its region ("Berlin", "new
+// york"), so match on the city part, ignoring case, spaces and
+// underscores. Only a single match is offered: a guess among several
+// could send someone to the wrong zone without a second look.
+function suggestTimezone(
+  value: string,
+  zones: readonly string[],
+): string | undefined {
+  const key = (text: string) => text.toLowerCase().replace(/[\s_]/g, "");
+  const wanted = key(value);
+  if (wanted === "") return undefined;
+  const matches = zones.filter(
+    (zone) => key(zone) === wanted || key(zone.split("/").pop()!) === wanted,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 // One outbound GET a day to GitHub's tags API (lib/updateCheck.ts), to
 // tell the cockpit a newer version exists. Default on, like
 // LOCAL_BACKUPS — for a deployment with no outbound access at all this

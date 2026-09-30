@@ -53,7 +53,12 @@ export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
 // describe the health of the pipeline itself. Unlike get_recent_events
 // above, none returns a raw row, so all four stay registered under
 // READ_ONLY — a demo deployment still needs to see that tracking works.
-export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
+export const registerDiagnosticTools: ToolRegistrar = (
+  server,
+  db,
+  { timezone },
+) => {
+  const period = periodInput(timezone);
   server.registerTool(
     "get_orphaned_events",
     {
@@ -86,7 +91,7 @@ export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
     {
       description: `Get the requests the server rejected for not matching a schema (a malformed envelope, an unregistered event type, or props that don't match that event's own schema), grouped by reason and event name — for an event that is rejected as unknown although the owner defined it, check get_schema_errors first, ranked by number of requests descending. Each group includes lastDetail, a short summary of the most recent occurrence's actual validation failure (e.g. "props.value: Expected number, received string") for invalid_envelope/invalid_props — null for unknown_event_type, where the event name itself is already the useful detail. Each group also includes lastSeen, the timestamp of that most recent occurrence — use it before calling a nonzero count a live problem, since a group that stopped days ago is an integration the owner has already fixed. A quality-assurance signal, not analytics: a nonzero, growing count usually means a tracking integration bug (e.g. a typo'd event name showing up repeatedly under "unknown_event_type") rather than real visitor behavior — these requests never became rows in the real events data. ${rankedShape("requests")} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
-        ...periodInput,
+        ...period,
         limit: limitInput("Max number of reason/event combinations to return"),
       },
     },
@@ -100,7 +105,7 @@ export const registerDiagnosticTools: ToolRegistrar = (server, db) => {
     {
       description:
         "Get how many requests to /events were dropped as bot/crawler traffic in a given time period, as { requests }. Best-effort only (see lib/bots.ts): catches bots that identify themselves honestly, not one deliberately spoofing a real browser's User-Agent. A rough volume signal, not a precise count — e.g. to notice an unusual crawler surge — not something to build alerting logic on top of.",
-      inputSchema: periodInput,
+      inputSchema: period,
     },
     async ({ from, to }) => {
       return jsonContent({

@@ -9,7 +9,12 @@ import {
 } from "./aggregate.js";
 import { NO_SEGMENT, type SegmentClause } from "./segment.js";
 import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
-import { enumerateDays } from "./traffic.js";
+import {
+  enumerateDays,
+  JOIN_LOCAL_SPANS,
+  LOCAL_SPANS_CTE,
+  localSpans,
+} from "./timezone.js";
 
 // "What happened" — keyed on event types and their props rather than on
 // pages, so unlike content.ts nothing here needs a page-view event to
@@ -45,7 +50,7 @@ export function getTopEvents(
 }
 
 export interface EventTrendDay {
-  date: string; // YYYY-MM-DD, UTC
+  date: string; // YYYY-MM-DD, in the site's zone
   events: number;
   sessions: number;
   visitors: number;
@@ -54,33 +59,36 @@ export interface EventTrendDay {
 // One event over time: "did signups grow this month". getTrafficByDay
 // covers everything together and a segment gives one number for the
 // whole period, so before this a single event had no trend at all.
-// Same UTC calendar days and zero-fill as getTrafficByDay, and the same
+// Same local calendar days and zero-fill as getTrafficByDay, and the same
 // per-day counting: a session or visitor active on two days is in both.
 export function getEventTrend(
   db: Database.Database,
   event: string,
   period: Period,
+  timezone: string,
   segment: SegmentClause = NO_SEGMENT,
 ): EventTrendDay[] {
   const rows = db
     .prepare(
-      `SELECT strftime('%Y-%m-%d', ts) AS date,
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT strftime('%Y-%m-%d', ts, span_offset || ' minutes') AS date,
               COUNT(*) AS events,
               COUNT(DISTINCT session_id) AS sessions,
               COUNT(DISTINCT visitor_id) AS visitors
-       FROM events
+       FROM events ${JOIN_LOCAL_SPANS}
        WHERE event = @event AND ts BETWEEN @from AND @to${segment.sql}
        GROUP BY date`,
     )
     .all({
       event,
+      spans: localSpans(db, period, timezone),
       from: period.from,
       to: period.to,
       ...segment.params,
     }) as EventTrendDay[];
 
   const byDate = new Map(rows.map((row) => [row.date, row]));
-  return enumerateDays(period.from, period.to).map(
+  return enumerateDays(period.from, period.to, timezone).map(
     (date) => byDate.get(date) ?? { date, events: 0, sessions: 0, visitors: 0 },
   );
 }

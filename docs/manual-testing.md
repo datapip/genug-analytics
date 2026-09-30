@@ -42,6 +42,7 @@ trailing slash, no path.
 ```sh
 DB_PATH=./dev.db \
 ALLOWED_ORIGIN=http://localhost:XXXX \
+TIMEZONE=Europe/Berlin \
 MCP_API_KEY=dev-mcp-key \
 COCKPIT_PASSWORD=dev-cockpit-password \
 PORT=3001 \

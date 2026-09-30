@@ -13,6 +13,7 @@ import type { AddressInfo } from "node:net";
 const tmpDir = mkdtempSync(join(tmpdir(), "genug-events-"));
 process.env.DB_PATH = join(tmpDir, "test.db");
 process.env.ALLOWED_ORIGIN = "https://site.example, https://www.site.example";
+process.env.TIMEZONE = "UTC";
 
 const { eventsRouter } = await import("./events.js");
 const { db } = await import("../db/index.js");

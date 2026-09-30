@@ -7,6 +7,43 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Breaking**
+
+- **Set `TIMEZONE` before you upgrade, or the server will not start.**
+  It takes an IANA name such as `Europe/Berlin`, `America/New_York` or
+  `UTC`; `docs/deploying.md` links the full list. It is required and has no default. A fixed offset like
+  `+01:00` is refused. It is not the container's `TZ`.
+
+**Fixed**
+
+- **Days and hours are now your own, not UTC's.** Timestamps are still
+  stored in UTC. What changed is where a day or an hour begins. Before,
+  a visit at 00:30 in Berlin counted on the previous day, at hour 22,
+  and the cockpit's Today started at 02:00 local time. Now `TIMEZONE`
+  decides this everywhere: the cockpit's charts and its Today, 7d and
+  30d, the by-day, by-weekday and by-hour tools, and what a bare date
+  like `2026-09-30` means when the agent asks about it. Clock changes
+  are handled. A day when clocks change lasts 23 or 25 hours and shows
+  as a small dip or bump. The cockpit and the tool descriptions name
+  the zone.
+- **The daily salt for consentless visitor ids now changes at your
+  midnight.** Before, it changed at midnight UTC. A visitor active
+  across that moment counted as two visitors in one of your days. The
+  salt is still random, kept for one day only, and never stored after.
+  The first start after the upgrade replaces the stored salt, so
+  visitors active across that moment count twice once. If your own
+  privacy notice or records say "midnight UTC", change them to
+  midnight in your time zone.
+- **Visitor counts for days before the upgrade read slightly high.**
+  Those rows were stored with ids that changed at midnight UTC, and
+  their days are now cut at your midnight. So a consentless visitor
+  active across midnight UTC on such a day counts as two visitors in
+  it. Totals, page views and events are not affected, and days after
+  the upgrade are exact.
+- **Automatic history notes are dated in your time zone.**
+
 ## 0.10.1 — 2026-09-28
 
 **Fixed**

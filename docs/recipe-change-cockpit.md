@@ -233,7 +233,8 @@ a different question. To change the options, edit `windowRangeSchema`,
 
 Today and 24h are rolling windows ending now — a partial, still-moving
 period is what those labels promise. 7d and 30d are not: they are the
-N complete UTC calendar days before today, fixed at the moment the day
+N complete calendar days before today in the site's zone
+(`TIMEZONE`, `lib/timezone.ts`), fixed at the moment the day
 turns over. That split exists because a rolling 7d window read as "the
 last 7 days" but changed on every reload, including against numbers an
 MCP query for the same nominal period had already returned — plausible

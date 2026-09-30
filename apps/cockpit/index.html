@@ -60,7 +60,7 @@
                 data-range="today"
                 class="active"
                 aria-pressed="true"
-                title="Since midnight UTC — updates continuously"
+                title="Since midnight in the site's time zone — updates continuously"
               >
                 <span class="range-long">Today</span
                 ><span class="range-short" aria-hidden="true">T</span>
@@ -77,7 +77,7 @@
                 type="button"
                 data-range="7d"
                 aria-pressed="false"
-                title="7 complete UTC days before today — not today itself"
+                title="7 complete days before today, in the site's time zone — not today itself"
               >
                 7d
               </button>
@@ -85,7 +85,7 @@
                 type="button"
                 data-range="30d"
                 aria-pressed="false"
-                title="30 complete UTC days before today — not today itself"
+                title="30 complete days before today, in the site's time zone — not today itself"
               >
                 30d
               </button>
@@ -284,9 +284,10 @@
                 ></span>
                 Events
               </span>
-              <!-- Buckets are UTC. Hidden in the table caption alone,
-                   a German reader takes a peak at "14" for 14:00 local
-                   when it is 16:00 — plausible while wrong. -->
+              <!-- Buckets are in the site's zone (TIMEZONE), which the
+                   viewer's browser may not share. Hidden in the table
+                   caption alone, a reader elsewhere would take a peak
+                   at "14" for their own 14:00 — plausible while wrong. -->
               <span class="card-note" id="trend-caption"></span>
             </div>
             <div class="chart-wrap">

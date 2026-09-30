@@ -241,7 +241,7 @@ test("survives more visitors than SQLite allows bound parameters", () => {
 });
 
 // The reason session is the default scope: a consentless visitor_id
-// rotates at UTC midnight, so the same person is v-day1 before it and
+// rotates at the site's midnight, so the same person is v-day1 before it and
 // v-day2 after. Visitor scope splits their funnel in two and reports no
 // conversion; session scope, keyed on the id the server carries across
 // midnight, still sees one visit that completed both steps.

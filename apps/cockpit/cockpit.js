@@ -262,17 +262,24 @@
     document.getElementById("version-pill").hidden = !latestVersion;
   }
 
-  // Pinned to UTC like formatDayLabel and the chart captions below it —
-  // 7d/30d are now fixed UTC calendar boundaries (see windowPeriod on
-  // the server), so formatting them in the browser's local zone would
-  // print a date the chart directly underneath disagrees with for any
-  // viewer not at UTC+0.
-  function renderPeriod(period) {
-    const opts = { timeZone: "UTC" };
+  // Formatted in the site's zone (TIMEZONE on the server), not the
+  // browser's: 7d/30d are fixed local calendar days there (see
+  // windowPeriod), so a viewer travelling elsewhere would otherwise see
+  // a date the chart directly underneath disagrees with.
+  function renderPeriod(period, timezone) {
+    const opts = { timeZone: timezone };
     const from = new Date(period.from).toLocaleDateString(DATE_LOCALE, opts);
     const to = new Date(period.to).toLocaleDateString(DATE_LOCALE, opts);
     document.getElementById("period").textContent =
-      from + " – " + to + " (UTC)";
+      from + " – " + to + " (" + zoneLabel(timezone) + ")";
+  }
+
+  // The name exactly as the owner set it, which is the label they will
+  // recognise, minus the underscores: "Buenos_Aires" reads as a config
+  // key. Intl's long names ("Central European Summer Time") change with
+  // the season and the viewer's locale, so they are not used.
+  function zoneLabel(timezone) {
+    return timezone.replace(/_/g, " ");
   }
 
   // Read-only mode hides every write control rather than disabling it:
@@ -379,9 +386,9 @@
   const GRID_LINES = 4;
 
   function formatDayLabel(dateStr) {
-    // dateStr is "YYYY-MM-DD" (UTC) — pin the parse to midnight UTC
-    // so the label can't shift a day depending on the viewer's
-    // timezone.
+    // dateStr is a calendar date the server already cut in the site's
+    // zone. Parsed and printed in UTC only so the viewer's own zone
+    // can't shift it a day — no conversion happens here.
     return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
       month: "numeric",
       day: "numeric",
@@ -406,19 +413,19 @@
           timeZone: "UTC",
         }),
       chart: "line",
-      caption: "Traffic by day (UTC)",
+      caption: "Traffic by day",
     },
     weekday: {
       getLabel: (row) => row.day.slice(0, 3),
       getFullLabel: (row) => row.day,
       chart: "bar",
-      caption: "Traffic by day of week (UTC)",
+      caption: "Traffic by day of week",
     },
     hour: {
       getLabel: (row) => String(row.hour),
-      getFullLabel: (row) => String(row.hour).padStart(2, "0") + ":00 UTC",
+      getFullLabel: (row) => String(row.hour).padStart(2, "0") + ":00",
       chart: "bar",
-      caption: "Traffic by hour of day (UTC)",
+      caption: "Traffic by hour of day",
     },
   };
 
@@ -493,8 +500,8 @@
     // visibly distorting both on a wide screen.
     lastTrendWidth = container.clientWidth;
     const width = Math.max(320, Math.round(lastTrendWidth));
-    const { getLabel, getFullLabel, chart, caption } = TREND_MODES[mode];
-    document.getElementById("trend-caption").textContent = caption;
+    const { getLabel, getFullLabel, chart } = TREND_MODES[mode];
+    document.getElementById("trend-caption").textContent = trendCaption(mode);
     const innerWidth = width - TREND_PADDING.left - TREND_PADDING.right;
     const innerHeight = TREND_HEIGHT - TREND_PADDING.top - TREND_PADDING.bottom;
     const maxValue = niceMax(
@@ -684,8 +691,17 @@
     container.append(trendTable(rows, mode));
   }
 
+  // Every bucket is in the site's zone, which the viewer's browser may
+  // not share — so the caption names it, in the visible note and the
+  // table caption alike.
+  function trendCaption(mode) {
+    return (
+      TREND_MODES[mode].caption + " (" + zoneLabel(latestData.timezone) + ")"
+    );
+  }
+
   function trendTable(rows, mode) {
-    const { getFullLabel, caption } = TREND_MODES[mode];
+    const { getFullLabel } = TREND_MODES[mode];
     const head = el("tr", null, [
       el("th", { scope: "col" }, ["Period"]),
       el("th", { scope: "col" }, ["Sessions"]),
@@ -703,7 +719,7 @@
     // page on a 320px phone, which then scrolled sideways.
     return el("div", { className: "visually-hidden" }, [
       el("table", null, [
-        el("caption", null, [caption]),
+        el("caption", null, [trendCaption(mode)]),
         el("thead", null, [head]),
         el("tbody", null, body),
       ]),
@@ -2285,7 +2301,7 @@
     hideError();
     latestData = data;
     renderVersion(data.version, data.latestVersion);
-    renderPeriod(data.period);
+    renderPeriod(data.period, data.timezone);
     renderRetentionNote(data.retentionDays);
     renderReadOnly(data.readOnly === true);
     // A form left open when the server came back read-only would render
@@ -2327,8 +2343,12 @@
       data.proseFieldMaxBytes || 0,
       data.history || { entries: [], skipped: [], dropped: 0, error: null },
     );
+    // In the site's zone like the date line above it: in the viewer's
+    // own, an owner abroad saw "Updated 14:22" above an hour chart
+    // whose last bar was 20.
     document.getElementById("updated-at").textContent =
-      "Updated " + new Date().toLocaleTimeString(DATE_LOCALE);
+      "Updated " +
+      new Date().toLocaleTimeString(DATE_LOCALE, { timeZone: data.timezone });
   }
 
   function showError(message) {

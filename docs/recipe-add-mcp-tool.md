@@ -128,7 +128,7 @@ server.registerTool(
     description:
       "Get visitors who completed more than one order in a given time period, ranked by order count descending. Note that consentless visitors get a new visitor_id every day (see get_consent_breakdown), so a repeat purchase across two days is only visible for consentful visitors.",
     inputSchema: {
-      ...periodInput,
+      ...period, // const period = periodInput(timezone), once per module
       ...segmentInput,
       limit: limitInput("Max number of visitors to return"),
     },
@@ -161,11 +161,18 @@ what `items`, `groups` and `total` mean.
 
 ### Rules you cannot break
 
-- **Use `periodInput` from `./shared.js`** for any time period. It
-  normalizes the bounds. If you write `z.string()` instead, a bare
-  `"2026-01-01"` from the agent sorts below every real timestamp that
-  day and the day vanishes from the result — a _wrong number reported
-  confidently_, not an error. Use `limitInput` for limits and
+- **Use `periodInput(timezone)` from `./shared.js`** for any time
+  period. Your registrar gets the zone as its third argument:
+  `(server, db, { timezone })`. It normalizes the bounds, and a bare
+  date means that day in the site's `TIMEZONE`. If you write
+  `z.string()` instead, a bare `"2026-01-01"` from the agent sorts below
+  every real timestamp that day and the day vanishes from the result —
+  a _wrong number reported confidently_, not an error.
+- **Bucket by day or hour through `lib/timezone.ts`**, never with a bare
+  `strftime(…, ts)`. That cuts at UTC midnight, not the site's. Join
+  `LOCAL_SPANS_CTE` / `JOIN_LOCAL_SPANS`, pass `spans: localSpans(db,
+period, timezone)`, and shift with `span_offset`, as
+  `getTrafficByDay` does. A test fails on a bare one. Use `limitInput` for limits and
   `jsonContent` for the return value.
 - **The description is the tool's entire documentation.** The agent has
   nothing else. State what the number counts, what it excludes, and

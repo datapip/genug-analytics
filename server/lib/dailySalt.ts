@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { logError } from "./logger.js";
+import { localDate } from "./timezone.js";
 
-// The consentless hash's salt: random, one per UTC day, and replaced —
-// not kept — when the day ends. It used to be an HMAC of the date keyed
+// The consentless hash's salt: random, one per day, and replaced — not
+// kept — when the day ends. It used to be an HMAC of the date keyed
 // by SALT_SECRET, so anyone holding that secret could rebuild the salt
 // for any past day and, with a known address and User-Agent, that
 // day's visitor_id. A random salt nobody keeps cannot be rebuilt.
@@ -13,16 +14,25 @@ import { logError } from "./logger.js";
 // on the site into two. The backup copies the database, events and
 // context directories, never this file, so no backup holds an old salt.
 // The file is overwritten, never appended: it only ever holds today's.
+//
+// The day is the site's own (TIMEZONE), the same day every report is
+// bucketed by. On UTC days a Berlin visitor active across 01:00 or
+// 02:00 local time became two visitors inside one reported day. Privacy
+// is the same either way: still random, still one per day, still never
+// kept.
+//
+// The stored label names the zone as well as the date. A date alone
+// would let a salt outlive its day: a file written on UTC's date, or
+// under a zone further east, carries a label that still matches the
+// local date in a zone to the west, and would be kept for up to a day
+// plus the difference. With the zone in the label, a file from any other
+// zone — or from before there was one — is replaced at the next start.
 
 const SALT_PATTERN = /^[a-f0-9]{64}$/;
 
 export interface DailySalt {
   // Today's salt, rotated first when the stored one is from another day.
   saltFor(now: Date): string;
-}
-
-function utcDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 function readStored(path: string): { day: string; salt: string } | undefined {
@@ -58,6 +68,7 @@ function readStored(path: string): { day: string; salt: string } | undefined {
 // at the first event, so a stale salt never outlives the start.
 export function createDailySalt(
   path: string,
+  timezone: string,
   now: Date = new Date(),
 ): DailySalt {
   let current = readStored(path);
@@ -97,7 +108,7 @@ export function createDailySalt(
 
   const salts: DailySalt = {
     saltFor(at: Date): string {
-      const day = utcDay(at);
+      const day = `${timezone} ${localDate(at, timezone)}`;
       if (current?.day !== day) current = rotate(day);
       return current.salt;
     },

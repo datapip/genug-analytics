@@ -52,7 +52,7 @@ import {
 import { getOrphanedEvents } from "../lib/orphanedEvents.js";
 import { getToolManifest } from "../mcp/tools.js";
 import { resetDatabase } from "../lib/resetDatabase.js";
-import { parseReadOnly, requireEnv } from "../lib/env.js";
+import { parseReadOnly, parseTimezone, requireEnv } from "../lib/env.js";
 import { timingSafeStringEqual } from "../lib/auth.js";
 import { logInfo } from "../lib/logger.js";
 import {
@@ -88,6 +88,7 @@ import { latestVersion } from "../lib/updateCheck.js";
 // request reaches this router it is guaranteed to be set.
 const cockpitPassword = requireEnv("COCKPIT_PASSWORD");
 const readOnly = parseReadOnly(process.env.READ_ONLY);
+const timezone = parseTimezone(requireEnv("TIMEZONE"));
 
 const RECENT_EVENTS_LIMIT = 5;
 const TOP_PAGES_LIMIT = 5;
@@ -151,10 +152,14 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     res.status(400).json({ ok: false, error: parsed.error });
     return;
   }
-  const period = windowPeriod(parsed.range, new Date());
+  const period = windowPeriod(parsed.range, new Date(), timezone);
 
   res.json({
     period,
+    // The zone every day and hour on the page is in. The page formats
+    // its labels in it and says which it is, since the viewer's
+    // browser may well be somewhere else.
+    timezone,
     // Which build is serving this page. A bug report that says "the
     // cockpit showed X" is only actionable with the version attached,
     // and once images are pulled rather than built the operator has no
@@ -179,9 +184,14 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     // line saying it happened five hundred times.
     topRejectedEvents: getTopRejectedEvents(db, period, REJECTED_EVENTS_LIMIT)
       .items,
-    trafficByDay: getTrafficByDay(db, period, pageViewEventType),
-    trafficByDayOfWeek: getTrafficByDayOfWeek(db, period, pageViewEventType),
-    trafficByHour: getTrafficByHour(db, period, pageViewEventType),
+    trafficByDay: getTrafficByDay(db, period, pageViewEventType, timezone),
+    trafficByDayOfWeek: getTrafficByDayOfWeek(
+      db,
+      period,
+      pageViewEventType,
+      timezone,
+    ),
+    trafficByHour: getTrafficByHour(db, period, pageViewEventType, timezone),
     topPages: getTopPages(db, period, TOP_PAGES_LIMIT, pageViewEventType).items,
     topReferrers: getTopReferrers(
       db,
@@ -234,7 +244,7 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     // Not period-scoped, unlike everything above it: a rename's
     // leftovers age out of any window while staying just as invisible.
     orphanedEvents: getOrphanedEvents(db, Object.keys(eventRegistry)),
-    toolManifest: getToolManifest(db, { readOnly }),
+    toolManifest: getToolManifest(db, { readOnly, timezone }),
     // Read fresh on every load, same as the MCP resource these three
     // feed (lib/context.ts deliberately holds no live binding) — an
     // edit made on the volume between one cockpit refresh and the next
@@ -494,14 +504,19 @@ cockpitRouter.put(
     // no number, and a history log that records those buries the three
     // lines worth reading among dozens that are not.
     if (result.name !== currentName) {
-      recordEventRenamed(currentName, result.name, {
-        movedRows: result.movedRows,
-        strandedRows: strandedAfterReload(
-          currentName,
-          storedBefore - result.movedRows,
-        ),
-        reason: body.data.reason,
-      });
+      recordEventRenamed(
+        currentName,
+        result.name,
+        {
+          movedRows: result.movedRows,
+          strandedRows: strandedAfterReload(
+            currentName,
+            storedBefore - result.movedRows,
+          ),
+          reason: body.data.reason,
+        },
+        timezone,
+      );
     }
 
     res.json({
@@ -710,11 +725,15 @@ cockpitRouter.delete(
 
     // After the restore branch above, so a delete that was undone
     // leaves nothing behind claiming it happened.
-    recordEventDeleted(eventName, {
-      storedRows: result.storedCount,
-      strandedRows: strandedAfterReload(eventName, result.storedCount),
-      reason: body.data.reason,
-    });
+    recordEventDeleted(
+      eventName,
+      {
+        storedRows: result.storedCount,
+        strandedRows: strandedAfterReload(eventName, result.storedCount),
+        reason: body.data.reason,
+      },
+      timezone,
+    );
 
     res.json({
       ok: true,
@@ -950,7 +969,7 @@ cockpitRouter.post(
       .map(([event, count]) => ({ event, count }))
       .sort((a, b) => b.count - a.count);
 
-    recordEventsReset(result.removed.length, stranded);
+    recordEventsReset(result.removed.length, stranded, timezone);
 
     res.json({
       ok: true,

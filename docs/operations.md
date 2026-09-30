@@ -206,7 +206,8 @@ transaction reaches disk.
   For today only, the id can be recomputed: it is a hash of the
   truncated address and the User-Agent, keyed by the day's random
   salt. So a data subject who supplies their address and their
-  browser's User-Agent on the same UTC day gives you what you need to
+  browser's User-Agent before midnight in your `TIMEZONE` on the day of
+  the visit gives you what you need to
   find and erase today's rows. After midnight the salt is gone, and
   earlier days cannot be found this way. That is the case
   Art. 11(2) describes, where the subject provides information enabling
@@ -260,7 +261,8 @@ transaction reaches disk.
   copy those files off the host as well: see below.
 
 - **Daily salt**: `daily-salt.json` beside the database holds the
-  day's salt for the visitor hash, and is replaced at midnight UTC. A
+  day's salt for the visitor hash, and is replaced at midnight in your
+  `TIMEZONE`. A
   stopped server replaces nothing, so the last day's salt stays there
   until the next start. When you shut a deployment down for good, or
   for a long time, delete that file. Nothing is lost: a new one is

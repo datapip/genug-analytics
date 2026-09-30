@@ -168,6 +168,7 @@ function baseEnv(dbPath: string, port: number): Record<string, string> {
     MCP_API_KEY: "test-key",
     COCKPIT_PASSWORD: "test-cockpit-password",
     ALLOWED_ORIGIN: `http://localhost:${port}`,
+    TIMEZONE: "UTC",
     LOCAL_BACKUPS: "false",
     // Beside DB_PATH, and for a blunter reason than tidiness: the
     // server seeds this directory at startup, so a spawned server
@@ -225,6 +226,40 @@ test("fails fast when COCKPIT_PASSWORD is missing and never starts listening", a
     "the failure should name the variable that's missing",
   );
 });
+
+// TIMEZONE has no default: unset, every day and hour would quietly be
+// UTC's, the plausible-while-wrong bucketing the setting exists to end.
+// A fixed offset is refused for the same reason — it is wrong for half
+// the year wherever clocks change — so both must stop the real entrypoint.
+for (const [label, value, port] of [
+  ["missing", undefined, 4232],
+  ["a fixed offset", "+01:00", 4233],
+] as const) {
+  test(`fails fast when TIMEZONE is ${label} and never starts listening`, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+
+    const env = baseEnv(join(dir, "test.db"), port);
+    if (value === undefined) delete env.TIMEZONE;
+    else env.TIMEZONE = value;
+    const server = spawnServer(env);
+    stopAndCleanUp(t, dir, server);
+
+    const { code } = await new Promise<{ code: number | null }>((resolve) => {
+      server.process.once("exit", (code) => resolve({ code }));
+    });
+
+    assert.notEqual(code, 0);
+    assert.equal(
+      server.rawLines.some((line) => line.includes("listening")),
+      false,
+    );
+    assert.equal(
+      server.rawLines.some((line) => line.includes("TIMEZONE")),
+      true,
+      "the failure should name the variable",
+    );
+  });
+}
 
 test("starts, logs a structured ready message, and responds to /healthz", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));

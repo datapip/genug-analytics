@@ -71,6 +71,7 @@ npm install
 npm run build
 DB_PATH=./genug.db \
 ALLOWED_ORIGIN=https://your-tracked-site.com \
+TIMEZONE=Europe/Berlin \
 MCP_API_KEY=<first-secret> \
 COCKPIT_PASSWORD=<second-secret> \
 node server/dist/index.js
@@ -83,6 +84,7 @@ survives a redeploy:
 ```sh
 docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
   -e ALLOWED_ORIGIN=https://your-tracked-site.com \
+  -e TIMEZONE=Europe/Berlin \
   -e MCP_API_KEY=<first-secret> \
   -e COCKPIT_PASSWORD=<second-secret> \
   -v genug-data:/data \

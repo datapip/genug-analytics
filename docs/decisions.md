@@ -598,18 +598,11 @@ identity fields are derived server-side, never trusted from the client:
   a client-supplied timestamp can't be trusted, and at this project's
   traffic scale the (rare) gap between an interaction and its beacon
   arriving is not worth tracking separately.
-- **Day-bucketing is UTC only, deliberately not configurable.**
-  `getTrafficByDay` (the cockpit's trend chart) groups events by
-  calendar day via SQLite's `strftime('%Y-%m-%d', ts)`, which is always
-  UTC. For a deployment whose visitors are far from UTC, a day's
-  activity can appear split across two bars, or "today" on the
-  cockpit can roll over a few hours off from the site owner's actual
-  midnight. A per-deployment timezone would fix this, but `strftime`
-  can't group by an IANA zone (only a fixed offset, which breaks across
-  DST) — doing it properly means bucketing in JS instead of SQL, real
-  effort for a cockpit-only cosmetic edge case nobody's hit yet.
-  Documented here instead of fixed; revisit only if a real deployment
-  finds it actually confusing.
+- **Days and hours are the site's, not UTC's.** `ts` is stored as a
+  UTC instant; where a day or an hour begins is set by the required
+  `TIMEZONE`. This was UTC only until a real deployment in Berlin found
+  it confusing — see "Days and hours in the site's time zone" at the
+  end of this journal.
 - **Every envelope string is length-capped, and `url` must be a real
   URL** (`schema-registry/envelope.ts`). Nothing enforced a maximum
   before: a single request could store ~90KB of junk in one row
@@ -5238,3 +5231,88 @@ so rather than wrapping the array in an object. That keeps the shape
 agents already parse, and a result with fewer rows than `limit` would
 otherwise look the same as a quiet site. The cockpit uses the same
 function and gets the same cap, which at its limit of 5 never applies.
+
+### Days and hours in the site's time zone
+
+Every day and hour boundary used to be UTC's. Storage was never the
+problem: `ts` is a UTC instant and stays one. The cuts were. For the
+one real deployment, in Berlin, a visit at 00:30 local time counted on
+the previous day at hour 22. The cockpit's Today began at 02:00. A bare
+`2026-09-30` from the agent meant 02:00 to 02:00. Every total was right
+and every label was off by one or two hours: plausible while wrong.
+The old entry under "Data model" called it cosmetic and said to
+revisit if a real deployment found it confusing. One did.
+
+**`TIMEZONE` is required, with no default.** A default of UTC would
+leave exactly the old behaviour for anyone who didn't read the docs.
+Only IANA names pass. `Intl` also accepts a fixed offset like `+01:00`,
+which is wrong for half the year wherever clocks change, so that is
+refused. The value is stored in `Intl`'s canonical spelling. It is not
+the container's `TZ`: the process never uses its own zone, so nothing
+depends on how the image is built.
+
+**Bucketing stays in SQLite.** `strftime` can shift by a fixed number of
+minutes but knows no zones. So `lib/timezone.ts` works out the offsets
+with `Intl` and hands them to SQL as spans of constant offset, one
+bound JSON parameter read through `json_each` — the same idiom as a
+segment's lists, with fixed SQL text. A period has one span, or two or
+three when a clock change falls inside. The query joins each row to its
+span and shifts by `span_offset`. The alternative, a JavaScript function
+registered with SQLite and called per row, was simpler to write but
+puts an `Intl` call on every row; at the 5M-event load test that is
+seconds on a 30-day window.
+
+Three details keep the spans honest. They are half-open and contiguous
+by construction, because an overlap would count a row twice and a gap
+would drop one, both silently. The outer edges are open (`''` and
+`'9999'`), since the query's own `BETWEEN` bounds the period. The
+interior edges are written with `toISOString()`, the one format `ts` is
+stored in, or the string comparison goes wrong the way `lib/period.ts`
+describes. A test checks that the by-day counts across a clock change
+add up to the summary's total, which catches all three.
+
+The scan for clock changes runs between the first and last stored row
+in the period, not between the bounds asked for. An agent can ask from
+year 1, which would be ~740,000 daily steps. The rows can only span the
+deployment's life, and finding them is two seeks on the `ts` index.
+
+**Where clocks change, the numbers show it.** The day clocks go back
+lasts 25 hours and the day they go forward 23, so a by-day chart shows
+a small bump and dip there. By hour, the repeated hour's two real hours
+land in one bucket and the skipped hour stays empty. Both are the
+truth about a local calendar, not errors, and the tool descriptions say
+so rather than smoothing them.
+
+**The daily salt turns at the same midnight.** The architect review
+caught this one. With reports cut at local midnight and the salt still
+at UTC's, a consentless visitor active across 01:00 or 02:00 Berlin
+time (winter or summer) would be
+two visitors inside one reported day — the per-day visitor count would
+be quietly inflated. Moving the salt's day is privacy-neutral: it is
+still random, kept for one day and never derived from a secret; only
+the hour it is replaced moves. The legal review caught a second part:
+the stored day label had to name the zone too. A date alone matched
+across zones, so on upgrade, or after moving `TIMEZONE` west, one salt
+could live about 28 hours. With the zone in the label, a salt from any
+other zone is replaced at start. Backup file names stay UTC, since they
+are not a report.
+
+What cannot be fixed is the data already stored. Rows from before the
+upgrade carry ids that rotated at UTC midnight, and those days are now
+cut at local midnight — so for them a consentless visitor active across
+UTC midnight is still two visitors inside one local day. Only visitor
+counts on pre-upgrade days are affected, only slightly, and the
+CHANGELOG says so rather than leaving it to be found.
+
+**Threaded, not global.** Every function in `lib/` takes the zone as a
+parameter. The routes read `TIMEZONE` once at load, as they already do
+for `READ_ONLY`. MCP tool modules get it as a third registrar argument,
+and `periodInput` became `periodInput(timezone)`, because its
+description names the zone and a module-level constant would bake in
+whatever was set at import. The tool manifest cache is keyed by zone as
+well as mode for the same reason.
+
+A test reads the compiled `lib/` files and fails on any `strftime` over
+`ts` without `span_offset`, so the rule in `AGENTS.md` is enforced
+rather than remembered.
+

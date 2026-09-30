@@ -321,7 +321,7 @@ export interface CohortReturn {
 // "Did last week's campaign visitors come back this week" — a set
 // intersection across two periods, which no count-shaped tool can be
 // combined into. The honest half of the answer is consentfulVisitors:
-// a consentless visitor_id is a new hash every UTC day, so for them
+// a consentless visitor_id is a new hash every day, so for them
 // returning on a later day is unobservable by design, and the result
 // says how much of the cohort that applies to instead of reporting a
 // return rate that is really a consent rate.

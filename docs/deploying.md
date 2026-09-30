@@ -53,6 +53,7 @@ npm install
 npm run build
 DB_PATH=./genug.db \
 ALLOWED_ORIGIN=https://your-tracked-site.com \
+TIMEZONE=Europe/Berlin \
 MCP_API_KEY=<random-secret> \
 COCKPIT_PASSWORD=<random-secret> \
 node server/dist/index.js
@@ -122,6 +123,7 @@ services:
     image: "ghcr.io/datapip/genug-analytics:v0.10.1" # the latest released tag
     environment:
       - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
+      - "TIMEZONE=${TIMEZONE}"
       - "MCP_API_KEY=${MCP_API_KEY}"
       - "COCKPIT_PASSWORD=${COCKPIT_PASSWORD}"
       # One hop: Coolify's Traefik. Raise to 2 ONLY if this record is
@@ -165,6 +167,7 @@ set `2` instead of `1` if this domain is also proxied.
 docker build -t genug .
 docker run --rm -p 3000:3000 \
   -e ALLOWED_ORIGIN=https://your-tracked-site.com \
+  -e TIMEZONE=Europe/Berlin \
   -e MCP_API_KEY=<random-secret> \
   -e COCKPIT_PASSWORD=<random-secret> \
   -v genug-data:/data \
@@ -229,7 +232,8 @@ either click "Deploy" in its UI or let a push-triggered webhook do it.
 4. **Set the exposed port**: in **General**, set **Ports Exposes** to
    `3000` (the internal port `server/index.ts` listens on via `PORT`).
 5. **Add environment variables** (see [Configuration](#configuration) below):
-   `PORT=3000`, `ALLOWED_ORIGIN=https://<the-tracked-site>`, plus
+   `PORT=3000`, `ALLOWED_ORIGIN=https://<the-tracked-site>`,
+   `TIMEZONE=<your zone, e.g. Europe/Berlin>`, plus
    `MCP_API_KEY` and `COCKPIT_PASSWORD`, both toggled as
    **secret**. `DB_PATH` doesn't need to be set — it defaults to
    `/data/genug.db`, matching the volume mount in the next step.
@@ -291,6 +295,7 @@ coming up in an insecure state.
 | `DB_PATH`           | no (default `/data/genug.db`) | Path to the SQLite file. The default matches the volume mount used in the Docker/Coolify instructions above, so this rarely needs setting — override only if you want the file somewhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `TRUST_PROXY`       | no (default `0`)              | How many reverse-proxy hops sit in front of the server: `1` behind a single proxy (Coolify's Traefik, nginx, Caddy), `2` behind that plus Cloudflare. Leave unset when the port is published directly. **Setting this higher than the number of proxies you actually have is a security hole** — `X-Forwarded-For` is text the sender writes, so an extra trusted hop lets anyone forge the address every rate limiter counts, including the cockpit's password lockout.                                                                                                                                                                                                                                                                                                                                                      |
 | `ALLOWED_ORIGIN`    | yes                           | The tracked site's exact origin (scheme + host + port, no path), for CORS on `/events`. Comma-separate several if the site serves on more than one origin (an apex plus a `www.` host, a staging host).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `TIMEZONE`          | yes                           | The time zone reports are in, as an IANA name: `Europe/Berlin`, `America/New_York`, `UTC`. The full list is the "TZ identifier" column of [Wikipedia's list of tz database time zones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones); a wrong name stops startup with an error that suggests the right one where it can. It sets where a day and an hour begin — the cockpit's charts and Today/7d/30d, every by-day and by-hour tool, and what a bare date like `2026-09-30` means when the agent asks about it. It also sets when the daily salt for consentless visitor ids is replaced. A fixed offset such as `+01:00` is refused, because it is wrong for half the year wherever clocks change. Not the container's `TZ`: Genug reads only this.                                                        |
 | `MCP_API_KEY`       | yes                           | Shared secret your AI agent's MCP config authenticates with.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `COCKPIT_PASSWORD`  | yes                           | The password for `/cockpit`. Typed once on a sign-in page, which exchanges it for a session cookie lasting 12 hours; changing it signs out every browser. Required — the server refuses to start without it, so the cockpit is never unintentionally public. The cockpit reads and (unless `READ_ONLY`) writes `ground-rules.md`, `about.md` and `history.json`, so on a non-`READ_ONLY` deployment this carries the same read-exposure as `MCP_API_KEY` for that text — don't hand it to someone you wouldn't hand the MCP key to.                                                                                                                                                                                                                                                                                           |
 | `EVENTS_PATH`       | no (default `/data/events`)   | Where every event schema lives, yours and the built-ins (see [Defining your own events](client.md#defining-your-own-events)). Created and filled from the image on first start; after that it is yours to edit and nothing overwrites it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -341,7 +346,7 @@ curl -s -b genug-cookies.txt 'https://data.your-domain.com/cockpit/data?range=7d
 
 `range` is one of `today`, `24h`, `7d` or `30d`, the same as the
 cockpit's buttons, and defaults to `7d`. `today` and `24h` end now.
-`7d` and `30d` are complete UTC days and leave out today. Any other
+`7d` and `30d` are complete days in `TIMEZONE` and leave out today. Any other
 value, or the old `days` parameter, gets a 400 naming the valid ones.
 
 `curl -u` no longer works — the cockpit used to take HTTP Basic Auth and

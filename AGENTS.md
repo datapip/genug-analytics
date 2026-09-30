@@ -201,9 +201,18 @@ visibly broken, which is the failure mode this project cares most about.
 - Never build SQL by string interpolation. Bind parameters. (The one
   accepted exception — `json_extract('$.key')` — is guarded by
   `isValidPropertyKey`; use it, don't work around it.)
-- Every tool taking a time period uses `periodInput` from
+- Every tool taking a time period uses `periodInput(timezone)` (or,
+  for a named pair, `periodBound(edge, timezone, …)`) from
   `server/mcp/shared.ts`. It normalizes the bounds, and a hand-rolled
   `z.string()` will silently return wrong numbers rather than an error.
+- Days and hours are the site's, set by the required `TIMEZONE`.
+  `ts` stays a UTC instant; only the cuts move. Never bucket with a bare
+  `strftime(…, ts)` — that is UTC's midnight, plausible while wrong.
+  Go through `lib/timezone.ts` (the spans join, `localDate`,
+  `localDayStart`), and take the zone as a parameter rather than
+  reading the environment. A test fails on a bare one. The daily salt
+  turns at the same midnight, so a consentless visitor is one visitor
+  per reported day.
 - Never hardcode `"page_view"`. Resolve the event tagged
   `"_pageView": true` via `pageViewEventType`; a deployment is free to
   rename it but cannot drop it — if nothing carries the tag, the

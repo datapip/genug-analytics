@@ -58,6 +58,9 @@ export interface McpServerOptions {
   // Skips every tool that writes. The routes read it from the
   // environment; tests pass it directly.
   readOnly?: boolean;
+  // The site's zone (TIMEZONE). Required: the tools' descriptions name
+  // it, and a bare date in a period means a day in it.
+  timezone: string;
 }
 
 // Rejects an inverted period before the handler runs, for every tool
@@ -113,25 +116,31 @@ export interface ToolSummary {
 // its own custom tool shows up in the cockpit's tool overview for free,
 // with no second list to keep in sync. One manifest per mode: a
 // read-only server registers fewer tools, and the cockpit must list
-// what the agent can actually call, not what the image ships.
-const manifests = new Map<boolean, ToolSummary[]>();
+// what the agent can actually call, not what the image ships. Keyed by
+// the zone too, since descriptions name it.
+const manifests = new Map<string, ToolSummary[]>();
+
+function manifestKey(readOnly: boolean, timezone: string): string {
+  return `${readOnly}:${timezone}`;
+}
 
 export function getToolManifest(
   db: Database.Database,
-  options: McpServerOptions = {},
+  options: McpServerOptions,
 ): ToolSummary[] {
-  const readOnly = options.readOnly === true;
-  if (!manifests.has(readOnly)) {
+  const key = manifestKey(options.readOnly === true, options.timezone);
+  if (!manifests.has(key)) {
     createMcpServer(db, options);
   }
-  return manifests.get(readOnly) ?? [];
+  return manifests.get(key) ?? [];
 }
 
 export function createMcpServer(
   db: Database.Database,
-  options: McpServerOptions = {},
+  options: McpServerOptions,
 ): McpServer {
   const readOnly = options.readOnly === true;
+  const { timezone } = options;
   const server = new McpServer(
     { name: "genug", version: VERSION },
     { instructions: SERVER_INSTRUCTIONS },
@@ -169,9 +178,9 @@ export function createMcpServer(
     ? toolModules
     : [...toolModules, ...writingToolModules, ...rawDataToolModules];
   for (const registerTools of modules) {
-    registerTools(server, db);
+    registerTools(server, db, { timezone });
   }
 
-  manifests.set(readOnly, manifest);
+  manifests.set(manifestKey(readOnly, timezone), manifest);
   return server;
 }

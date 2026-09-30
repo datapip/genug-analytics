@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { addDays, localDate, localDayStart } from "./timezone.js";
 
 // The cockpit's four period buttons. Only these are offered: a free
 // date range is analysis, which is the agent's job (see
@@ -6,8 +7,10 @@ import { z } from "zod";
 //
 // "today" and "24h" are rolling windows ending now — a partial,
 // still-moving period is what those labels promise. "7d" and "30d" are
-// the N complete UTC days before today, fixed once the day turns over,
-// so the number does not move between two reloads on the same day.
+// the N complete days before today, fixed once the day turns over, so
+// the number does not move between two reloads on the same day. Days
+// are the site's own (TIMEZONE, lib/timezone.ts), so "Today" starts at
+// the owner's midnight rather than at UTC's.
 export const windowRangeSchema = z.enum(["today", "24h", "7d", "30d"]);
 export type WindowRange = z.infer<typeof windowRangeSchema>;
 
@@ -45,14 +48,14 @@ export function parseWindowRange(
 export function windowPeriod(
   range: WindowRange,
   now: Date,
+  timezone: string,
 ): { from: string; to: string } {
-  const todayStart = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
+  const today = localDate(now, timezone);
+  const todayStart = localDayStart(today, timezone);
+  // Counted back in calendar days, not in 24-hour steps, so 7d still
+  // starts at a midnight when a clock change falls inside it.
   const fullDays = (n: number) => ({
-    from: new Date(todayStart - n * DAY_MS).toISOString(),
+    from: new Date(localDayStart(addDays(today, -n), timezone)).toISOString(),
     // `to` is inclusive (queries use BETWEEN), so stop 1 ms before today.
     to: new Date(todayStart - 1).toISOString(),
   });

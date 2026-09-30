@@ -3,6 +3,12 @@ import type { Period } from "./period.js";
 import { roundTo } from "./aggregate.js";
 import { NO_SEGMENT, type SegmentClause } from "./segment.js";
 import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
+import {
+  enumerateDays,
+  JOIN_LOCAL_SPANS,
+  LOCAL_SPANS_CTE,
+  localSpans,
+} from "./timezone.js";
 
 // "How much traffic, and when" — aggregate activity over a period,
 // however it's bucketed. Pairs with mcp/traffic.ts, which exposes these.
@@ -75,23 +81,6 @@ export function getTrafficSummary(
   };
 }
 
-// Shared by every day-bucketed query: a trend needs every day present,
-// not just the ones that happen to have data, or a quiet day silently
-// disappears instead of showing as a dip.
-export function enumerateDays(fromIso: string, toIso: string): string[] {
-  const cursor = new Date(fromIso);
-  cursor.setUTCHours(0, 0, 0, 0);
-  const end = new Date(toIso);
-  end.setUTCHours(0, 0, 0, 0);
-
-  const days: string[] = [];
-  while (cursor <= end) {
-    days.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return days;
-}
-
 interface TrafficCounts {
   sessions: number;
   visitors: number;
@@ -136,31 +125,36 @@ function bucketedCounts<K>(
 }
 
 export interface TrafficByDay extends TrafficCounts {
-  date: string; // YYYY-MM-DD, UTC
+  date: string; // YYYY-MM-DD, in the site's zone
 }
 
 // Same additive interactionEvents/viewEvents shape as getTrafficSummary,
 // just bucketed by day, so an agent that learned that vocabulary from
-// get_traffic_summary doesn't need a second one here. Days are UTC
-// calendar days (see "Data model" in docs/decisions.md) and zero-filled, so a
-// quiet day reads as a dip rather than vanishing from the series.
+// get_traffic_summary doesn't need a second one here. Days are calendar
+// days in the site's zone (lib/timezone.ts) and zero-filled, so a quiet
+// day reads as a dip rather than vanishing from the series. A day with
+// a clock change lasts 23 or 25 hours and reads as a small dip or bump.
 export function getTrafficByDay(
   db: Database.Database,
   period: Period,
   pageViewEvent: string,
+  timezone: string,
   segment: SegmentClause = NO_SEGMENT,
 ): TrafficByDay[] {
+  const spans = localSpans(db, period, timezone);
   const totals = db
     .prepare(
-      `SELECT strftime('%Y-%m-%d', ts) AS bucket,
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT strftime('%Y-%m-%d', ts, span_offset || ' minutes') AS bucket,
               COUNT(DISTINCT session_id) AS sessions,
               COUNT(DISTINCT visitor_id) AS visitors,
               COUNT(*) AS total
-       FROM events
+       FROM events ${JOIN_LOCAL_SPANS}
        WHERE ts BETWEEN @from AND @to${segment.sql}
        GROUP BY bucket`,
     )
     .all({
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,
@@ -168,13 +162,15 @@ export function getTrafficByDay(
 
   const viewEvents = db
     .prepare(
-      `SELECT strftime('%Y-%m-%d', ts) AS bucket, COUNT(*) AS count
-             FROM events
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT strftime('%Y-%m-%d', ts, span_offset || ' minutes') AS bucket, COUNT(*) AS count
+             FROM events ${JOIN_LOCAL_SPANS}
              WHERE event = @pageViewEvent AND ts BETWEEN @from AND @to${segment.sql}
              GROUP BY bucket`,
     )
     .all({
       pageViewEvent,
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,
@@ -184,7 +180,7 @@ export function getTrafficByDay(
   }[];
 
   const counts = bucketedCounts(totals, viewEvents);
-  return enumerateDays(period.from, period.to).map((date) => ({
+  return enumerateDays(period.from, period.to, timezone).map((date) => ({
     date,
     ...counts(date),
   }));
@@ -198,7 +194,7 @@ const WEEKDAY_NAMES = [
   "Thursday",
   "Friday",
   "Saturday",
-]; // index matches SQLite's strftime('%w', ts): 0 = Sunday
+]; // index matches SQLite's strftime('%w', …): 0 = Sunday
 
 // Displayed Monday-first, not Sunday-first (SQLite's own order) — the
 // conventional business-week reading for "which days get the most
@@ -209,28 +205,30 @@ export interface TrafficByDayOfWeek extends TrafficCounts {
   day: string; // "Monday".."Sunday"
 }
 
-// Same UTC caveat as getTrafficByDay (see "Data model" in docs/decisions.md):
-// a day-of-week bucket is which UTC day an event landed on, not the
-// visitor's own local weekday — for a deployment whose visitors are far
-// from UTC, traffic near midnight local time can land in the "wrong"
-// UTC weekday bucket.
+// The weekday in the site's zone, not the visitor's: a visitor in
+// another zone near midnight lands on the site's weekday, which is the
+// calendar the owner reads the result in.
 export function getTrafficByDayOfWeek(
   db: Database.Database,
   period: Period,
   pageViewEvent: string,
+  timezone: string,
   segment: SegmentClause = NO_SEGMENT,
 ): TrafficByDayOfWeek[] {
+  const spans = localSpans(db, period, timezone);
   const totals = db
     .prepare(
-      `SELECT CAST(strftime('%w', ts) AS INTEGER) AS bucket,
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT CAST(strftime('%w', ts, span_offset || ' minutes') AS INTEGER) AS bucket,
               COUNT(DISTINCT session_id) AS sessions,
               COUNT(DISTINCT visitor_id) AS visitors,
               COUNT(*) AS total
-       FROM events
+       FROM events ${JOIN_LOCAL_SPANS}
        WHERE ts BETWEEN @from AND @to${segment.sql}
        GROUP BY bucket`,
     )
     .all({
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,
@@ -238,13 +236,15 @@ export function getTrafficByDayOfWeek(
 
   const viewEvents = db
     .prepare(
-      `SELECT CAST(strftime('%w', ts) AS INTEGER) AS bucket, COUNT(*) AS count
-             FROM events
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT CAST(strftime('%w', ts, span_offset || ' minutes') AS INTEGER) AS bucket, COUNT(*) AS count
+             FROM events ${JOIN_LOCAL_SPANS}
              WHERE event = @pageViewEvent AND ts BETWEEN @from AND @to${segment.sql}
              GROUP BY bucket`,
     )
     .all({
       pageViewEvent,
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,
@@ -261,32 +261,34 @@ export function getTrafficByDayOfWeek(
 }
 
 export interface TrafficByHour extends TrafficCounts {
-  hour: number; // 0-23, UTC
+  hour: number; // 0-23, in the site's zone
 }
 
-// UTC, not the visitor's local hour — far more noticeable here than for
-// day-of-week or day bucketing: "peak traffic at 14:00" only means the
-// site owner's local peak hour if they happen to be near UTC. Documented
-// here rather than solved (see docs/decisions.md's "Day-bucketing is UTC only"
-// for why: strftime can't group by an IANA zone, only a fixed offset
-// that breaks across DST).
+// The hour in the site's zone, not the visitor's. Where clocks change,
+// the fall-back night puts two real hours into one bucket and the
+// spring-forward night leaves one empty; over any period longer than a
+// few days that is noise, and the tool description says so.
 export function getTrafficByHour(
   db: Database.Database,
   period: Period,
   pageViewEvent: string,
+  timezone: string,
   segment: SegmentClause = NO_SEGMENT,
 ): TrafficByHour[] {
+  const spans = localSpans(db, period, timezone);
   const totals = db
     .prepare(
-      `SELECT CAST(strftime('%H', ts) AS INTEGER) AS bucket,
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT CAST(strftime('%H', ts, span_offset || ' minutes') AS INTEGER) AS bucket,
               COUNT(DISTINCT session_id) AS sessions,
               COUNT(DISTINCT visitor_id) AS visitors,
               COUNT(*) AS total
-       FROM events
+       FROM events ${JOIN_LOCAL_SPANS}
        WHERE ts BETWEEN @from AND @to${segment.sql}
        GROUP BY bucket`,
     )
     .all({
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,
@@ -294,13 +296,15 @@ export function getTrafficByHour(
 
   const viewEvents = db
     .prepare(
-      `SELECT CAST(strftime('%H', ts) AS INTEGER) AS bucket, COUNT(*) AS count
-             FROM events
+      `WITH ${LOCAL_SPANS_CTE}
+       SELECT CAST(strftime('%H', ts, span_offset || ' minutes') AS INTEGER) AS bucket, COUNT(*) AS count
+             FROM events ${JOIN_LOCAL_SPANS}
              WHERE event = @pageViewEvent AND ts BETWEEN @from AND @to${segment.sql}
              GROUP BY bucket`,
     )
     .all({
       pageViewEvent,
+      spans,
       from: period.from,
       to: period.to,
       ...segment.params,

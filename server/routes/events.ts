@@ -20,7 +20,7 @@ import { insertRejectedEvent } from "../db/rejectedEvents.js";
 import { resolveVisitorIdentity } from "../lib/identity.js";
 import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
-import { requireEnv } from "../lib/env.js";
+import { parseTimezone, requireEnv } from "../lib/env.js";
 import { isBotUserAgent } from "../lib/bots.js";
 import { classifyUserAgent } from "../lib/userAgent.js";
 import { stripUnknownParams } from "../lib/url.js";
@@ -68,7 +68,10 @@ if (allowedOrigins.size === 0) {
     "ALLOWED_ORIGIN must name at least one origin (comma-separated for more than one)",
   );
 }
-const dailySalt = createDailySalt(join(dirname(dbPath), "daily-salt.json"));
+const dailySalt = createDailySalt(
+  join(dirname(dbPath), "daily-salt.json"),
+  parseTimezone(requireEnv("TIMEZONE")),
+);
 startRotation(dailySalt);
 
 // Plain boolean, not a type predicate: event names come from JSON files
