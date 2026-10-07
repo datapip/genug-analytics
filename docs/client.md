@@ -35,7 +35,7 @@ disagree.
   persistent tracking. Leave it unset until your consent manager has
   actually answered — that's a real third state, distinct from `false`,
   and it's what a returning visitor's existing persistent cookie
-  survives (see [what is stored](privacy.md#what-actually-gets-stored)). Set it to `true` once
+  survives (see [what is stored](privacy.md#how-visitors-are-told-apart)). Set it to `true` once
   they accept, and to `false` only for an explicit decline or
   withdrawal, since `false` actively removes any existing cookie. Call
   `window.genugAnalytics.setConsent(true)` later (e.g. from a cookie-banner
@@ -55,7 +55,7 @@ disagree.
 ### Loading only after consent
 
 By default a visitor who clicks "Reject" is still counted, under the
-daily hash (see [privacy](privacy.md#running-without-a-consent-banner)).
+daily hash (see [privacy](privacy.md#how-visitors-are-told-apart)).
 `consent: false` changes _how_ they are identified, not _whether_.
 If you or your client want no analytics at all without consent, don't
 put the script tag in the page. Load it from your consent manager
@@ -103,10 +103,7 @@ On reject, nothing loads and nothing is sent. On withdrawal,
 `genug_vid` cookie. It also leaves the `genug_optout` flag, which is
 why `startAnalytics()` queues `optIn()` first.
 
-Consent (Art. 6(1)(a) GDPR, § 25(1) TDDDG) is then the basis for the
-analytics. It must be valid under Art. 7 GDPR: withdrawing must be as
-easy as accepting. Server logs still need their own basis, usually
-Art. 6(1)(f). The [privacy policy text](privacy.md#text-for-your-privacy-policy)
+The [privacy policy text](privacy.md#text-for-your-privacy-policy)
 says what to change for this mode.
 
 The cost: every visitor who rejects or ignores the banner is missing
@@ -165,7 +162,7 @@ usually runs _after_ `client.js` has already fired the page view — and
 that's fine.** Leaving `consent` unset (rather than `false`) until your
 consent manager answers is exactly what it's for: an unanswered request
 is never treated as a rejection, so a returning, already-consented
-visitor's persistent ID survives it (see [what is stored](privacy.md#what-actually-gets-stored)).
+visitor's persistent ID survives it (see [what is stored](privacy.md#how-visitors-are-told-apart)).
 The only cost is that this one page view is recorded consentless, since
 consent genuinely wasn't confirmed yet when it fired.
 

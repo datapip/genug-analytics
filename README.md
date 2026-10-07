@@ -115,16 +115,11 @@ The full walk-through with a screenshot is
    Then ask: _"What were my top pages this week, and where did that
    traffic come from?"_
 
-Before going live, three things the software cannot decide for you:
-name what you collect in your privacy notice; state your retention
-period there (it defaults to 396 days, 13 months — a real period, not
-forever — but your notice still has to say so); and decide whether the
-default consentless mode is actually usable without a banner for
-**your** site. Genug's architecture makes that a defensible question to
-ask, not a settled yes — whether it holds depends on your use case and
-your local law, and is yours to check, ideally with your own counsel,
-not something the software decides for you. All three are laid out in
-[privacy](docs/privacy.md).
+Before going live, three things are yours to decide: what your
+privacy notice says, how long you keep the data (13 months by default),
+and whether you need a consent banner. Genug works without one, but
+whether that's allowed for your site is a question for your lawyer.
+[Privacy](docs/privacy.md) lists what Genug stores and has a template.
 
 ## What you can ask
 
@@ -180,10 +175,8 @@ filtered down to the parameters you keep (the six `utm_*` by default), the devic
 User-Agent classified to, the visitor's language, the consent mode,
 and the props your event declares. No raw address, no User-Agent
 string, no profile. In consentless mode nothing is written to the
-visitor's device except the opt-out flag, if they ask for it. Whether
-that lets you run without a banner is your decision to make with your
-own counsel; [docs/privacy.md](docs/privacy.md) sets out what Genug
-does, what stays yours to do, and where the argument is unsettled.
+visitor's device except the opt-out flag, if they ask for it.
+[docs/privacy.md](docs/privacy.md) has the details.
 
 ## Make it yours
 
@@ -202,8 +195,8 @@ that are plausible while wrong. The reasoning behind every rule is in
 
 ## Operating it
 
-- **Retention** defaults to 396 days (13 months), a defensible starting point (see
-  [operations](docs/operations.md#retention) for the reasoning) — set
+- **Retention** defaults to 396 days (13 months)
+  ([operations](docs/operations.md#retention)). Set
   `RETENTION_DAYS=-1` to keep everything instead, or a different number
   of days to choose your own period.
 - **Backups** are on by default: a daily consistent snapshot on the

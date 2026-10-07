@@ -182,19 +182,15 @@ what leaves your server when you do
 
 ## Before you go live
 
-Three things the software cannot do for you:
+Three things the software can't decide for you:
 
-- **Say what you collect** in your privacy notice, and name a legal
-  basis. The field table and the checklist are written for exactly
-  this. → [Running without a consent banner](privacy.md#running-without-a-consent-banner)
-- **Say how long you keep it, if 13 months isn't right.** `RETENTION_DAYS`
-  defaults to 396 days; set it if you want a different period, or `-1`
-  to keep everything. Your notice should say which. → [Retention](operations.md#retention)
-- **Decide whether consentless mode actually fits your case.** It
-  defaults to on, and the architecture makes it a defensible question
-  to ask — not a settled yes for every deployment. Whether it holds
-  depends on your use case and your local law; check it yourself,
-  ideally with your own counsel, before relying on it. → [Running without a consent banner](privacy.md#running-without-a-consent-banner)
+- **Your privacy notice.** What Genug stores, and a template.
+  → [Privacy](privacy.md)
+- **Your retention period.** `RETENTION_DAYS` defaults to 396 days (13
+  months). → [Retention](operations.md#retention)
+- **Whether you need a consent banner.** Genug works without one, but
+  whether that is allowed for your site is a question for your lawyer.
+  → [Questions for your lawyer](privacy.md#questions-for-your-lawyer)
 
 ## Next
 

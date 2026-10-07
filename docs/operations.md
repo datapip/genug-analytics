@@ -146,95 +146,52 @@ transaction reaches disk.
 
 ## Data lifecycle
 
-- **Opting out**: `genugAnalytics.optOut()` writes a first-party
-  `genug_optout` flag, after which the script sends nothing at all for
-  that browser until `optIn()` is called. It makes exactly one request
-  on the way out — no event, no URL — so the server can clear the
-  `genug_vid` cookie the page cannot delete itself; that request is
-  never stored, and nothing is counted or recorded about it. This is
-  the Art. 21 objection route a deployment relying on legitimate
-  interest needs — link it from your privacy notice.
+- **Opting out**: `genugAnalytics.optOut()` stops the script for that
+  browser and deletes the `genug_vid` cookie. See
+  [the opt-out](privacy.md#the-opt-out).
 - **Bot filtering**: requests to `/events` whose `User-Agent` matches a
   known crawler/automation-tool signature (or has no `User-Agent` at
   all) are silently dropped — no error, no stored row, same response as
   a real event. This is best-effort: it catches bots that identify
   themselves honestly (most crawlers do), not one deliberately spoofing
   a real browser.
-- **Withdrawing consent**: when an event arrives with `consent: false`
-  — an explicit decline, not merely unset — and the visitor still has a
-  `genug_vid` cookie, the server clears it. So calling `setConsent(false)`
-  from your banner's reject path removes the identifier on the visitor's
-  next event, usually within seconds. This has to happen server-side —
-  the cookie is `httpOnly`, so your own page JavaScript cannot delete
-  it. Note that withdrawal stops future identification; it does not
-  delete events already collected, which is the separate erasure tool
-  below, and it does not stop collection — consentless events carry on.
-  The thing that stops collection outright is `optOut()`, described
-  under [Running without a consent banner](privacy.md#running-without-a-consent-banner).
-- <a id="retention"></a>**Retention**: `RETENTION_DAYS` (see [Configuration](deploying.md#configuration))
-  controls how many days of events, rejected events and bot activity are
-  kept before the daily job deletes the rest. **Defaults to 396 (13
-  months)** — deliberately, and loudly: an unset value used to mean
-  forever, and defaulting to a real number instead is worth more than a
-  full explanation each time it's mentioned, so see
-  [decisions.md](decisions.md) under "Data lifecycle" for why it
-  changed and what it means if you're upgrading from a version where it
-  didn't. Set `RETENTION_DAYS=-1` to keep events forever, explicitly —
-  the way unset used to, now that omitting it no longer says that for
-  you. (`0` is refused rather than accepted: "0 days" reads as "keep
-  nothing", which is the opposite of what it would do.)
-  13 months is a commonly used figure, and comfortably under what France's
-  CNIL allows for exempted analytics — a 25-month ceiling on the
-  underlying data, separate from the 13-month ceiling on the tracker
-  itself that this project's consent cookie already follows; it is not
-  a rule laid down by a German authority, so treat it as a defensible
-  starting point rather than an authority to cite. **The
-  code default doesn't write your privacy notice for you** — Art.
-  13(2)(a) still expects your notice to _state_ the period, even though
-  the software now picks a reasonable one without being asked.
-- <a id="deletion-and-erasure"></a>**Deletion**: ask your AI agent to erase a visitor — it calls the
-  `delete_visitor_data(visitor_id, confirm)` MCP tool. Called without
-  `confirm: true` it deletes nothing and only reports how many events
-  would be affected, so the agent can show you that count and get an
-  explicit yes before calling it again with `confirm: true`. On a
-  deployment started with `READ_ONLY=true` the tool does not exist;
-  erasure there means running the delete against the database
-  yourself.
+- **Withdrawing consent**: call `setConsent(false)` from your banner's
+  reject path. The server deletes the `genug_vid` cookie on the
+  visitor's next event; the page can't, because the cookie is
+  `HttpOnly`. Events already collected stay, and collection carries on
+  without the cookie. To stop collection, use `optOut()`.
+- <a id="retention"></a>**Retention**: `RETENTION_DAYS` (see
+  [Configuration](deploying.md#configuration)) sets how many days of
+  events, rejected events and bot activity are kept. A job at startup
+  and then daily deletes the rest. **The default is 396 days (13 months).** Set `-1`
+  to keep everything. `0` is refused, since "0 days" reads as "keep
+  nothing", the opposite of what it would do. The privacy template
+  has a slot for it.
+- <a id="deletion-and-erasure"></a>**Deletion**: ask your AI agent to
+  erase a visitor. It calls `delete_visitor_data(visitor_id, confirm)`.
+  Without `confirm: true` it only reports how many events would go, so
+  the agent can show you the count and ask before deleting. On a
+  `READ_ONLY` deployment the tool doesn't exist; you run the delete
+  against the database yourself.
 
   **Read this before you promise anyone erasure.** The tool needs a
-  `visitor_id`, and nothing Genug stores can be worked backwards to one.
-  For today only, the id can be recomputed: it is a hash of the
-  truncated address and the User-Agent, keyed by the day's random
-  salt. So a data subject who supplies their address and their
-  browser's User-Agent before midnight in your `TIMEZONE` on the day of
-  the visit gives you what you need to
-  find and erase today's rows. After midnight the salt is gone, and
-  earlier days cannot be found this way. That is the case
-  Art. 11(2) describes, where the subject provides information enabling
-  identification and Arts. 15 to 20 apply again — so a request backed by
-  those details should be honoured rather than refused. The same lookup
-  problem, and the same answer, applies to an Art. 15 access request and
-  an Art. 21 objection, not only to Art. 17.
+  `visitor_id`, and Genug has no way to find one for a person:
 
-  What remains true is that you cannot do it from your side alone, and
-  that an unaided request cannot be fulfilled. For consentless traffic
-  there is no way to find the
-  right one: the ID is a daily-rotating hash the visitor never sees and
-  never receives, and nothing in Genug maps a person to it. That is a
-  consequence of storing no stable identifier, not an oversight — but
-  it means an Art. 17 request from a consentless visitor cannot be
-  fulfilled, and the case GDPR provides for that (Art. 11: a controller
-  who cannot identify the data subject) is something you have to state
-  in your own privacy notice rather than assume. For a consented
-  visitor the ID is the `genug_vid` cookie value, which is `HttpOnly` —
-  so you get it from the request that person is making, not from asking
-  them to read it off their own machine.
+  - **A consented visitor's** ID is the `genug_vid` cookie value. It is
+    `HttpOnly`, so you read it from a request that person makes, not by
+    asking them to look it up.
+  - **A consentless visitor's** ID can be recomputed only on the day of
+    the visit, before midnight in your `TIMEZONE`, from their address
+    and their browser's User-Agent. After that the salt is gone, and
+    their rows can't be found.
 
-  Deleting also does not reach the backups: the daily snapshots hold
-  the rows for up to 7 more days, and an off-host copy keeps them for
-  as long as you keep it. Delete the snapshots too if the request has
-  to be complete, or say in your notice how long the residue lives.
-  There's no undo on the live database.
+  How to answer an access or erasure request you can't match is a
+  question for your lawyer.
+
+  Deleting doesn't reach the backups: the daily snapshots keep the rows
+  for up to 7 more days, and an off-host copy keeps them as long as you
+  keep it. Delete the snapshots too if the request has to be complete.
+  There is no undo on the live database.
 
 - **Health check**: `GET /healthz` returns `200` if the server can
   reach its database, `500` otherwise — point your host platform's
@@ -395,7 +352,7 @@ describe what every event and prop means. Keep them with the export.
 
 Before you pass an export on, two things:
 
-- **It is personal data.** In consented mode, `visitor_id` comes from a
+- **It identifies visitors.** In consented mode, `visitor_id` comes from a
   cookie and stays the same across visits. In consentless mode it is a
   hash that changes daily, so it cannot link one day to the next, but it
   is still per-visitor. `url` and `props` hold whatever your pages and

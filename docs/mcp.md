@@ -51,7 +51,11 @@ sessions or visitors, be careful with small samples. A sensible default
 is written there on first start; edit it, or empty it to have none.
 Edits apply on the next question, with no restart.
 
-Keep it to how you want the agent to _behave_. Facts about what a
+A second file, `about.md`, says what the site or business is for, so
+the agent isn't left guessing. It starts empty, since there is no
+sensible default. Write it from the cockpit or by hand.
+
+Keep the ground rules to how you want the agent to _behave_. Facts about what a
 number means already live in each tool's own description, and a claim
 written in both places will eventually disagree with itself.
 
@@ -146,25 +150,15 @@ to that vendor's API. So do the two resources described above — the
 schema registry and the deployment-context document (ground rules and
 history) — since a client reads both before it calls anything.
 
-Most tools return aggregates — counts, rankings, breakdowns.
-`get_recent_events` is the exception: it returns raw rows, including
-URLs and whatever your events put in `props`. Query strings are already
-filtered before anything is stored, by default down to the six `utm_*`
-parameters (see [privacy.md](privacy.md)). That keeps most personal
-data out, but not all: a `utm_*` value or a prop can still contain
-something personal. Widening `KEPT_QUERY_PARAMS`, or setting it to `*`, widens what
-reaches the agent too. Your own event props are yours to keep clean. An answer is capped at
-64,000 characters of JSON, which still fits 100 ordinary rows: when
-unusually large rows would push past it, fewer rows come back and a
-second text block tells the agent so. If your deployment holds data
-you would not hand to a third party, that is the tool to think about.
-`READ_ONLY=true` unregisters it along with every writing tool, so a
-deployment whose key is meant to be public — a demo, for instance —
-never hands out raw rows through it. On a deployment that isn't
-`READ_ONLY`, there is no separate setting that turns just this one
-tool off: keeping the writing tools while dropping only this one takes
-a build of your own, a fork of `server/mcp/diagnostics.ts` rather than
-of the project.
+Most tools return aggregates: counts, rankings, breakdowns.
+`get_recent_events` is the exception. It returns raw rows, including
+URLs and whatever your events put in `props`. One answer is capped at
+64,000 characters of JSON, about 100 ordinary rows. Query strings are
+filtered before anything is stored (see [privacy](privacy.md#what-gets-stored)),
+which keeps most personal data out, but not all: a `utm_*` value or a
+prop can still contain something personal. If your deployment holds
+data you wouldn't hand to a third party, this is the tool to think
+about. `READ_ONLY=true` removes it.
 
 Whether you need a data-processing agreement with the model vendor,
 and what to say in your privacy policy about it, is a question for your
