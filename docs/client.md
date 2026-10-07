@@ -4,8 +4,7 @@ Embedding the script, tracking events, and defining your own.
 
 ## Embedding the client script
 
-Add the config object (optional, but see below) and the script tag,
-early in `<head>`:
+Put the config object and the script tag early in `<head>`:
 
 ```html
 <script>
@@ -16,50 +15,37 @@ early in `<head>`:
 <script defer src="https://data.your-domain.com/client.js"></script>
 ```
 
-The script reads its own `<script src>` to find your server — no
-separate config attribute needed, and this still works with `defer`.
-`window.genugAnalyticsConfig` must be set _before_ this tag, since it's
-only read once, at load.
+The script finds your server from its own `src`. The config is read
+once, at load, so it must come before the tag. `defer` keeps the tag
+from slowing your page down.
 
-`defer` is there so the tag never delays your page. Without it a
-`<script src>` in `<head>` blocks rendering until the file arrives, on
-every page load — and `client.js` is deliberately cached for only an
-hour, which makes that a real round trip to your collector rather than
-a cache hit for a good share of visits.
-Deferred scripts still run before `DOMContentLoaded`, so what you give
-up is only the visitor who leaves before the HTML finished parsing.
-Analytics is not worth a slower site; drop the attribute if you
-disagree.
+The config options:
 
-- **`consent`** (default unset): whether the visitor has consented to
-  persistent tracking. Leave it unset until your consent manager has
-  actually answered — that's a real third state, distinct from `false`,
-  and it's what a returning visitor's existing persistent cookie
-  survives (see [what is stored](privacy.md#how-visitors-are-told-apart)). Set it to `true` once
-  they accept, and to `false` only for an explicit decline or
-  withdrawal, since `false` actively removes any existing cookie. Call
-  `window.genugAnalytics.setConsent(true)` later (e.g. from a cookie-banner
-  "Accept" callback) to switch a visitor over without a page reload.
-  Note: because the consentless hash rotates daily, the
-  `get_new_vs_returning_visitors` MCP tool can only reliably tell new
-  from returning visitors for consentful (`consent: true`) traffic, or
-  same-day returns either way — a consentless visitor who comes back
-  tomorrow looks "new" again every time.
-- **`enableAutoPageTracking`** (default `false`): see "Tracking page
-  loads" below.
-- **`enableAutoLinkTracking`** (default `false`): see "Tracking outbound
-  links and downloads" below.
-- **`enableAutoRouteTracking`** (default `false`): see "Tracking
-  single-page-app route changes" below.
+- **`consent`** (default unset): whether the visitor agreed to
+  tracking across days. Leave it unset until your consent manager has
+  answered. Set `true` on accept, and `false` only on an explicit
+  decline or withdrawal, because `false` deletes an existing
+  `genug_vid` cookie. Unset leaves a returning visitor's cookie alone.
+  To switch without a reload, call
+  `window.genugAnalytics.setConsent(true)` from your banner's callback.
+- **`enableAutoPageTracking`** (default `false`): see
+  [tracking page loads](#tracking-page-loads).
+- **`enableAutoLinkTracking`** (default `false`): see
+  [outbound links and downloads](#tracking-outbound-links-and-downloads).
+- **`enableAutoRouteTracking`** (default `false`): see
+  [route changes](#tracking-single-page-app-route-changes).
+
+Without consent, a visitor gets a new ID every day. So "new versus
+returning" is only reliable for consented visitors, or for returns on
+the same day.
 
 ### Loading only after consent
 
-By default a visitor who clicks "Reject" is still counted, under the
-daily hash (see [privacy](privacy.md#how-visitors-are-told-apart)).
-`consent: false` changes _how_ they are identified, not _whether_.
-If you or your client want no analytics at all without consent, don't
-put the script tag in the page. Load it from your consent manager
-instead:
+By default a visitor who rejects is still counted, under the daily ID
+([privacy](privacy.md#how-visitors-are-told-apart)). `consent: false`
+changes _how_ they are identified, not _whether_. To collect nothing
+without consent, leave the script tag out and load it from your
+consent manager:
 
 ```html
 <script>
@@ -98,16 +84,14 @@ instead:
 </script>
 ```
 
-On reject, nothing loads and nothing is sent. On withdrawal,
-`optOut()` stops the script on the current page and removes the
-`genug_vid` cookie. It also leaves the `genug_optout` flag, which is
-why `startAnalytics()` queues `optIn()` first.
-
-The [privacy policy text](privacy.md#text-for-your-privacy-policy)
+On reject, nothing loads and nothing is sent. On withdrawal, `optOut()`
+stops the script and deletes the `genug_vid` cookie. It leaves the
+opt-out flag behind, which is why `startAnalytics()` queues `optIn()`
+first. The [privacy policy text](privacy.md#text-for-your-privacy-policy)
 says what to change for this mode.
 
-The cost: every visitor who rejects or ignores the banner is missing
-from every number. Expect far lower counts than consentless mode gives.
+Expect far lower numbers: everyone who rejects or ignores the banner is
+missing from all of them.
 
 ## Tracking events
 
@@ -120,17 +104,14 @@ window.genugAnalytics.track("product_added_to_cart", {
 });
 ```
 
-`track(event, props)` sends any registered event type immediately.
-`props` must match that event's schema (see [Defining your own events](#defining-your-own-events)
-below) or the server rejects it.
+`track(event, props)` sends a registered event right away. The props
+must match the event's definition, or the server rejects it.
 
 #### Calling `track()` before the script has loaded
 
-`client.js` is a separate request, so your own inline code can run
-before it arrives — and `window.genugAnalytics.track(...)` throws if the
-script isn't there yet. If you call `track()` from inline code, or from
-a framework that may run before the tag loads, add this small stub
-_before_ the `<script src>` tag:
+`track()` throws if `client.js` hasn't arrived yet. If you call it from
+inline code, or from a framework that may run first, put this stub
+_before_ the script tag:
 
 ```html
 <script>
@@ -150,57 +131,40 @@ _before_ the `<script src>` tag:
 <script defer src="https://data.your-domain.com/client.js"></script>
 ```
 
-Calls made before the script loads are queued and replayed, in order,
-as soon as it initialises — including `setConsent` and `optOut`, so
-consent granted early, or an opt-out remembered from a previous visit,
-still applies to everything queued behind it. You don't need this
-if you only ever call `track()` from user interactions (a click
-handler, a form submit), which by definition happen after load.
+Queued calls are replayed in order once the script loads. You don't
+need the stub if you only call `track()` from clicks and form submits.
 
-**A consent manager that calls `setConsent(true)` from its own callback
-usually runs _after_ `client.js` has already fired the page view — and
-that's fine.** Leaving `consent` unset (rather than `false`) until your
-consent manager answers is exactly what it's for: an unanswered request
-is never treated as a rejection, so a returning, already-consented
-visitor's persistent ID survives it (see [what is stored](privacy.md#how-visitors-are-told-apart)).
-The only cost is that this one page view is recorded consentless, since
-consent genuinely wasn't confirmed yet when it fired.
+**A consent manager usually answers after the first page view.** That
+page view is then recorded without consent. Everything after it is
+consented, and a returning visitor's cookie survives because `consent`
+was unset rather than `false`. To get the first page view in as
+consented too, either set `window.genugAnalyticsConfig.consent = true`
+inline when your site already knows the answer, or use the stub above
+so `setConsent(true)` is replayed first.
 
-If you'd rather that first event be recorded as consentful too, either
-of these gets it in before the auto page-view fires:
+#### Events that must not count twice
 
-- Set `window.genugAnalyticsConfig.consent = true` inline before the
-  script tag, if your site already knows the answer at render time from
-  its own cookie. It is read once at init, before anything is sent.
-- Or use the stub above, so the consent manager's `setConsent(true)` is
-  replayed ahead of the page view.
-
-For an event where firing twice would double-count (a completed order,
-not a page view), pass a third argument — a value you know uniquely
-identifies it:
+For an event like a completed order, pass a third argument that
+uniquely identifies it. A repeat with the same value, from a refresh or
+the back button, is dropped:
 
 ```js
 window.genugAnalytics.track(
   "order_completed",
   { value: 129.9, currency: "EUR" },
-  "3f9c2a…", // idempotency key — reuse the same value on a page
-  // refresh or back-navigation and the duplicate is silently dropped
+  "3f9c2a…", // idempotency key
 );
 ```
 
-Don't use the order number printed on the invoice. It links the
-visitor's session to a named customer in your shop. Use a hash of it
-instead, made by the shop's backend with a secret the shop keeps (an
-HMAC). A plain hash without a secret is not enough: order numbers are
-sequential, so anyone can hash them one by one and find the match. The
-same goes for an `order_id` prop.
-
-Most events should omit this third argument entirely.
+Don't use the order number itself: it links the session to a named
+customer. Have the shop's backend make an HMAC of it with a secret the
+shop keeps. A plain hash isn't enough, because order numbers can be
+guessed one by one. The same goes for an `order_id` prop. Most events
+need no third argument.
 
 ### From HTML attributes (no JS required)
 
-Tag any clickable element — a click anywhere inside it (even on a
-nested icon/span) sends the event:
+A click anywhere inside a tagged element sends the event:
 
 ```html
 <button data-genug-on-click="cta_click" data-genug-props='{"plan":"pro"}'>
@@ -208,21 +172,13 @@ nested icon/span) sends the event:
 </button>
 ```
 
-`data-genug-props` is optional and must be valid JSON if present;
-malformed JSON logs a console warning and sends empty props rather than
-breaking the click.
+`data-genug-props` is optional. Invalid JSON there logs a warning and
+sends empty props. Use a `<button>` or `<a href>`, so keyboard users
+trigger it too; a tagged `<div>` only works for them if you made it
+keyboard-accessible yourself.
 
-The listener only fires on a real `click` event, so a `<button>` or
-`<a href>` works the same for mouse, touch and keyboard (Enter/Space)
-activation. Tagging a non-interactive element like a `<div>` instead
-works for mouse/touch but never fires for a keyboard-only visitor
-unless you've already made it focusable and keyboard-activatable
-yourself (`role="button"`, `tabindex`, a keydown handler) — the same
-markup that keyboard accessibility requires anyway.
-
-This is also how you track **internal** links. There is no built-in
-event for them — define one of your own (see [Defining your own events](#defining-your-own-events))
-and tag the links you care about:
+This is also how you track **internal links**. There is no built-in
+event for them, so define your own and tag the links you care about:
 
 ```html
 <a
@@ -234,39 +190,21 @@ and tag the links you care about:
 </a>
 ```
 
-Internal links are deliberately _not_ covered by
-`enableAutoLinkTracking` (which handles outbound links and downloads —
-see below). The reason that flag exists is that outbound links and
-downloads mostly live inside content you didn't hand-write, so they
-can't be tagged. Internal links are your own: you know which ones
-matter, and tagging just those keeps the data meaningful instead of
-recording every click on every link — which on a content site would
-roughly double your stored rows, since each internal click is already
-followed by the destination's own `page_view`.
-
 ### Tracking page loads
 
-Nothing fires automatically on page load by default. Two ways to opt in
-(checked in this order, so a page never fires both):
+Nothing fires on page load by default. Two ways to turn it on:
 
-1. **`data-genug-on-load="event_name"`** (+ optional
-   `data-genug-props`) on `<html>` — not `<body>`, since `<html>`
-   exists even if the script runs before `<body>` is parsed. Fires that
-   named custom event once, at load. Presence alone is the opt-in, same
-   as the click attributes above — no config flag needed.
-2. **`window.genugAnalyticsConfig.enableAutoPageTracking = true`** — only
-   checked if the attribute above isn't present. Fires the built-in
-   `page_view` event with `page_title`/`document_language` derived from
-   the page automatically.
-
-**Running a single-page app?** Either of these fires once, on the real
-page load — a visitor who then browses ten routes is recorded as having
-seen one page. You also want `enableAutoRouteTracking`, below.
+1. **`data-genug-on-load="event_name"`** (with optional
+   `data-genug-props`) on `<html>` fires that event once, at load.
+2. **`enableAutoPageTracking: true`** fires the built-in `page_view`,
+   with the page title and language. It is ignored if the attribute
+   above is present, so a page never fires both.
 
 ### Tracking single-page-app route changes
 
-Off by default. Set `enableAutoRouteTracking: true` and every route
-change fires a page event too, not just the initial load:
+In a single-page app, page loads fire only once. Add
+`enableAutoRouteTracking: true` so each route change fires the same
+event again:
 
 ```html
 <script>
@@ -277,55 +215,20 @@ change fires a page event too, not just the initial load:
 </script>
 ```
 
-It's **additive, not a replacement**: it repeats whatever "Tracking page
-loads" above is set up to fire, so on its own it sends nothing and warns
-in the console. Set `enableAutoPageTracking` alongside it, or put
-`data-genug-on-load` on `<html>` — whichever you already use. Either
-way the same precedence applies, since a route change runs exactly the
-same code a page load does.
+It repeats whatever page loads fire, so on its own it does nothing and
+warns in the console. It counts `history.pushState()` and back/forward
+when the path or query string changes. It does not count
+`replaceState()`, a change of the `#hash` alone, or the route you are
+already on. Hash-routed apps (`#/about`) are therefore not tracked.
 
-What counts as a route change:
-
-- **`history.pushState()`** — what routers call to navigate — and
-  **back/forward** (`popstate`), when the path or query string changes.
-- **Not `history.replaceState()`.** That means "rewrite the current
-  entry" — canonicalising a URL, stripping a token, storing filter state
-  — which isn't a visit.
-- **Not a hash-only change.** `#faq` → `#pricing` is an in-page jump, so
-  counting it would fire a page event for every anchor link and "back to
-  top" button. The tradeoff: **hash-routed apps** (`#/about`) aren't
-  tracked at all, and since the fragment is stripped before storage,
-  calling `track()` for them by hand records only the page they hang
-  off. Open an issue if you need them.
-- **Not the route you're already on**, however many times a router
-  re-pushes it.
-
-The event is fired on the next tick rather than the instant the URL
-changes. That's deliberate: frameworks set `document.title` _after_
-navigating, so firing immediately would record the previous page's
-title, and a route guard redirecting `/old` → `/new` pushes twice in one
-tick — waiting records one event, at the URL the visitor actually landed
-on.
-
-Note that `document.referrer` doesn't change on a route change; it stays
-whichever external site sent the visitor. That's right for attribution,
-but it means these events don't record the previous route. The full
-`url` is stored on every event, so the sequence is still recoverable
-from the raw events.
-
-Why this is a separate flag rather than part of `enableAutoPageTracking`:
-plenty of sites use `pushState` for things that aren't navigation — a
-lightbox, a wizard step, filter state. Turning this on for everyone
-would inflate those deployments' numbers permanently, with nothing on
-the stored row to tell a page view that happened from one that didn't.
-Missing this flag means you under-count, which you can fix by setting it;
-the other direction can't be fixed after the fact.
+It's off by default because many sites use `pushState` for things that
+aren't navigation, like a lightbox or a filter. The referrer stays the
+external site that sent the visitor.
 
 ### Tracking outbound links and downloads
 
-Off by default. Set `enableAutoLinkTracking: true` and every click on a
-link leaving your site, or pointing at a downloadable file, is recorded
-automatically:
+Set `enableAutoLinkTracking: true` to record clicks on links that leave
+your site, or that point at a file:
 
 ```html
 <script>
@@ -333,165 +236,52 @@ automatically:
 </script>
 ```
 
-- Links to another host fire **`outbound_link_click`** with
+- A link to another host fires **`outbound_link_click`** with
   `target_url`, `target_host` and `link_text`.
-- Links to a file fire **`file_download`** with `file_url`,
-  `file_extension` and `link_text`. A link counts as a file if it has a
-  `download` attribute, or its URL ends in a common file extension
-  (`.pdf`, `.zip`, `.docx`, …).
-- Both URLs are filtered like the page URL: only the parameters in
-  `KEPT_QUERY_PARAMS` survive (the `utm_*` ones by default), and the
-  `#fragment` is dropped unless `KEPT_HASH_VALUES` keeps it. A signed download link keeps
-  its path and loses its signature.
-
-Ask your agent things like _"what are people downloading?"_ or _"where
-is my traffic leaving to?"_ — `get_events_by_property` groups either event by
-any of its props, e.g. `outbound_link_click` by `target_host`.
+- A link to a file fires **`file_download`** with `file_url`,
+  `file_extension` and `link_text`. A file is a link with a `download`
+  attribute, or one whose URL ends in a common extension (`.pdf`,
+  `.zip`, `.docx`, …).
 
 Worth knowing:
 
-- **A link that's both wins as a download.** An outbound `.pdf` records
-  `file_download`, not `outbound_link_click` — downloading the file is
-  what the visitor did; whose server it sat on is incidental.
-- **Middle-click is counted**, since "open in new tab" is a normal way
-  to follow a link. Right-click (opening the context menu) isn't — it
-  isn't a visit.
-- **Internal links are not tracked** by this flag; it exists for the
-  links you can't hand-tag with `data-genug-on-click`, which in
-  practice means outbound and CMS content.
-- **File detection is best-effort.** A URL's extension is a hint, not a
-  declaration, so a download served from an extensionless URL is only
-  caught if the link carries a `download` attribute.
-- **Renaming a built-in event needs no client change.** The script never
-  sends a name for the three events it fires itself — it sends the role
-  (`pageView`, `outboundClick`, `fileDownload`) and the server looks up
-  whatever this deployment calls that event. So a rename takes effect
-  at once, and a browser holding a cached copy of the script keeps
-  working straight through it.
+- An outbound link to a file counts as a download.
+- Middle-click counts; right-click doesn't.
+- Internal links aren't tracked; tag them yourself (above).
+- A link with its own `data-genug-on-click` fires only that event. A
+  tagged element _around_ a link fires both.
+- Both URLs are filtered like page URLs, so a signed download link
+  loses its signature.
 
-  **Rename it in the cockpit and your existing rows come with it.** The
-  Edit button knows the old name and the new one, so it offers to move
-  them, ticked by default and showing the count. Rename the _file_
-  instead and they stay behind: from the outside, renaming an event and
-  deleting one while adding another are the same thing, so nothing can
-  tell which old name maps to which new one. The cockpit says the old
-  rows are there, and a one-line `UPDATE` you run yourself moves them.
-  See "Renaming an event" in
-  [recipe-add-event.md](recipe-add-event.md).
-
-  If you **delete** one and leave the flag on, those clicks are rejected
-  and show up in the cockpit's rejected counter and in
-  `get_top_rejected_events`, saying which tag is missing — the same
-  place a mistyped custom event shows up.
-
-- **A tagged link fires only its tag.** If a link carries
-  `data-genug-on-click`, the automatic event is skipped, so one click
-  is never recorded twice. Same precedence `data-genug-on-load`
-  already takes over `enableAutoPageTracking`. A tagged _container_
-  around a link is different — an outbound link inside
-  `<div data-genug-on-click="card_click">` still fires both, since
-  those describe two genuinely different things.
+Ask your agent _"what are people downloading?"_ or _"where is my
+traffic leaving to?"_.
 
 ### Limits on what you can send
 
-Generous, and only there to stop one request filling the database:
+- A request body is at most **16 KB**.
+- `url` and `referrer` are at most **2048 characters**. `url` must be an
+  absolute `http` or `https` URL; `referrer` is empty, `http`, `https`
+  or `android-app`.
+- Event names and idempotency keys are at most **128 characters**.
+- A list prop holds at most **50 values**.
+- Query parameters not in `KEPT_QUERY_PARAMS` (default: the six
+  `utm_*`) are removed, by the script and again by the server.
+- The `#fragment` is removed unless it is in `KEPT_HASH_VALUES` (empty
+  by default).
 
-- The whole request body is capped at **16KB**, which is what bounds
-  `props` — they're open by design, so there's no per-prop limit.
-- `url` and `referrer` are capped at **2048 characters** each, and `url`
-  must be a real absolute `http` or `https` URL. The client script
-  always sends `location.href`, so this only matters for a custom
-  integration — one sending a `javascript:` or `data:` URL gets a `400`.
-  `referrer` must be `""` or an `http`, `https` or `android-app` URL.
-  The last is what Chrome on Android sends for a click in an app.
-- Query parameters not listed in `KEPT_QUERY_PARAMS` are **stripped**
-  from `url` and `referrer`, by the client before sending and again on
-  arrival. Unset, that keeps the six `utm_*` parameters. Page rankings
-  group by path, so nothing you can rank on is lost. The server writes
-  the list into `client.js` as it serves it, so the client and the
-  server always filter with the same one — give or take the hour a
-  browser caches the script after you change it.
-- The **`#fragment` is dropped** unless it is listed in
-  `KEPT_HASH_VALUES`, which is empty by default, on both sides, for the
-  same reason: an OAuth implicit response puts `access_token` there
-  precisely to keep it out of server logs, and some reset and
-  unsubscribe links do the same. Nothing Genug reports reads a
-  fragment. The one thing this costs is hash-routed apps — see the note
-  under [route changes](#tracking-single-page-app-route-changes) — whose
-  routes now collapse to the page they hang off even if you call
-  `track()` for them yourself.
-- Event names and `idempotencyKey` are capped at **128 characters**.
-- A prop declared as a list holds at most **50 values**, each capped
-  like an ordinary prop of its type.
-
-Anything over the body limit gets a `413`; anything failing validation
-gets a `400` and shows up in `get_top_rejected_events` with the reason,
-so a broken integration is visible rather than silently dropping data.
+Too large gets a `413`. Anything invalid gets a `400` and shows up in
+`get_top_rejected_events` with the reason, so a broken integration is
+visible.
 
 ## Defining your own events
 
-Two ways, and the cockpit is the easier one. Its **Schema registry**
-card has a **Register new event** button: name the event, describe it, then add
-each prop by picking a type from a list and ticking whether it is
-required and whether it holds several values. It is live the moment you
-press Create — no restart, no rebuild, nothing to write by hand. The
-form never asks you to type a rule string, so the usual way to get one
-wrong is not available.
+The easiest way is the cockpit. In its **Schema registry** card, press
+**Register new event**, name and describe it, and add each prop by
+picking a type. It is live at once.
 
-The other way is the file the form writes, and it is worth knowing
-either way. One JSON file, named for the event — `order_completed.json`
-defines `order_completed`. There is nothing to register, and no
-database change is ever needed: every event type shares one table and
-type-specific props are stored as JSON rather than as columns.
-
-It goes in **`/data/events/` on your persistent volume**
-(`EVENTS_PATH`) — drop the file in, then press **Reload events into system**
-in the cockpit's Schema registry card. No restart and no rebuild, so
-this works with a stock image straight from a registry. (Restarting the
-container does the same thing; the button just saves you the downtime,
-and the events that would arrive during it.)
-
-Changing an event you already have is narrower than creating one: the
-**Edit** button beside each one covers its name, description and its
-props' descriptions and examples. Anything structural on an
-event that already exists — adding a prop, changing a type — is a file
-edit, because it is already being sent and a changed rule can start
-rejecting it.
-
-That directory is the whole registry, not an extension of it. The first
-time the server starts against an empty volume it copies the built-in
-events (`page_view`, `outbound_link_click`, `file_download`) there and
-then leaves the directory alone forever. So the built-ins are yours to
-edit too: rename `page_view.json` to `seitenaufruf.json`, reword a
-description, delete one you do not want — see "Renaming an event" in
-[recipe-add-event.md](recipe-add-event.md) first, because renaming affects data you
-have already collected.
-
-Because seeding happens only once, an event you delete stays deleted,
-and a file you rename does not come back. The other side of that: if
-you build your own image and add an event to
-`packages/schema-registry/events/`, it will _not_ appear on a volume
-that already has files — put it on the volume as well.
-
-The way back is the cockpit's **Danger zone**, which has a **Reset
-events** button: it discards every event file on the volume and copies
-the image's built-ins out again. That means the whole directory, not
-just the events you added — renaming a built-in is renaming its file,
-so there is nothing left to tell a renamed built-in from an event you
-wrote, and edits to the built-ins go too. Stored data is not deleted,
-which is the part to think about: rows collected under an event name
-that no longer exists stay in the database, still counting toward
-totals while matching no question asked by name. The button says how
-many it stranded, and they are listed in the Schema registry card
-afterwards (see "Renaming an event" in [recipe-add-event.md](recipe-add-event.md) for
-what to do about them).
-
-Every file is checked at startup. A broken one is skipped and listed in
-the cockpit rather than stopping the server, because one typo edited on
-a live server must not take collection down for every other event. If
-the file carrying `"_pageView": true` is the broken one, the built-in
-page-view event stands in for it so page views keep being recorded, and
-the cockpit says that is what happened.
+Behind the form is one JSON file per event, named for it, in
+`/data/events/` (`EVENTS_PATH`). You can write the file yourself and
+press **Reload events into system**. No restart, no database change:
 
 ```json
 {
@@ -503,8 +293,19 @@ the cockpit says that is what happened.
 }
 ```
 
-**[recipe-add-event.md](recipe-add-event.md)** walks through
-it with a full example, and covers the parts that are easy to get
-wrong: one prop holds one value, descriptions are what your AI agent
-reads to understand your data, and events that would double-count on a
-page refresh need an idempotency key.
+The built-ins (`page_view`, `outbound_link_click`, `file_download`) are
+copied there when the folder is empty, usually on first start. After
+that nothing overwrites the folder, so you can edit, rename or delete
+them. An event you add to your own image's
+`packages/schema-registry/events/` therefore doesn't reach a volume
+that already has files; put it on the volume too. A broken file is
+skipped and shown in the cockpit; it doesn't stop the server.
+
+**Reset events**, in the cockpit's danger zone, empties the folder and
+copies the built-ins back. Your own events and your edits go with it.
+Stored rows stay, but rows under a name that no longer exists match no
+question asked by name. The cockpit lists them afterwards.
+
+**[recipe-add-event.md](recipe-add-event.md)** covers the rest: what
+the cockpit can change on a live event, renaming without losing data,
+deleting, and resetting to the built-ins.

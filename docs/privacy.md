@@ -106,7 +106,7 @@ back in. Most often this happens in one of these places:
   every page view.
 - **Order numbers.** An order number, as a prop or as an
   `idempotency_key`, links a session to a named
-  customer. Send a keyed hash instead ([client.md](client.md#from-javascript)).
+  customer. Send a keyed hash instead ([client.md](client.md#events-that-must-not-count-twice)).
 
 ## The opt-out
 

@@ -345,7 +345,8 @@ choice. Removing a prop, or making one required, stays a file edit for
 the same reason **Edit** never offers those either.
 
 **Delete**, also on the event's row, removes its file — the one-event
-version of the danger zone's Reset below. Rows already stored under
+version of the danger zone's
+[Reset events](client.md#defining-your-own-events). Rows already stored under
 that name are left exactly where Reset leaves them: still in the
 table, matching nothing, the ordinary orphaned-events case.
 
@@ -512,7 +513,7 @@ A confirmation page that the visitor refreshes or back-navigates to
 will fire the event again, and `get_property_sum` will add the revenue
 twice. Pass a third argument that identifies the real-world occurrence
 — a keyed hash of your order id, not the id itself (see
-[client.md](client.md#from-javascript)):
+[client.md](client.md#events-that-must-not-count-twice)):
 
 ```js
 window.genugAnalytics.track("order_completed", props, orderKey);
