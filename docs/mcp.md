@@ -150,8 +150,9 @@ Most tools return aggregates — counts, rankings, breakdowns.
 `get_recent_events` is the exception: it returns raw rows, including
 URLs and whatever your events put in `props`. Query strings are already
 filtered before anything is stored, by default down to the six `utm_*`
-parameters (see [privacy.md](privacy.md)), so the usual accidents are
-covered. Widening `KEPT_QUERY_PARAMS`, or setting it to `*`, widens what
+parameters (see [privacy.md](privacy.md)). That keeps most personal
+data out, but not all: a `utm_*` value or a prop can still contain
+something personal. Widening `KEPT_QUERY_PARAMS`, or setting it to `*`, widens what
 reaches the agent too. Your own event props are yours to keep clean. An answer is capped at
 64,000 characters of JSON, which still fits 100 ordinary rows: when
 unusually large rows would push past it, fewer rows come back and a
@@ -165,13 +166,9 @@ tool off: keeping the writing tools while dropping only this one takes
 a build of your own, a fork of `server/mcp/diagnostics.ts` rather than
 of the project.
 
-For a client's deployment in the EU this is a processor relationship
-with the model vendor, not a technicality: you need a data-processing
-agreement with them and a valid basis for the transfer, and the
-recipient belongs in the tracked site's privacy policy. An
-EU-hosted or locally-run model avoids the transfer question entirely.
-None of this is legal advice — if the data is a client's, get it
-checked.
+Whether you need a data-processing agreement with the model vendor,
+and what to say in your privacy policy about it, is a question for your
+lawyer. Genug can't answer it for you.
 
 ## Claude Code / Cursor
 
@@ -249,6 +246,21 @@ header directly (as of writing) — it needs a local stdio bridge via
   }
 }
 ```
+
+## claude.ai
+
+Add a custom connector in claude.ai's settings, with the URL
+`https://data.your-domain.com/mcp` and an `Authorization` header of
+`Bearer YOUR_MCP_API_KEY`. claude.ai connects from Anthropic's servers,
+so your server must be reachable over HTTPS. Where the header field
+sits depends on your plan, so check claude.ai's current help pages.
+
+claude.ai calls from addresses shared with other users, so the
+per-address limit above is counted across all of them. Check with your
+lawyer whether your plan's terms are enough for your data before you
+connect (see [what leaves your server](#what-leaves-your-server-when-you-ask)).
+
+Then try the [weekly digest](digest.md) as a first prompt.
 
 MCP client config support changes over time — check each client's
 current docs if a snippet above doesn't work.
