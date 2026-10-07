@@ -19,49 +19,23 @@ your own data:
 _Genug_ is German for _enough_: just enough analytics to answer your
 questions, and nothing to operate beyond one process and one file.
 
-**Status:** alpha. Running in production on the maintainer's own site;
-not yet used elsewhere. The numbers are tested and the privacy model is
-written down, but the shape of things may still change before 1.0 —
-what changed between versions is in [CHANGELOG.md](CHANGELOG.md).
-
-## How it works
-
-1. **Get a server.** Any small Linux box with Docker — see
-   [capacity](#operating-it) for what "small" means.
-2. **Install Genug Analytics.** One command builds it, puts HTTPS in
-   front, and starts it.
-3. **Define your events**, if the three built in — page views, outbound
-   clicks, file downloads — aren't the whole story.
-4. **Add your business context**, in your own words — what the site is
-   for, so the agent isn't left guessing at it.
-5. **Add the tracking script to your website.** One `<script>` tag and
-   the decision whether to enable automatic tracking or not.
-6. **Connect your preferred AI agent** — Claude, Cursor, or any MCP
-   client, with one API key.
-7. **Ask your analytics questions.** No more login to tools or
-   creating dashboards, just chat.
-
-The [quick start](#quick-start) below walks through 1, 2, 5 and 6;
-[tracking your own events](#tracking-your-own-events) and
-[connecting an agent](docs/mcp.md#telling-the-agent-how-to-answer)
-cover 3 and 4.
+**Status:** alpha. Running in production on the maintainer's own sites.
+The shape of things may still change before 1.0; see
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Why
 
-- **Ask, don't read.** 33 MCP tools, each answering one question
-  a site owner actually asks — top pages, where traffic comes from,
-  which campaign converted, whether last week's visitors came back.
-  Every tool can be narrowed to a segment of sessions, so "where did
-  the buyers of product X come from" is one call, not a dashboard
-  filter you have to build. If you want a chart, ask the agent for one.
-- **Radically small.** One Node process, one SQLite file, no analytics
-  platform to run. Your own events are one JSON file each — no
-  migration, no rebuild, live the moment you save.
-- **Privacy by architecture.** No cookie by default: the visitor id is
-  a daily-rotating hash of a truncated address and the User-Agent, and
-  neither is ever stored. Query strings are filtered before they reach
-  the database. A working opt-out is built in. Consent switches on a
-  first-party cookie, and nothing else changes.
+- **Ask, don't read.** 34 MCP tools, each answering one question a site
+  owner actually asks: top pages, where traffic comes from, which
+  campaign converted, whether a drop is real. Every tool can be narrowed
+  to a segment, so "where did the buyers of product X come from" is one
+  question.
+- **Radically small.** One Node process, one SQLite file. Your own
+  events are one JSON file each, live the moment you save.
+- **Privacy by architecture.** No cookie by default: the visitor ID is
+  a daily-changing hash, and the address it comes from is never stored.
+  Query strings are filtered before storage. Consent switches on a
+  first-party cookie, and an opt-out is built in.
 
 A small cockpit is there for when you want to look rather than ask:
 
@@ -69,29 +43,14 @@ A small cockpit is there for when you want to look rather than ask:
 
 ## Quick start
 
-The full walk-through with a screenshot is
-[docs/getting-started.md](docs/getting-started.md). The short version:
-
-1. **Pick a hostname on a subdomain of the site you track**, such as
-   `data.your-domain.com`, and point it at your server before you run
-   anything: add an `A` record for the subdomain (e.g. `data`) with
-   your server's IP as the value (e.g. `1.23.45.67`), **unproxied** —
-   on Cloudflare that means DNS-only, not the orange cloud, or the
-   certificate request in step 2 never completes. Give it a few
-   minutes to propagate. The consent cookie is host-only, so a
-   different domain silently degrades consentful tracking. Details in
-   [deploying](docs/deploying.md#the-hostname).
-2. **Run it.** On a fresh Ubuntu server, one command installs Docker,
-   puts Caddy in front for HTTPS, and starts it — asking only for the
-   hostname, the tracked site's origin, and a cockpit password:
+1. **Point a subdomain at your server**, such as `data.your-domain.com`,
+   as DNS only (no Cloudflare proxy).
+2. **Install it** on a fresh Ubuntu server. It asks for the hostname,
+   your site's origin and a password, and sets up HTTPS:
 
    ```sh
    curl -fsSL https://genug-analytics.com/install.sh | sudo bash
    ```
-
-   Already on Coolify, building from source, or want to run `docker run`
-   and a reverse proxy by hand instead? All three are in
-   [deploying](docs/deploying.md#installing).
 
 3. **Put the script on your site**, early in `<head>`:
 
@@ -102,10 +61,7 @@ The full walk-through with a screenshot is
    <script defer src="https://data.your-domain.com/client.js"></script>
    ```
 
-4. **Watch the first event arrive** at `/cockpit`, with the password
-   you set. If nothing shows, the rejected counter says why.
-5. **Connect your agent.** For Claude Code it is one line; other
-   clients are in [connecting an agent](docs/mcp.md).
+4. **Connect your agent.** For Claude Code:
 
    ```sh
    claude mcp add --transport http genug https://data.your-domain.com/mcp \
@@ -115,130 +71,59 @@ The full walk-through with a screenshot is
    Then ask: _"What were my top pages this week, and where did that
    traffic come from?"_
 
-Before going live, three things are yours to decide: what your
-privacy notice says, how long you keep the data (13 months by default),
-and whether you need a consent banner. Genug works without one, but
-whether that's allowed for your site is a question for your lawyer.
+Step by step, with troubleshooting: [getting started](docs/getting-started.md).
+Coolify or Docker by hand: [deploying](docs/deploying.md#installing).
+
+Before going live, decide what your privacy notice says, how long you
+keep data (13 months by default), and whether you need a consent
+banner. That last one is a question for your lawyer.
 [Privacy](docs/privacy.md) lists what Genug stores and has a template.
-
-## What you can ask
-
-The agent reads the schema registry first, so it knows what your
-deployment tracks, then picks the tool. The tools cover:
-
-| Question                     | Answered by                                                             |
-| ---------------------------- | ----------------------------------------------------------------------- |
-| How much traffic, and when?  | Summary, per day / weekday / hour, one event's trend, is a change real? |
-| Which pages, and where from? | Top, entry, exit and bounce pages; referrers; campaign params           |
-| What happened?               | Events ranked, broken down by any prop, summed, funnelled               |
-| Who is visiting?             | Devices and browsers, languages, new vs returning, cohorts              |
-| Is tracking working?         | Recent raw events, rejections, bot traffic, still arriving?             |
-| … for one set of sessions?   | The `segment` argument on every tool above                              |
-
-What each number means, what it excludes and where it misleads is in
-every tool's description — that is the documentation the agent reads,
-and it is written to be argued with. There is deliberately no raw-SQL
-tool. One tool, `get_recent_events`, returns recent raw rows for
-checking that tracking works; `READ_ONLY=true` removes it. More in [docs/mcp.md](docs/mcp.md), including
-what leaves your server when a hosted model answers.
 
 ## Tracking your own events
 
-Three events come built in: page views, outbound link clicks and file
-downloads, each behind its own opt-in flag. Anything else is yours to
-define — one JSON file, or the cockpit's form — and to send:
+Page views, outbound clicks and file downloads are built in. Define
+anything else in the cockpit or as one JSON file, then send it:
 
 ```js
-window.genugAnalytics.track("order_completed", {
-  order_total: 49.9,
-  order_currency: "EUR",
-});
+window.genugAnalytics.track("order_completed", { order_total: 49.9 });
 ```
 
 ```html
-<button data-genug-on-click="cta_click" data-genug-props='{"plan":"pro"}'>
-  Upgrade
-</button>
+<button data-genug-on-click="cta_click">Upgrade</button>
 ```
 
-Props are validated against your schema on arrival; a mistyped one
-shows up in the cockpit's rejected counter rather than vanishing.
-Single-page apps, consent wiring, idempotency keys and the limits on
-what you can send are in [docs/client.md](docs/client.md); adding an
-event end to end is [a recipe](docs/recipe-add-event.md).
+An event that doesn't match its definition is rejected and counted in
+the cockpit, with the reason. More in [client.md](docs/client.md).
 
-## Privacy, in one paragraph
+## Docs
 
-Every event is one row: the event name, a server-assigned visitor and
-session id, a UTC timestamp, the URL and referrer with query strings
-filtered down to the parameters you keep (the six `utm_*` by default), the device type and browser the
-User-Agent classified to, the visitor's language, the consent mode,
-and the props your event declares. No raw address, no User-Agent
-string, no profile. In consentless mode nothing is written to the
-visitor's device except the opt-out flag, if they ask for it.
-[docs/privacy.md](docs/privacy.md) has the details.
+- [Connecting an agent](docs/mcp.md): every client, telling the agent
+  about your site, what leaves your server
+- [The client script](docs/client.md): consent, single-page apps,
+  custom events
+- [Privacy](docs/privacy.md): what is stored, and a policy template
+- [Operations](docs/operations.md): capacity, retention, backups,
+  restore, erasure, export
+- [Weekly digest](docs/digest.md): a ready-made prompt
 
 ## Make it yours
 
 You run your own copy, so change it. Three recipes are written to be
-followed end to end, by you or by an AI assistant working in this repo:
+followed end to end, by you or by an AI coding assistant:
 
 - [Add a tracked event](docs/recipe-add-event.md)
-- [Add an MCP tool](docs/recipe-add-mcp-tool.md) — check first; the
-  generic tools plus a segment already answer most questions
+- [Add an MCP tool](docs/recipe-add-mcp-tool.md)
 - [Change the cockpit](docs/recipe-change-cockpit.md)
 
-An AI coding assistant pointed at this repo picks up [AGENTS.md](AGENTS.md):
-a short set of rules that keep a customisation from producing numbers
-that are plausible while wrong. The reasoning behind every rule is in
-[docs/decisions.md](docs/decisions.md).
-
-## Operating it
-
-- **Retention** defaults to 396 days (13 months)
-  ([operations](docs/operations.md#retention)). Set
-  `RETENTION_DAYS=-1` to keep everything instead, or a different number
-  of days to choose your own period.
-- **Backups** are on by default: a daily consistent snapshot on the
-  same volume, seven days kept. Copying them off the host is your job.
-- **Erasure** goes through the agent's one write tool, which previews
-  before it deletes. A consentless visitor cannot be looked up, by
-  design — read that section before promising anyone erasure.
-- **Your data** is one SQLite file on your server. Export it with any
-  SQLite tool: no export API, no lock-in.
-- **Health** is `GET /healthz`.
-- **Capacity**, measured rather than guessed: about 2,300 events a
-  second in Docker behind a reverse proxy, and 0.4 KB stored per event.
-  Writing does not care how large the database is; reading does. A
-  2 vCPU / 2 GB VPS is enough and 4 GB is headroom —
-  `scripts/load-events.mjs` re-runs the test on your own hardware.
-
-Capacity, retention, backups, restore, erasure, export and migrations: [docs/operations.md](docs/operations.md).
-
-## Project
-
-```
-packages/client/           The browser snippet — a classic script, no imports
-packages/schema-registry/  The event envelope's schema; one JSON file per event
-server/                    One process: /events collector, /mcp, /cockpit
-  lib/                     The query layer, one module per kind of question
-  mcp/                     The tools, grouped to match lib/
-apps/cockpit/              Static HTML, CSS and JS — no build step
-docs/                      Guides, recipes, the design journal
-```
+An assistant working in this repo reads [AGENTS.md](AGENTS.md), the
+rules that keep a change from producing numbers that look right but
+aren't. The reasoning is in [docs/decisions.md](docs/decisions.md).
 
 ```sh
 npm install
 npm run build && npm test && npm run lint
 ```
 
-Runtime dependencies: `express`, `better-sqlite3`, `zod`, and the MCP
-SDK. Tests use `node:test`, colocated with the code they test. A
-hands-on end-to-end check against a real second site is in
-[docs/manual-testing.md](docs/manual-testing.md); cutting a release is
-[docs/releasing.md](docs/releasing.md).
-
 ## License
 
-MIT — see [LICENSE](LICENSE). Self-host it, change it, redeploy it;
-that is the point of the deployment model.
+MIT — see [LICENSE](LICENSE).

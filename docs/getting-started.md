@@ -4,7 +4,7 @@ The short path from nothing to your first question. Each step links to
 the details.
 
 **On a fresh Ubuntu server, one command does steps 1–4:** it asks for
-the hostname and a password, generates the MCP key, and puts Caddy in
+the hostname, the tracked site's origin and a password, generates the MCP key, and puts Caddy in
 front for HTTPS. Point the DNS record at the server first (step 1).
 
 ```sh

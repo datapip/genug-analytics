@@ -8,7 +8,7 @@ track and how you want answers, then picks the tool.
 ## What you can ask
 
 Each tool answers one question, and its description tells the agent
-what the number means and where it misleads. The 33 tools cover:
+what the number means and where it misleads. The 34 tools cover:
 
 - **How much, and when** — sessions, visitors and events for a period;
   per day, per weekday, per hour; one event's trend over time; how
