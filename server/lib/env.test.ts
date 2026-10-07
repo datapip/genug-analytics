@@ -6,7 +6,7 @@ import {
   parseTimezone,
   parseTrustProxy,
   parseReadOnly,
-  parseMcpApiKey,
+  shortMcpApiKeyWarning,
 } from "./env.js";
 
 test("requireEnv returns the value when set", () => {
@@ -78,18 +78,17 @@ test("parseReadOnly refuses anything that is not true or false", () => {
   }
 });
 
-test("parseMcpApiKey refuses a short key, saying how to make one", () => {
-  assert.throws(
-    () => parseMcpApiKey("x".repeat(31), false),
-    /at least 32 characters, got 31.*openssl rand -hex 32/,
+test("shortMcpApiKeyWarning warns on a short key, saying how to make one", () => {
+  assert.match(
+    shortMcpApiKeyWarning("x".repeat(31), false) ?? "",
+    /is 31 characters\. Use at least 32.*openssl rand -hex 32/,
   );
-  const key = "a".repeat(64);
-  assert.equal(parseMcpApiKey(key, false), key);
+  assert.equal(shortMcpApiKeyWarning("a".repeat(32), false), undefined);
 });
 
 // The demo publishes its key, so its length guards nothing.
-test("parseMcpApiKey accepts a short key on a READ_ONLY deployment", () => {
-  assert.equal(parseMcpApiKey("demo", true), "demo");
+test("shortMcpApiKeyWarning stays quiet on a READ_ONLY deployment", () => {
+  assert.equal(shortMcpApiKeyWarning("demo", true), undefined);
 });
 
 test("parseTimezone accepts an IANA name and returns its canonical spelling", () => {

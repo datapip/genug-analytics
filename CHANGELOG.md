@@ -9,13 +9,6 @@ how a version is cut.
 
 ## Unreleased
 
-**Breaking**
-
-- **The server refuses to start if `MCP_API_KEY` is shorter than 32
-  characters**, unless `READ_ONLY=true`. A key from the install script
-  or `openssl rand -hex 32` is 64. Replace a shorter one before you
-  update, and in every connected client.
-
 **Added**
 
 - **`get_collection_health` tells the agent whether events are still
@@ -38,6 +31,10 @@ how a version is cut.
   hosted agents call from addresses shared with strangers, who could
   lock your connector out before. The wrong-key lockout on `/mcp` is
   gone; the keyless limit does that job.
+- **A warning at startup if `MCP_API_KEY` is shorter than 32
+  characters**, since the key's length now carries the protection the
+  lockout gave. A key from the install script or `openssl rand -hex 32`
+  is 64.
 
 ## 0.11.0 — 2026-09-30
 

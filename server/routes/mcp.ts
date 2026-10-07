@@ -3,20 +3,22 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { db } from "../db/index.js";
 import { createMcpServer } from "../mcp/tools.js";
 import {
-  parseMcpApiKey,
   parseReadOnly,
   parseTimezone,
   requireEnv,
+  shortMcpApiKeyWarning,
 } from "../lib/env.js";
 import { createMcpAuthMiddleware } from "../lib/mcpAuth.js";
-import { logError } from "../lib/logger.js";
+import { logError, logInfo } from "../lib/logger.js";
 
 // Read at module scope. Every module that needs it parses the same
 // variable itself; whichever is imported first is the one whose throw
 // stops startup, which is enough — a bad value cannot reach a listening
 // server through any of them.
 const readOnly = parseReadOnly(process.env.READ_ONLY);
-const mcpApiKey = parseMcpApiKey(requireEnv("MCP_API_KEY"), readOnly);
+const mcpApiKey = requireEnv("MCP_API_KEY");
+const keyWarning = shortMcpApiKeyWarning(mcpApiKey, readOnly);
+if (keyWarning) logInfo(keyWarning);
 const timezone = parseTimezone(requireEnv("TIMEZONE"));
 
 const requireApiKey = createMcpAuthMiddleware(mcpApiKey);

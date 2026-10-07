@@ -3427,9 +3427,11 @@ immediately and binds from the first real deployment onward.)
   above; one that lets the right key through still answers right versus
   wrong, so it bounds nothing. What bounds guessing now is the keyless
   budget, 10 a minute per address, and the key's length: the server
-  refuses to start on a key under 32 characters (`parseMcpApiKey`).
+  warns at startup on a key under 32 characters (`shortMcpApiKeyWarning`).
   The install script and `.env.example` generate 64 hex characters, so
-  this only stops a hand-picked key. `READ_ONLY` is exempt, since its
+  this only flags a hand-picked key. A warning rather than a refusal,
+  because an update should not stop a deployment whose key has worked
+  so far; the owner decides. `READ_ONLY` gets no warning, since its
   key is published and there is nothing to guess. That also means the
   demo's 60 a minute is shared by everyone using it from one vendor
   address. That comes with a public key and isn't something this split

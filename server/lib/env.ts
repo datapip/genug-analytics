@@ -53,19 +53,22 @@ export function parseReadOnly(value: string | undefined): boolean {
 }
 
 // With no lockout on /mcp (lib/mcpAuth.ts), the key's length is what
-// makes guessing it hopeless. Length is not randomness, but it refuses
-// the "password" and "dev-key" kind. A READ_ONLY key is published on
-// purpose, so there is nothing to guess and any length passes.
+// makes guessing it hopeless. Length is not randomness, but it catches
+// the "password" and "dev-key" kind. A warning, not a refusal: the
+// owner decided an update must not stop a running deployment over a
+// key that has worked so far. A READ_ONLY key is published on purpose,
+// so there is nothing to guess and no warning.
 export const MIN_MCP_API_KEY_LENGTH = 32;
 
-export function parseMcpApiKey(value: string, readOnly: boolean): string {
-  if (!readOnly && value.length < MIN_MCP_API_KEY_LENGTH) {
-    throw new Error(
-      `MCP_API_KEY must be at least ${MIN_MCP_API_KEY_LENGTH} characters, got ${value.length}. ` +
-        "Generate one with: openssl rand -hex 32",
-    );
-  }
-  return value;
+export function shortMcpApiKeyWarning(
+  value: string,
+  readOnly: boolean,
+): string | undefined {
+  if (readOnly || value.length >= MIN_MCP_API_KEY_LENGTH) return undefined;
+  return (
+    `MCP_API_KEY is ${value.length} characters. Use at least ${MIN_MCP_API_KEY_LENGTH}, ` +
+    "or it can be guessed. Generate one with: openssl rand -hex 32"
+  );
 }
 
 // The zone every day and hour boundary is cut in (lib/timezone.ts).

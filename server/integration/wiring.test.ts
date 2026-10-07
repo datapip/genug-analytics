@@ -2138,7 +2138,9 @@ test("rate limits /mcp per address, with the key and without it apart", async (t
   assert.equal(line.limit, 60);
 });
 
-test("refuses to start on a short MCP_API_KEY", async (t) => {
+// A short key is the owner's call, so it starts, but says so: with no
+// lockout on /mcp, the key's length is what stops a guesser.
+test("warns about a short MCP_API_KEY but still starts", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
   const server = spawnServer({
@@ -2147,14 +2149,11 @@ test("refuses to start on a short MCP_API_KEY", async (t) => {
   });
   stopAndCleanUp(t, dir, server);
 
-  const { code } = await new Promise<{ code: number | null }>((resolve) => {
-    server.process.once("exit", (code) => resolve({ code }));
-  });
-  assert.notEqual(code, 0);
-  assert.ok(
-    server.rawLines.some((line) => line.includes("MCP_API_KEY must be")),
+  const warning = await server.waitForLog((line) =>
+    String(line.msg).startsWith("MCP_API_KEY is 9 characters"),
   );
-  assert.ok(!server.rawLines.some((line) => line.includes("listening")));
+  assert.match(String(warning.msg), /openssl rand -hex 32/);
+  await server.waitForLog((line) => line.msg === "genug server listening");
 });
 
 // One allowed request must be one JSON-RPC message. The transport
