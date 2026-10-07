@@ -7,6 +7,23 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Added**
+
+- **`get_collection_health` tells the agent whether events are still
+  arriving.** It compares the quiet time since the last event with the
+  longest quiet stretch in the last 14 days, for all events and for page
+  views separately. A long silence is a reason to look, not proof that
+  tracking broke.
+- **`get_traffic_change` tells the agent whether a rise or drop is real.**
+  It compares sessions and page views, and optionally one event, with
+  the same span one to four weeks earlier, and answers within, above or
+  below the usual range. Small counts and short history get their own
+  answers instead of a percentage. Periods are limited to 31 days.
+- **A weekly digest recipe** in `docs/digest.md`, and **claude.ai
+  setup** in `docs/mcp.md`.
+
 ## 0.11.0 — 2026-09-30
 
 **Breaking**
