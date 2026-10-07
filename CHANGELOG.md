@@ -36,6 +36,10 @@ how a version is cut.
   lockout gave. A key from the install script or `openssl rand -hex 32`
   is 64.
 
+**Fixed**
+
+- A restart or redeploy no longer loses up to an hour of bot counts.
+
 ## 0.11.0 — 2026-09-30
 
 **Breaking**

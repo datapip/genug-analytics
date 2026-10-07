@@ -534,6 +534,46 @@ test("shuts down gracefully on SIGTERM: logs before exiting with code 0", async 
   );
 });
 
+// Bot hits are counted in memory and written once an hour, so a
+// redeploy that skipped the write would lose up to an hour of them.
+test("writes the bot count on SIGTERM rather than losing it", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows: SIGTERM can't be delivered to a child process");
+    return;
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const dbPath = join(dir, "test.db");
+  const port = 4235;
+
+  const server = spawnServer(baseEnv(dbPath, port));
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const res = await fetch(`http://localhost:${port}/events`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: `http://localhost:${port}`,
+      "user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+    },
+    body: JSON.stringify({
+      auto: "pageView",
+      url: "https://example.com/",
+      props: { page_title: "Home", document_language: "en" },
+    }),
+  });
+  assert.equal(res.status, 204);
+  assert.equal((await server.stop()).code, 0);
+
+  const checkDb = new Database(dbPath, { readonly: true });
+  const row = checkDb
+    .prepare("SELECT COALESCE(SUM(count), 0) AS total FROM bot_activity")
+    .get() as { total: number };
+  checkDb.close();
+  assert.equal(row.total, 1);
+});
+
 // Unset now defaults to a real number of days rather than forever, but
 // silently applying even a sensible default is still the wrong way to
 // do it — a deployer upgrading from a version where unset meant forever

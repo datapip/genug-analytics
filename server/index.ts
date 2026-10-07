@@ -318,6 +318,10 @@ const server = app.listen(port, () => {
 function shutdown(signal: string): void {
   logInfo("Shutting down", { signal });
   server.close(() => {
+    // The counter lives in memory, so without this every redeploy
+    // loses up to an hour of bot hits. After close, so in-flight
+    // requests are counted too.
+    runBotActivityFlush();
     db.close();
     process.exit(0);
   });

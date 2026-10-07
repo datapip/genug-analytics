@@ -81,8 +81,9 @@ banner. That last one is a question for your lawyer.
 
 ## Tracking your own events
 
-Page views, outbound clicks and file downloads are built in. Define
-anything else in the cockpit or as one JSON file, then send it:
+Page views, outbound clicks and file downloads are built in. The last
+two are off until you add `enableAutoLinkTracking: true` to the config.
+Define anything else in the cockpit or as one JSON file, then send it:
 
 ```js
 window.genugAnalytics.track("order_completed", { order_total: 49.9 });
