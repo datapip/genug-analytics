@@ -14,15 +14,16 @@ need to read this file first.
 
 ## Current status
 
-**Not live anywhere yet.** No real deployment, no real client, no real
-collected data. This means breaking changes — renaming a field, changing
-the envelope, altering a stored schema — are cheap right now: there's no
-production database to migrate and no external consumer (a client's AI
-agent config, a cockpit bookmark) to keep working. Prefer the cleanest
-name/shape over a backwards-compatible one while this holds. Remove this
-note once a real deployment exists — from that point on, breaking
-changes need actual migration/compatibility thinking, same as any other
-production system.
+**Live, on the maintainer's own sites.** There is a real database and a
+real MCP client configuration (an agent connected with a key) in use, so
+a breaking change — renaming a field, changing the envelope, altering a
+stored schema, renaming a tool — now needs actual migration and
+compatibility thinking, the same as any other production system.
+Migrations are append-only from here (see "Project maturity").
+
+Several entries below were decided while this section said the opposite
+("not live anywhere yet", renames free). They are kept as written: they
+record what was reasonable then, not what is allowed now.
 
 ## What this is
 

@@ -2,8 +2,10 @@ import { getRecentEvents } from "../lib/recentEvents.js";
 import { getTopRejectedEvents } from "../lib/rejectedEvents.js";
 import { getBotActivityCount } from "../lib/botActivity.js";
 import { getOrphanedEvents } from "../lib/orphanedEvents.js";
+import { getCollectionHealth } from "../lib/collectionHealth.js";
 import {
   eventRegistry,
+  pageViewEventType,
   schemaErrors,
   eventsSource,
 } from "@genug/schema-registry";
@@ -51,7 +53,7 @@ export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
 // "Is tracking actually working" — quality-assurance signals rather
 // than analytics. None of these describe visitor behaviour; they
 // describe the health of the pipeline itself. Unlike get_recent_events
-// above, none returns a raw row, so all four stay registered under
+// above, none returns a raw row, so all of them stay registered under
 // READ_ONLY — a demo deployment still needs to see that tracking works.
 export const registerDiagnosticTools: ToolRegistrar = (
   server,
@@ -68,6 +70,21 @@ export const registerDiagnosticTools: ToolRegistrar = (
     },
     async () => {
       return jsonContent(getOrphanedEvents(db, Object.keys(eventRegistry)));
+    },
+  );
+
+  server.registerTool(
+    "get_collection_health",
+    {
+      description:
+        "Check whether tracking is still arriving right now, judged against this site's own history rather than a fixed threshold. Returns, for all accepted events and for the page-view event separately: lastSeen, hoursSince (how long it has been quiet), longestEarlierGapHours (the longest quiet stretch between two events in the last 14 days, not counting the current one) and a verdict. The verdicts: never_seen (nothing stored); too_little_to_tell (under three days of history, or fewer than two events in the last 14 days, so there is no usual silence to compare with — say so rather than guessing); normal; longer_than_usual (quiet for longer than anything in the last 14 days and for over an hour). Also eventsLast24h and rejectedLast24h. longer_than_usual is a reason to look, not proof that tracking broke: a campaign ending, a holiday or an outage of the site itself all look the same from here. The usual causes of a real break are a removed or blocked script tag, a changed consent setup, or a schema change that now rejects the event — check get_top_rejected_events and get_schema_errors next. Page views are judged on their own because the script can lose its automatic page tracking while custom events keep arriving. A small site's ordinary quiet nights and weekends are inside its own gaps, so a long verdict there takes a long silence: normal only means not longer than the longest quiet stretch in the last 14 days, which is weak evidence of health on a small site, and an outage inside that window raises the bar for the days after it. This describes the pipeline, not visitors, and says nothing about whether the numbers it did record are right.",
+      inputSchema: {},
+    },
+    async () => {
+      // pageViewEventType is a live binding: read it here, per call.
+      return jsonContent(
+        getCollectionHealth(db, new Date(), pageViewEventType),
+      );
     },
   );
 

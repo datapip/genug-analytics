@@ -12,7 +12,7 @@ calls the relevant tool itself.
 
 Every tool answers one question, and its description tells the agent
 what the number means and where it misleads — so you ask in plain
-language and the agent picks. The 31 tools cover:
+language and the agent picks. The 32 tools cover:
 
 - **How much, and when** — sessions, visitors and events for a period;
   per day, per weekday, per hour; one event's trend over time; how
@@ -27,7 +27,8 @@ language and the agent picks. The 31 tools cover:
   versus returning, consent mix, and whether one period's visitors
   came back in a later one.
 - **Is tracking working** — the latest raw events, rejected requests
-  with the reason, bot traffic, and events stranded by a rename.
+  with the reason, bot traffic, whether events are still arriving, and
+  events stranded by a rename.
 
 Every tool that takes a period also takes a **segment**: a list of
 conditions that narrow the answer to a set of sessions — those that
