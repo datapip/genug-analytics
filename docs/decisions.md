@@ -4425,8 +4425,8 @@ immediately and binds from the first real deployment onward.)
   the question someone actually has before deploying. Re-measured with
   the server confined by CPU affinity and a memory cgroup
   (`systemd-run --user --scope -p MemoryMax=4G`), against an identical
-  one-million-event database each time. Numbers in
-  `docs/operations.md`.
+  one-million-event database each time. `docs/operations.md` keeps only
+  the summary a user needs to pick a server; the measurements are here.
 
   **Core count does not matter.** 1 CPU: 2,870 events/s and a 0.30 s
   7-day cockpit page. 2 CPUs: 2,987 and 0.26 s. Unconstrained: 2,972 and
@@ -4485,6 +4485,29 @@ immediately and binds from the first real deployment onward.)
   `TRUST_PROXY=2`, and neither belongs in a real deployment. The pattern
   across all three traps is the same: the generator has to be told the
   truth about the defences, or it measures them instead of the server.
+
+  **The memory floor, for pricing a cheap tier.** The same
+  one-million-event database ran at full speed with the container
+  limited to 512 MB, and still served it at 128 MB — 2,827 events/s, no
+  out-of-memory kill. Node sizes its heap to its limit and SQLite reads
+  through the page cache, so there is no fixed working set. What sets
+  the minimum is everything around Genug: a minimal Linux (~200 MB),
+  Docker's daemons (~200 MB) and a proxy (~15 MB). Hence "1 GB works,
+  2 GB is comfortable". The caveat: those runs capped the container on a
+  24 GB host, so the host's page cache still held the database. A real
+  1 GB machine reads from disk sooner. A "4 GB minimum" quoted for
+  Docker is Docker Desktop's Linux VM on macOS and Windows, not Docker
+  Engine on a VPS.
+
+  **Per-tool timings at 5,000,000 events**, for the user doc's "reading
+  is where size shows": `get_top_pages` over 30 days 0.17 s,
+  `get_events_by_property` 0.07 s, `get_steps_funnel` 0.3 s, a segmented
+  `get_top_referrers` 1.1 s, `get_traffic_summary` 0.19 s over 30 days
+  and 3.3 s over a year, `get_traffic_by_day` over a year 5 s. About two
+  thirds of the cockpit's 1.2 s at that size is two panels that read all
+  of history: stored events per type, and the stranded-rows check.
+  Measured on an AMD Ryzen 7 PRO 7840U laptop (8 cores), 24 GB RAM, NVMe,
+  ext4, Node 24, client and server on one machine.
 
 - ~~Run `PRAGMA optimize`~~ **Measured and rejected, 2026-09-24.** The
   app never runs `ANALYZE`, so SQLite plans without statistics. That
