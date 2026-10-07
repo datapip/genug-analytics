@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Request, Response } from "express";
 import { createMcpAuthMiddleware } from "./mcpAuth.js";
-import { createFailedAttemptLimiter } from "./rateLimit.js";
+import { createRequestLimiter } from "./rateLimit.js";
 
 function createMockRes() {
   return {
@@ -88,142 +88,94 @@ test("rejects a non-Bearer Authorization scheme", () => {
   assert.equal(res.statusCode, 401);
 });
 
-test("blocks further attempts once the failure limit is reached", () => {
-  const limiter = createFailedAttemptLimiter(3, 60_000);
-  const middleware = createMcpAuthMiddleware("secret-key", limiter);
-  const wrong = {
-    headers: { authorization: "Bearer wrong-key" },
-    ip: "203.0.113.9",
+// Small budgets so a test can spend one in a few calls.
+function smallLimiters(keyed: number, keyless: number) {
+  return {
+    keyed: createRequestLimiter(keyed, "/mcp"),
+    keyless: createRequestLimiter(keyless, "/mcp keyless"),
+  };
+}
+
+function call(
+  middleware: ReturnType<typeof createMcpAuthMiddleware>,
+  authorization: string | undefined,
+  ip = "203.0.113.9",
+) {
+  const req = {
+    headers: authorization === undefined ? {} : { authorization },
+    ip,
   } as unknown as Request;
+  const res = createMockRes();
+  let nextCalled = false;
+  middleware(req, res as unknown as Response, () => {
+    nextCalled = true;
+  });
+  return { status: res.statusCode, nextCalled, res };
+}
+
+// The bug this fixes: claude.ai and other hosted agents share their
+// addresses with the vendor's other customers. Before, ten wrong keys
+// from any of them locked the owner's own connector out for fifteen
+// minutes, and sixty keyless calls spent its request budget.
+test("strangers on the owner's address cannot spend the owner's budget", () => {
+  const middleware = createMcpAuthMiddleware("secret-key", smallLimiters(2, 3));
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = createMockRes();
-    middleware(wrong, res as unknown as Response, () => {});
-    assert.equal(res.statusCode, 401, `attempt ${attempt + 1} should be 401`);
+    assert.equal(call(middleware, "Bearer wrong-key").status, 401);
   }
-
-  const res = createMockRes();
-  middleware(wrong, res as unknown as Response, () => {});
-  assert.equal(res.statusCode, 429, "the attempt past the limit is throttled");
-});
-
-// The bug this guards against: a request with no Authorization header at
-// all is the normal shape of an unauthenticated caller hitting a public
-// endpoint, not a guess at the key. Before this guard existed, every one
-// of these counted as a failed attempt — so ten bare POSTs from anyone,
-// no key required, locked the site owner's own agent out of MCP for
-// fifteen minutes, repeatably.
-test("many requests with no Authorization header never trigger the lockout", () => {
-  const limiter = createFailedAttemptLimiter(3, 60_000);
-  const middleware = createMcpAuthMiddleware("secret-key", limiter);
-  const bare = { headers: {}, ip: "203.0.113.9" } as unknown as Request;
-
   for (let attempt = 0; attempt < 20; attempt++) {
-    const res = createMockRes();
-    middleware(bare, res as unknown as Response, () => {});
-    assert.equal(res.statusCode, 401, `attempt ${attempt + 1} should be 401`);
+    assert.equal(call(middleware, "Bearer wrong-key").status, 429);
+    assert.equal(call(middleware, undefined).status, 429);
   }
 
-  // The real key still works afterwards — the budget was never spent.
-  const res = createMockRes();
-  let nextCalled = false;
-  middleware(
-    {
-      headers: { authorization: "Bearer secret-key" },
-      ip: "203.0.113.9",
-    } as unknown as Request,
-    res as unknown as Response,
-    () => {
-      nextCalled = true;
-    },
-  );
-  assert.equal(nextCalled, true);
-  assert.equal(res.statusCode, undefined);
+  const owner = call(middleware, "Bearer secret-key");
+  assert.equal(owner.nextCalled, true);
+  assert.equal(owner.status, undefined);
 });
 
-// The point of counting failures rather than requests: a successful
-// request never consumes any of the budget, so ordinary use can't
-// throttle itself however heavy it gets.
-test("successful auth never consumes the failure budget", () => {
-  const limiter = createFailedAttemptLimiter(3, 60_000);
-  const middleware = createMcpAuthMiddleware("secret-key", limiter);
-  const right = {
-    headers: { authorization: "Bearer secret-key" },
-    ip: "203.0.113.9",
-  } as unknown as Request;
+// The keyless budget is what bounds guessing, so a guess past it is
+// refused before the key is compared. The response says so, and for
+// how long, rather than a bare 401 that would invite another try.
+test("guesses past the keyless budget are refused with a wait", () => {
+  const middleware = createMcpAuthMiddleware(
+    "secret-key",
+    smallLimiters(60, 2),
+  );
 
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const res = createMockRes();
-    let nextCalled = false;
-    middleware(right, res as unknown as Response, () => {
-      nextCalled = true;
-    });
-    assert.equal(nextCalled, true);
-    assert.equal(res.statusCode, undefined);
-  }
+  call(middleware, "Bearer guess-1");
+  call(middleware, "Bearer guess-2");
+  const refused = call(middleware, "Bearer guess-3");
+
+  assert.equal(refused.status, 429);
+  assert.equal(refused.nextCalled, false);
+  const retryAfter = Number(refused.res.headers["Retry-After"]);
+  assert.ok(retryAfter >= 1 && retryAfter <= 60);
 });
 
-test("throttling is tracked per IP, not globally", () => {
-  const limiter = createFailedAttemptLimiter(2, 60_000);
-  const middleware = createMcpAuthMiddleware("secret-key", limiter);
-  const attackerReq = {
-    headers: { authorization: "Bearer wrong-key" },
-    ip: "203.0.113.9",
-  } as unknown as Request;
+// The other half of the split: the key-holder's flood is still
+// bounded, and spending it does not spend the keyless budget.
+test("the owner's own budget is bounded separately", () => {
+  const middleware = createMcpAuthMiddleware("secret-key", smallLimiters(2, 5));
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    middleware(attackerReq, createMockRes() as unknown as Response, () => {});
-  }
+  assert.equal(call(middleware, "Bearer secret-key").nextCalled, true);
+  assert.equal(call(middleware, "Bearer secret-key").nextCalled, true);
+  const third = call(middleware, "Bearer secret-key");
+  assert.equal(third.status, 429);
+  assert.equal(third.nextCalled, false);
 
-  const blocked = createMockRes();
-  middleware(attackerReq, blocked as unknown as Response, () => {});
-  assert.equal(blocked.statusCode, 429);
-
-  // A different caller is unaffected by the attacker's failures.
-  const innocent = createMockRes();
-  let nextCalled = false;
-  middleware(
-    {
-      headers: { authorization: "Bearer secret-key" },
-      ip: "198.51.100.4",
-    } as unknown as Request,
-    innocent as unknown as Response,
-    () => {
-      nextCalled = true;
-    },
-  );
-  assert.equal(nextCalled, true);
+  assert.equal(call(middleware, "Bearer wrong-key").status, 401);
 });
 
-// Pins the lockout semantics above: a blocked IP is refused before its
-// credentials are examined, so the correct key does not rescue it until
-// the window lapses.
-test("a blocked IP is refused even with the correct key", () => {
-  const limiter = createFailedAttemptLimiter(1, 60_000);
-  const middleware = createMcpAuthMiddleware("secret-key", limiter);
+test("budgets are kept per address", () => {
+  const middleware = createMcpAuthMiddleware("secret-key", smallLimiters(1, 1));
 
-  middleware(
-    {
-      headers: { authorization: "Bearer wrong-key" },
-      ip: "203.0.113.9",
-    } as unknown as Request,
-    createMockRes() as unknown as Response,
-    () => {},
+  call(middleware, "Bearer secret-key", "203.0.113.9");
+  assert.equal(
+    call(middleware, "Bearer secret-key", "203.0.113.9").status,
+    429,
   );
-
-  const res = createMockRes();
-  let nextCalled = false;
-  middleware(
-    {
-      headers: { authorization: "Bearer secret-key" },
-      ip: "203.0.113.9",
-    } as unknown as Request,
-    res as unknown as Response,
-    () => {
-      nextCalled = true;
-    },
+  assert.equal(
+    call(middleware, "Bearer secret-key", "198.51.100.4").nextCalled,
+    true,
   );
-
-  assert.equal(res.statusCode, 429);
-  assert.equal(nextCalled, false);
 });

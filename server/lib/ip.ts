@@ -4,8 +4,8 @@
 //
 // `truncateIp` narrows for the **visitor hash** (lib/identity.ts).
 // `limiterKey` narrows for the **counters** that bound abuse: the
-// /events and /mcp request limits, the /mcp key lockout and the
-// cockpit password lockout (lib/rateLimit.ts).
+// /events and /mcp request limits and the cockpit password lockout
+// (lib/rateLimit.ts).
 
 // 0-255, no leading "+", no whitespace, no "010" octal-looking parts.
 const IPV4_OCTET = /^(0|[1-9][0-9]{0,2})$/;
@@ -120,16 +120,16 @@ export function truncateIp(ip: string): string {
 // from any address inside it, so keying on the full address means the
 // counters bound nothing at all for anyone on IPv6. That mattered most
 // where it was least visible — the cockpit password lockout and the
-// /mcp key lockout are the only thing standing between a guesser and a
-// single shared secret at an entirely predictable hostname, and both
+// /mcp keyless limit are the only thing standing between a guesser and
+// a single shared secret at an entirely predictable hostname, and both
 // were bypassable by rotating within a block the attacker already
 // holds. A /48 is the largest common end-site delegation, so no line
 // spans more than one, which is the property the counter needs. It is
 // deliberately the over-grouping error rather than the under-grouping
 // one: plenty of providers, German residential among them, delegate a
 // /56, so one /48 can hold a couple of hundred unrelated households,
-// and they share a budget. For the lockouts that is near-free — the
-// collateral is a fifteen-minute wait, and only for someone who is
+// and they share a budget. For the cockpit lockout that is near-free —
+// the collateral is a fifteen-minute wait, and only for someone who is
 // themselves failing auth. For /events it is the real cost, and the
 // knob to reach for if a deployment ever sees refusals against an IPv6
 // key is the ceiling, not the width: narrowing less would hand the

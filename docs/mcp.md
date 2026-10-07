@@ -86,8 +86,10 @@ Two tools write: `delete_visitor_data`, which previews and asks for
 confirmation ([erasure](operations.md#deletion-and-erasure)), and
 `add_history_note`. `READ_ONLY=true` removes both.
 
-`/mcp` accepts 60 calls a minute per address, and one JSON-RPC message
-per request. Both are far above what an agent needs.
+`/mcp` accepts 60 calls a minute per address with the right key, and
+one JSON-RPC message per request. Both are far above what an agent
+needs. Calls without the right key have their own budget of 10, so a
+stranger can't use up yours.
 
 ## What leaves your server when you ask
 
@@ -200,9 +202,7 @@ Add a custom connector in claude.ai's settings, with the URL
 so your server must be reachable over HTTPS. Where the header field
 sits depends on your plan, so check claude.ai's current help pages.
 
-claude.ai calls from addresses shared with other users, so the
-per-address limit above is counted across all of them. Check with your
-lawyer whether your plan's terms are enough for your data before you
+Check with your lawyer whether your plan's terms are enough for your data before you
 connect (see [what leaves your server](#what-leaves-your-server-when-you-ask)).
 
 Then try the [weekly digest](digest.md) as a first prompt.

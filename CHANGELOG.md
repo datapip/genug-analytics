@@ -9,6 +9,13 @@ how a version is cut.
 
 ## Unreleased
 
+**Breaking**
+
+- **The server refuses to start if `MCP_API_KEY` is shorter than 32
+  characters**, unless `READ_ONLY=true`. A key from the install script
+  or `openssl rand -hex 32` is 64. Replace a shorter one before you
+  update, and in every connected client.
+
 **Added**
 
 - **`get_collection_health` tells the agent whether events are still
@@ -23,6 +30,14 @@ how a version is cut.
   answers instead of a percentage. Periods are limited to 31 days.
 - **A weekly digest recipe** in `docs/digest.md`, and **claude.ai
   setup** in `docs/mcp.md`.
+
+**Changed**
+
+- `/mcp` now counts calls with the right key and without it apart: 60
+  a minute per address with the key, 10 without. claude.ai and other
+  hosted agents call from addresses shared with strangers, who could
+  lock your connector out before. The wrong-key lockout on `/mcp` is
+  gone; the keyless limit does that job.
 
 ## 0.11.0 — 2026-09-30
 

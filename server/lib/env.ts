@@ -52,6 +52,22 @@ export function parseReadOnly(value: string | undefined): boolean {
   throw new Error(`READ_ONLY must be "true" or "false", got: ${value}`);
 }
 
+// With no lockout on /mcp (lib/mcpAuth.ts), the key's length is what
+// makes guessing it hopeless. Length is not randomness, but it refuses
+// the "password" and "dev-key" kind. A READ_ONLY key is published on
+// purpose, so there is nothing to guess and any length passes.
+export const MIN_MCP_API_KEY_LENGTH = 32;
+
+export function parseMcpApiKey(value: string, readOnly: boolean): string {
+  if (!readOnly && value.length < MIN_MCP_API_KEY_LENGTH) {
+    throw new Error(
+      `MCP_API_KEY must be at least ${MIN_MCP_API_KEY_LENGTH} characters, got ${value.length}. ` +
+        "Generate one with: openssl rand -hex 32",
+    );
+  }
+  return value;
+}
+
 // The zone every day and hour boundary is cut in (lib/timezone.ts).
 // Required, with no default: a missing zone would quietly mean UTC,
 // which is the very plausible-while-wrong bucketing this setting exists

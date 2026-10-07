@@ -20,10 +20,16 @@ const EVENTS_MAX_PER_WINDOW = 600;
 // The cost of a call is also not alike — a segment on an entry
 // condition materialises every entry row of its period — and a key that
 // is public (READ_ONLY, see env.ts) invites exactly the loop this
-// bounds. Counted before the key is checked, so a flood is refused at
-// the door whether or not it knows the key; guessing the key is the
-// failed-attempt limiter's job below.
-const MCP_MAX_PER_WINDOW = 60;
+// bounds. Only requests carrying the right key count here
+// (lib/mcpAuth.ts): hosted agents call from addresses shared with the
+// vendor's other customers, and a stranger there must not be able to
+// spend the owner's budget.
+export const MCP_MAX_PER_WINDOW = 60;
+// Everything else on /mcp, per address: no key, a wrong one. This is
+// what bounds guessing the key now, so it is low — a real client sends
+// the key on every call, and only an auth-discovery probe arrives
+// without one.
+export const MCP_KEYLESS_MAX_PER_WINDOW = 10;
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 interface WindowState {
@@ -120,12 +126,10 @@ export function createRequestLimiter(
           windowSeconds: WINDOW_MS / 1000,
         });
       }
-      // A body and a Retry-After, not a bare 429. /mcp answers two
-      // different 429s — this one, and the key lockout in routes/mcp.ts
-      // — and an agent that cannot tell "wait a minute" from "wait
-      // fifteen" reports an outage to its human, which is this
-      // project's worst failure: plausible, and wrong. The /events
-      // client never reads either, which costs nothing.
+      // A body and a Retry-After, not a bare 429: an agent that is
+      // not told how long to wait reports an outage to its human,
+      // which is this project's worst failure — plausible, and wrong.
+      // The /events client never reads either, which costs nothing.
       res.set("Retry-After", String(retryAfterSeconds));
       res.status(429).json({
         error: "rate limit reached",
@@ -141,7 +145,6 @@ export const rateLimitEvents = createRequestLimiter(
   EVENTS_MAX_PER_WINDOW,
   "/events",
 );
-export const rateLimitMcp = createRequestLimiter(MCP_MAX_PER_WINDOW, "/mcp");
 
 // Without this, a map would grow by one entry per distinct IP ever seen
 // and never shrink. Runs independently of the request path so it keeps
@@ -169,10 +172,9 @@ export interface FailedAttemptLimiter {
   retryAfterSeconds(ip: string, now?: number): number;
 }
 
-// Counts *failed* authentication attempts, not requests — an AI agent
-// legitimately fires many /mcp calls in a burst, so a request limiter
-// would throttle real work while barely slowing a guesser. A successful
-// call consumes no budget at all.
+// Counts *failed* sign-ins to the cockpit, not requests. A successful
+// one consumes no budget at all. /mcp used this too until its callers
+// moved to shared vendor addresses; see lib/mcpAuth.ts.
 //
 // A blocked IP is refused without its credentials being checked, which
 // necessarily locks out the real password until the window lapses.

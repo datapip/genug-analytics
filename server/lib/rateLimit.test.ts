@@ -228,8 +228,8 @@ test("checkRateLimit reports the first refusal in a window only once", () => {
   );
 });
 
-// A bare 429 leaves an agent unable to tell this refusal, which clears
-// within the minute, from the key lockout, which holds for fifteen.
+// A bare 429 leaves an agent unable to tell how long to wait, and an
+// agent that cannot tell reports an outage.
 test("a refused request carries Retry-After and a body saying how long", () => {
   const limiter = createRequestLimiter(1, "/test");
 

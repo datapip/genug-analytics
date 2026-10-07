@@ -165,7 +165,7 @@ function baseEnv(dbPath: string, port: number): Record<string, string> {
   return {
     PORT: String(port),
     DB_PATH: dbPath,
-    MCP_API_KEY: "test-key",
+    MCP_API_KEY: "test-key-0123456789abcdef0123456789",
     COCKPIT_PASSWORD: "test-cockpit-password",
     ALLOWED_ORIGIN: `http://localhost:${port}`,
     TIMEZONE: "UTC",
@@ -369,7 +369,7 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
     headers: {
       ...mcpBody.headers,
       accept: "application/json, text/event-stream",
-      authorization: "Bearer test-key",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
     },
   });
   assert.notEqual(authorized.status, 401);
@@ -1210,7 +1210,7 @@ test("renames an event from the cockpit and keeps collecting under the new name"
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      authorization: "Bearer test-key",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -1240,7 +1240,7 @@ test("renames an event from the cockpit and keeps collecting under the new name"
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
-        authorization: "Bearer test-key",
+        authorization: "Bearer test-key-0123456789abcdef0123456789",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -1963,7 +1963,7 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      authorization: "Bearer test-key",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   });
@@ -2088,10 +2088,11 @@ test("refuses to start on a READ_ONLY value that is neither true nor false", asy
   assert.ok(!server.rawLines.some((line) => line.includes("listening")));
 });
 
-// The limiter is mounted ahead of the key check, so a burst is refused
-// whether or not it carries the key; a valid key is used here so the
-// 429 can only be the request limit, not the failed-attempt lockout.
-test("rate limits /mcp per address, before the key is checked", async (t) => {
+// Two budgets per address, split by whether the request carries the
+// right key, so a stranger sharing a hosted agent's address cannot
+// spend the owner's. Through the real stack: the unit tests pin the
+// middleware, this pins that routes/mcp.ts mounts it that way.
+test("rate limits /mcp per address, with the key and without it apart", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4219;
 
@@ -2099,7 +2100,7 @@ test("rate limits /mcp per address, before the key is checked", async (t) => {
   stopAndCleanUp(t, dir, server);
   await server.waitForLog((line) => line.msg === "genug server listening");
 
-  const request = (key = "test-key") =>
+  const request = (key = "test-key-0123456789abcdef0123456789") =>
     fetch(`http://localhost:${port}/mcp`, {
       method: "POST",
       headers: {
@@ -2110,15 +2111,20 @@ test("rate limits /mcp per address, before the key is checked", async (t) => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
 
-  for (let i = 0; i < 60; i++) {
+  // A stranger spends the keyless budget; the owner is not affected.
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await request("wrong-key")).status, 401, `guess ${i + 1}`);
+  }
+  assert.equal((await request("wrong-key")).status, 429);
+  assert.equal((await request()).status, 200);
+
+  for (let i = 1; i < 60; i++) {
     assert.equal((await request()).status, 200, `request ${i + 1}`);
   }
 
   const refused = await request();
   assert.equal(refused.status, 429);
-  // Through the real stack, not just the middleware: an agent has to be
-  // able to tell this refusal from the key lockout, which lasts fifteen
-  // minutes rather than under one.
+  // An agent has to be told how long to wait, or it reports an outage.
   const retryAfter = Number(refused.headers.get("retry-after"));
   assert.ok(retryAfter >= 1 && retryAfter <= 60, `Retry-After ${retryAfter}`);
   assert.deepEqual(await refused.json(), {
@@ -2126,16 +2132,29 @@ test("rate limits /mcp per address, before the key is checked", async (t) => {
     retryAfterSeconds: retryAfter,
   });
 
-  // The order, not just the ceiling: a wrong key inside a spent window
-  // is answered 429 by the limiter, not 401 by the key check. Moving
-  // the limiter behind the key check would turn this into a 401 while
-  // every other assertion here still passed. One bad key is far below
-  // the 10-failure lockout, so the 429 can only be the request limit.
-  assert.equal((await request("wrong-key")).status, 429);
-
-  const line = await server.waitForLog((l) => l.msg === "rate limit reached");
-  assert.equal(line.route, "/mcp");
+  const line = await server.waitForLog(
+    (l) => l.msg === "rate limit reached" && l.route === "/mcp",
+  );
   assert.equal(line.limit, 60);
+});
+
+test("refuses to start on a short MCP_API_KEY", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+
+  const server = spawnServer({
+    ...baseEnv(join(dir, "test.db"), 4234),
+    MCP_API_KEY: "too-short",
+  });
+  stopAndCleanUp(t, dir, server);
+
+  const { code } = await new Promise<{ code: number | null }>((resolve) => {
+    server.process.once("exit", (code) => resolve({ code }));
+  });
+  assert.notEqual(code, 0);
+  assert.ok(
+    server.rawLines.some((line) => line.includes("MCP_API_KEY must be")),
+  );
+  assert.ok(!server.rawLines.some((line) => line.includes("listening")));
 });
 
 // One allowed request must be one JSON-RPC message. The transport
@@ -2155,7 +2174,7 @@ test("refuses a batched JSON-RPC body on /mcp", async (t) => {
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      authorization: "Bearer test-key",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
     },
     body: JSON.stringify([
       { jsonrpc: "2.0", id: 1, method: "tools/list" },
@@ -2218,7 +2237,7 @@ test("the deployment-context resource serves the seeded file, and edits are live
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      authorization: "Bearer test-key",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -2271,7 +2290,7 @@ test("add_history_note writes into the same file the resource serves", async (t)
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
-        authorization: "Bearer test-key",
+        authorization: "Bearer test-key-0123456789abcdef0123456789",
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });

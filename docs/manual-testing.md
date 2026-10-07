@@ -43,7 +43,7 @@ trailing slash, no path.
 DB_PATH=./dev.db \
 ALLOWED_ORIGIN=http://localhost:XXXX \
 TIMEZONE=Europe/Berlin \
-MCP_API_KEY=dev-mcp-key \
+MCP_API_KEY=dev-mcp-key-0123456789abcdef0123456 \
 COCKPIT_PASSWORD=dev-cockpit-password \
 PORT=3001 \
 node server/dist/index.js
@@ -174,7 +174,7 @@ the form offers to carry the stored events across, and the events you
 fired a minute ago move with it. Then rename it back.
 
 To exercise the MCP side too, point an MCP client at
-`http://localhost:3001/mcp` with `Authorization: Bearer dev-mcp-key` and
+`http://localhost:3001/mcp` with `Authorization: Bearer dev-mcp-key-0123456789abcdef0123456` and
 call `get_traffic_summary`, `get_top_pages`, or `list_event_types`, or
 read the `genug://schema-registry` resource.
 

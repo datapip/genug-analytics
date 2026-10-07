@@ -2,17 +2,21 @@ import { Router, json, type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { db } from "../db/index.js";
 import { createMcpServer } from "../mcp/tools.js";
-import { parseReadOnly, parseTimezone, requireEnv } from "../lib/env.js";
+import {
+  parseMcpApiKey,
+  parseReadOnly,
+  parseTimezone,
+  requireEnv,
+} from "../lib/env.js";
 import { createMcpAuthMiddleware } from "../lib/mcpAuth.js";
-import { rateLimitMcp } from "../lib/rateLimit.js";
 import { logError } from "../lib/logger.js";
 
-const mcpApiKey = requireEnv("MCP_API_KEY");
-// Read at module scope like the key above. Every module that needs it
-// parses the same variable itself; whichever is imported first is the
-// one whose throw stops startup, which is enough — a bad value cannot
-// reach a listening server through any of them.
+// Read at module scope. Every module that needs it parses the same
+// variable itself; whichever is imported first is the one whose throw
+// stops startup, which is enough — a bad value cannot reach a listening
+// server through any of them.
 const readOnly = parseReadOnly(process.env.READ_ONLY);
+const mcpApiKey = parseMcpApiKey(requireEnv("MCP_API_KEY"), readOnly);
 const timezone = parseTimezone(requireEnv("TIMEZONE"));
 
 const requireApiKey = createMcpAuthMiddleware(mcpApiKey);
@@ -27,11 +31,8 @@ function methodNotAllowed(req: Request, res: Response): void {
 
 export const mcpRouter: Router = Router();
 
-// The request limiter sits in front of the key check on purpose: a
-// flood is bounded whether or not it carries the key. The failed-attempt
-// limiter inside requireApiKey is the one that makes the key hard to
-// guess; this one makes a known key hard to abuse.
-mcpRouter.use(rateLimitMcp);
+// Checks the key and the per-address limits in one step, so a flood is
+// bounded whether or not it carries the key. See lib/mcpAuth.ts.
 mcpRouter.use(requireApiKey);
 
 // One JSON-RPC message per request, at 16kb. Express's default body

@@ -3344,7 +3344,9 @@ immediately and binds from the first real deployment onward.)
 - ~~Brute-force protection on the authenticated routes~~ Done:
   `lib/rateLimit.ts`'s `createFailedAttemptLimiter`, used by both
   `lib/cockpitAuth.ts` and `routes/mcp.ts` (10 failures per IP per 15
-  minutes). Only `/events` was rate limited before, leaving the two
+  minutes). `/mcp` dropped it on 2026-10-07; see "Shared vendor
+  addresses" under the request limit below. Only `/events` was rate
+  limited before, leaving the two
   routes actually guarding data — each behind a single shared secret —
   freely guessable. `timingSafeStringEqual` stops timing attacks but
   does nothing against simply trying repeatedly.
@@ -3408,9 +3410,36 @@ immediately and binds from the first real deployment onward.)
   spent window must be answered 429 by the limiter, not 401 by the key
   check — since every assertion about the ceiling alone passes just as
   well with the two mounted the wrong way round.
+
+  **Shared vendor addresses**, 2026-10-07. claude.ai calls `/mcp` from
+  Anthropic's servers, from addresses shared with every other
+  claude.ai user, and other hosted agents do the same. Both `/mcp`
+  counters were per address, so anyone could add a connector with the
+  owner's URL and a made-up key: ten calls locked the owner's own
+  connector out for fifteen minutes, sixty spent its request budget,
+  and both could be repeated forever. A list of vendor addresses would
+  go stale without anyone noticing. The one thing a stranger can't send
+  is the key, so the key now picks the budget: 60 a minute per address
+  for requests with it, 10 for everything else
+  (`lib/mcpAuth.ts`, one comparison for both decisions).
+
+  The lockout went. A lockout that refuses the right key is the attack
+  above; one that lets the right key through still answers right versus
+  wrong, so it bounds nothing. What bounds guessing now is the keyless
+  budget, 10 a minute per address, and the key's length: the server
+  refuses to start on a key under 32 characters (`parseMcpApiKey`).
+  The install script and `.env.example` generate 64 hex characters, so
+  this only stops a hand-picked key. `READ_ONLY` is exempt, since its
+  key is published and there is nothing to guess. That also means the
+  demo's 60 a minute is shared by everyone using it from one vendor
+  address. That comes with a public key and isn't something this split
+  can fix. The cockpit keeps its lockout: its caller is the owner's
+  browser, not a vendor's servers, and its password is chosen by a
+  person, with no length rule.
 - ~~Every counter keyed on the full address~~ Fixed, 2026-09-15. The
   three controls that bound abuse — the `/events` and `/mcp` request
-  limits, the `/mcp` key lockout and the cockpit password lockout —
+  limits, the `/mcp` key lockout (since removed) and the cockpit
+  password lockout —
   all keyed on `req.ip`, and the comment in `identity.ts` defended it:
   narrowing is for the hash, the limiter needs the whole address,
   because throttling a /24 throttles an office for one abuser.
@@ -3849,8 +3878,8 @@ immediately and binds from the first real deployment onward.)
   site" toward being run and looked at by others — not a blocker, but
   flagged so it isn't decided by default before going public.
   `/mcp` was deliberately not included here: it's meant to be reachable
-  by an agent holding a key, already sits behind the failed-attempt
-  lockout and the per-address request limit, and writing tools are
+  by an agent holding a key, already sits behind a long generated key
+  and the per-address request limits, and writing tools are
   unregistered under `READ_ONLY` — the cockpit's single static password
   is the weaker of the two.
 - ~~**The cockpit signs in instead of re-sending a password**~~ Done,

@@ -173,7 +173,7 @@ coming up in an insecure state.
 | ------------------- | ----------------------------- | -------------------------------------------------------------------------------- |
 | `ALLOWED_ORIGIN`    | yes                           | The tracked site's exact origin, e.g. `https://example.com`. Comma-separated.    |
 | `TIMEZONE`          | yes                           | The time zone reports are in, as an IANA name like `Europe/Berlin`. See below.   |
-| `MCP_API_KEY`       | yes                           | The key your AI agent sends as `Authorization: Bearer …`.                        |
+| `MCP_API_KEY`       | yes                           | The key your AI agent sends as `Authorization: Bearer …`. 32+ characters.        |
 | `COCKPIT_PASSWORD`  | yes                           | The password for `/cockpit`. See below.                                          |
 | `PORT`              | no (default `3000`)           | The port the server listens on.                                                  |
 | `DB_PATH`           | no (default `/data/genug.db`) | The SQLite file.                                                                 |
@@ -214,7 +214,8 @@ defaults, so update it if you add any ([privacy](privacy.md#what-gets-stored)).
 **`READ_ONLY=true`** removes `delete_visitor_data`, `add_history_note`
 and `get_recent_events`, and the cockpit refuses every edit. Collection
 continues. Use it for a demo or any deployment whose key is public;
-the context files are then public too.
+the context files are then public too. It also skips the key's
+32-character minimum, so don't use it just to turn off writes.
 
 ## Signing in to the cockpit
 
