@@ -12,11 +12,12 @@ calls the relevant tool itself.
 
 Every tool answers one question, and its description tells the agent
 what the number means and where it misleads — so you ask in plain
-language and the agent picks. The 32 tools cover:
+language and the agent picks. The 33 tools cover:
 
 - **How much, and when** — sessions, visitors and events for a period;
   per day, per weekday, per hour; one event's trend over time; how
-  long sessions last and how many bounce.
+  long sessions last and how many bounce; and whether a rise or drop is
+  bigger than the site's usual week-to-week noise.
 - **Which pages, and where from** — top pages, entry and exit pages,
   the pages that lose the most visitors, referrers, and campaign
   parameters (`utm_campaign` and friends) on the entry page.

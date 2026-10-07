@@ -368,6 +368,42 @@ test("get_traffic_by_day refuses a period longer than its cap", async () => {
   await client.close();
 });
 
+// Each refusal names what to do instead, rather than judging a period
+// it cannot judge or an event that does not exist.
+test("get_traffic_change refuses what it cannot judge", async () => {
+  const { client } = await connect();
+  const long = await call(client, "get_traffic_change", {
+    from: "2026-01-01",
+    to: "2026-03-01",
+  });
+  assert.match(String(long.error), /31/);
+  assert.match(String(long.error), /get_traffic_by_day/, "offers a way out");
+
+  // A 31-day month across the autumn clock change is 31 local days,
+  // though it measures 32 in UTC milliseconds.
+  const { client: berlin } = await connect(undefined, "Europe/Berlin");
+  const october = await call(berlin, "get_traffic_change", {
+    from: "2026-10-01",
+    to: "2026-10-31",
+  });
+  assert.equal(october.error, undefined);
+  await berlin.close();
+
+  const future = await call(client, "get_traffic_change", {
+    from: "9999-01-01",
+    to: "9999-01-02",
+  });
+  assert.match(String(future.error), /future/);
+
+  const unknown = await call(client, "get_traffic_change", {
+    ...PERIOD,
+    event: "no_such_event",
+  });
+  assert.match(String(unknown.error), /Unknown event type/);
+  assert.match(String(unknown.error), /page_view/, "lists the valid ones");
+  await client.close();
+});
+
 // Every other test here runs in UTC, where a bare date is the same day
 // either way — so a tool that dropped the zone would pass them all.
 // 22:30 UTC on the 29th is 00:30 on the 30th in Berlin.

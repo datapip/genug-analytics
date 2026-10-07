@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { pageViewEventType } from "@genug/schema-registry";
 import {
   getTrafficSummary,
@@ -8,7 +9,17 @@ import {
   hasAnyEvents,
 } from "../lib/traffic.js";
 import {
+  BASELINE_PERIODS,
+  getTrafficChange,
+  MAX_CHANGE_DAYS,
+} from "../lib/trafficChange.js";
+import { enumerateDays } from "../lib/timezone.js";
+import {
   periodInput,
+  resolveSegment,
+  isRegisteredEvent,
+  unknownEventError,
+  toolError,
   segmentInput,
   withSegment,
   trendLengthError,
@@ -137,6 +148,64 @@ export const registerTrafficTools: ToolRegistrar = (
       return withSegment(db, segment, { from, to }, (clause) =>
         jsonContent(
           getSessionSummary(db, { from, to }, pageViewEventType, clause),
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_traffic_change",
+    {
+      description: `Did traffic really change, or is it noise? Compares a period with the same span 1 to ${BASELINE_PERIODS} weeks earlier (whole weeks, so the weekday mix always matches; a period over 7 days steps back by whole multiples of a week) and gives each number a verdict. Use this before reporting any rise or drop as news; get_traffic_summary twice and a percentage cannot tell 4 → 6 from 40 → 60. Judges sessions and viewEvents (page views), plus one event's count if \`event\` is given. Visitors are left out on purpose: consentless visitor ids rotate daily, so a shift in consent moves them with no change in traffic. Per metric: current, baselineMean, usualLow-usualHigh (the band counted as normal), change, changePct (null when the baseline is zero) and verdict. Verdicts: within_usual_range; above_usual_range or below_usual_range (more than twice the noise away from the baseline mean, where noise is the larger of sqrt(mean) and the baseline weeks' own spread); too_few_to_tell (under 10 on both sides — report no percentage then); too_little_history (fewer than 3 baseline weeks fall inside the stored data, e.g. a new deployment, a recently added event, or rows deleted by retention). A period running past now is cut at now, and each baseline at the same local clock time, so "today so far" is fair. baselinePeriods lists every week compared, so you can show the human the numbers. Limits: above_usual_range means bigger than this site's usual variation, not that a cause was found — read the deployment context's history, and run get_top_referrers or get_top_pages on both periods to see where it came from. Anyone who can reach the collection endpoint can send events, so a verdict can be manufactured; a rise that comes from one referrer or a handful of pages deserves that check. A segment on a recently added event compares against weeks it could not have happened in. The period is limited to ${MAX_CHANGE_DAYS} days. ${SEGMENT_HINT}`,
+      inputSchema: {
+        ...period,
+        event: z
+          .string()
+          .optional()
+          .describe(
+            "Optional. A registered event name whose count is also judged, e.g. a signup or purchase event. See list_event_types.",
+          ),
+        ...segmentInput,
+      },
+    },
+    async ({ from, to, event, segment }) => {
+      // Local days, as the step is counted: in UTC milliseconds a month
+      // with the autumn clock change measures one day too long.
+      const days = enumerateDays(from, to, timezone).length;
+      if (days > MAX_CHANGE_DAYS) {
+        return toolError(
+          `That period covers ${days} days; get_traffic_change compares at most ${MAX_CHANGE_DAYS}. For longer trends use get_traffic_by_day.`,
+        );
+      }
+      const now = new Date();
+      if (Date.parse(from) > now.getTime()) {
+        return toolError(
+          `The period starts in the future (${from}); there is nothing to compare yet.`,
+        );
+      }
+      if (event !== undefined && !isRegisteredEvent(event)) {
+        return unknownEventError(event);
+      }
+      // Resolved once against the period asked for, so a bad segment is
+      // an error before any query runs. Each baseline resolves its own,
+      // because entry-based conditions depend on the period.
+      return withSegment(db, segment, { from, to }, () =>
+        jsonContent(
+          getTrafficChange(
+            db,
+            { from, to },
+            now,
+            timezone,
+            pageViewEventType,
+            event,
+            (p) => {
+              const resolved = resolveSegment(db, segment, p);
+              if ("error" in resolved) {
+                throw new Error("segment resolved once but not again");
+              }
+              return resolved.clause;
+            },
+          ),
         ),
       );
     },

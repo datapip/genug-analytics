@@ -48,7 +48,7 @@ cover 3 and 4.
 
 ## Why
 
-- **Ask, don't read.** 32 MCP tools, each answering one question
+- **Ask, don't read.** 33 MCP tools, each answering one question
   a site owner actually asks — top pages, where traffic comes from,
   which campaign converted, whether last week's visitors came back.
   Every tool can be narrowed to a segment of sessions, so "where did
@@ -131,14 +131,14 @@ not something the software decides for you. All three are laid out in
 The agent reads the schema registry first, so it knows what your
 deployment tracks, then picks the tool. The tools cover:
 
-| Question                     | Answered by                                                   |
-| ---------------------------- | ------------------------------------------------------------- |
-| How much traffic, and when?  | Summary, per day / weekday / hour, one event's trend          |
-| Which pages, and where from? | Top, entry, exit and bounce pages; referrers; campaign params |
-| What happened?               | Events ranked, broken down by any prop, summed, funnelled     |
-| Who is visiting?             | Devices and browsers, languages, new vs returning, cohorts    |
-| Is tracking working?         | Recent raw events, rejections, bot traffic, still arriving?   |
-| … for one set of sessions?   | The `segment` argument on every tool above                    |
+| Question                     | Answered by                                                             |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| How much traffic, and when?  | Summary, per day / weekday / hour, one event's trend, is a change real? |
+| Which pages, and where from? | Top, entry, exit and bounce pages; referrers; campaign params           |
+| What happened?               | Events ranked, broken down by any prop, summed, funnelled               |
+| Who is visiting?             | Devices and browsers, languages, new vs returning, cohorts              |
+| Is tracking working?         | Recent raw events, rejections, bot traffic, still arriving?             |
+| … for one set of sessions?   | The `segment` argument on every tool above                              |
 
 What each number means, what it excludes and where it misleads is in
 every tool's description — that is the documentation the agent reads,

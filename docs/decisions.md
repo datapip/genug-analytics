@@ -2285,7 +2285,8 @@ agent beat glancing at a dashboard for sequenced, multi-step questions
 (see "Project maturity & path to a solid product" below).
 
 (`compare_periods(period_a, period_b)` was built and then removed —
-see "Project maturity" below for why.)
+see "Project maturity" below for why. A comparison came back later as
+`get_traffic_change`, for a different reason: see that entry.)
 
 Three further tools generalize the "breakdown" idea beyond pages, added
 once it became clear `get_top_pages` was the only dimension-breakdown
@@ -5317,3 +5318,61 @@ A test reads the compiled `lib/` files and fails on any `strftime` over
 `ts` without `span_offset`, so the rule in `AGENTS.md` is enforced
 rather than remembered.
 
+
+### `get_traffic_change`: a verdict, not a subtraction
+
+`compare_periods` was removed because it was "call `get_traffic_summary`
+twice and subtract" (see "Core product value"). The agent can subtract.
+This tool brings a comparison back, so it has to say what the agent
+cannot do for itself. If a later review finds it is only subtraction,
+delete it on the old reasoning.
+
+**What the agent gets wrong.** Given 4 sessions last Tuesday and 6 this
+Tuesday, it reports "+50%". The ground rules already say to treat small
+samples with caution. That is prose, and the agent still reports the
+number as news. The product here is the verdict on whether a change is
+bigger than the site's own noise. That is the same kind of guarantee as
+`periodInput`: something the server computes so the agent cannot get it
+wrong.
+
+**The baseline is the same span, 1–4 weeks earlier.** Shifting by whole
+weeks keeps the weekday mix identical, so a Monday is never judged
+against a Sunday. A period longer than a week is shifted by whole
+multiples of a week (31 days → 5 weeks), and the period is capped at 31
+days so four baselines stay inside the default retention. The shift is
+done on the local calendar (`lib/timezone.ts`), not by subtracting
+milliseconds, so a week containing a clock change still lines up.
+
+**A period still running is cut at now, and so is each baseline.**
+Otherwise "today so far" at 10:00 is judged against four whole days and
+reads as a large drop.
+
+**Noise is the larger of two estimates.** `sqrt(mean)` is the noise of
+counts that arrive at random. Real traffic is lumpier: a shared link, a
+newsletter, a bot burst. So the baseline weeks' own standard deviation
+is used when it is larger. A change counts only if it exceeds twice
+that. Below 10 on both sides there is no verdict, just "too few to
+tell". This was the testing-specialist's method. The architect proposed
+a plain Poisson test against the previous period. It was rejected
+because pure Poisson flags too much, which is the failure this tool
+exists to prevent.
+
+**Units.** Sessions and page views, plus one event if asked. Visitors
+are left out: a consentless visitor's id rotates daily, so a change in
+the consent mix moves a visitor count with no change in traffic.
+
+**A baseline older than the data is dropped, not counted as zeros.** A
+baseline week that starts before the oldest stored event (a new
+deployment, or rows pruned by retention) would turn into a rise against
+nothing. So is a week with no stored rows at all: a stray test event
+months before the script went live, or weeks the snippet was missing,
+would otherwise pass the first check and still count as zero traffic.
+With fewer than three usable baseline weeks there is no verdict.
+The one most likely plausible-while-wrong bug was this one.
+
+**Not done: where the change came from.** The security review asked for
+a flag when most of a change comes from a few visitors or one referrer.
+Anyone can post to `/events`, so a verdict can be manufactured. The
+description says so and points the agent at `get_top_referrers` and
+`get_top_pages` on both periods. A built-in concentration check is the
+next step if that turns out not to be enough.
