@@ -1,18 +1,14 @@
 # Connecting an AI agent
 
-Point your AI client at `https://data.your-domain.com/mcp`,
-authenticating with `Authorization: Bearer <MCP_API_KEY>`. Once
-connected, just ask it things like "what were my top pages last week?"
-or "where's my traffic coming from?" — it reads the schema-registry
-resource first to see what events this deployment actually tracks, and
-the deployment-context resource for how you want it to answer, then
-calls the relevant tool itself.
+Point your AI client at `https://data.your-domain.com/mcp` with the
+header `Authorization: Bearer <MCP_API_KEY>`. Then ask, for example,
+"what were my top pages last week?". The agent reads which events you
+track and how you want answers, then picks the tool.
 
 ## What you can ask
 
-Every tool answers one question, and its description tells the agent
-what the number means and where it misleads — so you ask in plain
-language and the agent picks. The 33 tools cover:
+Each tool answers one question, and its description tells the agent
+what the number means and where it misleads. The 33 tools cover:
 
 - **How much, and when** — sessions, visitors and events for a period;
   per day, per weekday, per hour; one event's trend over time; how
@@ -31,46 +27,32 @@ language and the agent picks. The 33 tools cover:
   with the reason, bot traffic, whether events are still arriving, and
   events stranded by a rename.
 
-Every tool that takes a period also takes a **segment**: a list of
-conditions that narrow the answer to a set of sessions — those that
-contained an event (with a prop value), came from a referrer, entered
-on a page or campaign parameter, or used a device, browser or
-language. That is how "where did the buyers of product X come from"
-is one call: top referrers, segmented to sessions with
-`order_completed` where `product_id` is X. There is no raw-SQL tool
-and no row export, on purpose; see "MCP tool design" in
-[decisions.md](decisions.md) for why.
+Every tool that takes a period also takes a **segment**, which narrows
+the answer to some sessions: those with an event or prop value, a
+referrer, an entry page or campaign, a device, browser or language. So
+"where did the buyers of product X come from" is one question. There
+is no raw-SQL tool and no row export, on purpose.
 
 ## Telling the agent how to answer
 
-Alongside the schema registry, the agent reads a **deployment-context**
-resource: a markdown document you write, at `ground-rules.md` in
-`CONTEXT_PATH` (default `/data/context`). It holds instructions rather
-than data — ask instead of guessing, say whether a number counts
-sessions or visitors, be careful with small samples. A sensible default
-is written there on first start; edit it, or empty it to have none.
-Edits apply on the next question, with no restart.
+Before answering, the agent reads a **deployment context** that you
+write. It is three files in `CONTEXT_PATH` (default `/data/context`).
+Edits apply on the next question.
 
-A second file, `about.md`, says what the site or business is for, so
-the agent isn't left guessing. It starts empty, since there is no
-sensible default. Write it from the cockpit or by hand.
+- **`ground-rules.md`**: how to answer. Ask instead of guessing, say
+  whether a number is sessions or visitors, be careful with small
+  samples. A default is written on first start. Keep it to behaviour;
+  what a number means is already in each tool's description.
+- **`about.md`**: what the site or business is for. It starts empty.
+  Write it from the cockpit or by hand.
+- **`history.json`**: what happened to the site, so the agent can
+  explain a change instead of guessing. See below.
 
-Keep the ground rules to how you want the agent to _behave_. Facts about what a
-number means already live in each tool's own description, and a claim
-written in both places will eventually disagree with itself.
-
-Two things to know: text in this file is treated as instruction the
-agent can act on, unlike the URLs and referrers visitors supply, which
-tools explicitly flag as data only. And on a `READ_ONLY` deployment the
-MCP key is public, so anyone holding it can read this file — don't put
-anything private in it there.
+The agent treats this text as instruction, unlike visitor-supplied URLs
+and props, which it treats as data. On a `READ_ONLY` deployment the
+key is public, so these files are too: keep anything private out.
 
 ### Telling it what happened
-
-The same document carries a **history**: things that happened to the
-site or its tracking, so the agent can explain a change in the numbers
-instead of guessing at it. It lives in `history.json` beside the ground
-rules, and is a list of entries:
 
 ```json
 [
@@ -83,72 +65,36 @@ rules, and is a list of entries:
 ]
 ```
 
-`from` and `note` are required; `to` only when the entry covers a range.
-Dates are `YYYY-MM-DD` and have to be real days. Each note is shown to
-the agent on one line, so line breaks inside one become spaces — keep an
-entry to a sentence or two and write a second entry rather than a
-paragraph. An entry that doesn't
-fit is skipped and named in the document, so a typo costs that entry
-rather than the file. A file that isn't valid JSON is reported as
-unreadable — deliberately, so it can never be mistaken for "nothing
-happened".
+`from` and `note` are required, `to` is for a range. Dates are
+`YYYY-MM-DD`. Keep a note to a sentence or two. A bad entry is skipped
+and named; a file that isn't valid JSON is reported as unreadable, so
+it is never mistaken for "nothing happened".
 
-The agent is told that an empty history means nothing was written down,
-not that nothing occurred, so it won't cite one as evidence.
+You don't have to edit the file. Tell the agent what happened and it
+adds an entry with `add_history_note`. It only adds; to change or
+remove an entry, edit the file. It records only what **you** said,
+never something read from a tool result.
 
-It reaches the model vendor the same way ground rules do (see [What
-leaves your server when you ask](#what-leaves-your-server-when-you-ask)
-below), and it is free text about your own business rather than a
-sentence about how to answer — more likely to have a name in it
-("refunded Jane Doe's order") than a ground rule ever is. The same
-caution applies: on a `READ_ONLY` deployment the key is public, so don't
-put anything private in a note.
+Renaming, deleting or resetting events in the cockpit adds an entry by
+itself, marked **Recorded automatically**, because those can change
+your numbers. The cockpit asks for an optional reason and adds it to
+the entry.
 
-You don't have to edit the file by hand. Tell the agent what happened
-and it can write the entry for you with `add_history_note` — "the
-checkout was down all of Tuesday" becomes a dated line the next
-session reads. It adds entries only; changing or removing one is an
-edit to `history.json` on the server. The agent is told to record only
-what **you** said, never something it read in a tool result: URLs and
-prop values come from visitors, and this file is the one place text is
-read back as instruction.
+### Limits and writing tools
 
-Three kinds of entry write themselves, marked **Recorded
-automatically**: renaming an event, deleting one, and Reset events.
-Those are the only cockpit actions that can change your numbers — each
-leaves already collected rows under a name nothing asks about any more
-— so the agent finds that cause in the same place it looks for yours,
-instead of reporting a drop on the 12th as though the website had
-changed. Creating an event or fixing its wording changes no number and
-writes nothing.
+Two tools write: `delete_visitor_data`, which previews and asks for
+confirmation ([erasure](operations.md#deletion-and-erasure)), and
+`add_history_note`. `READ_ONLY=true` removes both.
 
-Both forms ask **why**, optionally, and put what you type on the same
-line as `Reason given: …`. It is the one moment anyone knows the answer;
-a week later the rename is a mystery to everyone including you. Leave it
-empty and the line is still written, just without the reason.
-
-Two tools write. `delete_visitor_data` previews before it deletes and
-needs an explicit confirmation — see
-[Erasure](operations.md#deletion-and-erasure) — and `add_history_note`
-appends to the history above. A deployment started with `READ_ONLY=true`
-registers neither, which is the mode for a key you mean to publish (see
-[Configuration](deploying.md#configuration)).
-
-`/mcp` accepts 60 calls a minute per address before answering 429, and
-one JSON-RPC message per request — a batched array is refused with 400.
-Both are far above what an agent working through a question needs, and
-exist so a public key cannot be used to keep the server busy.
+`/mcp` accepts 60 calls a minute per address, and one JSON-RPC message
+per request. Both are far above what an agent needs.
 
 ## What leaves your server when you ask
 
-Worth being clear about, because it is the one place the self-hosted
-story has an edge. Genug stores everything on your own machine and
-sends it nowhere on its own. But an MCP client is something else's
-client: when you ask a question, the tool results it fetches go into
-that model's context, which for a hosted assistant means they are sent
-to that vendor's API. So do the two resources described above — the
-schema registry and the deployment-context document (ground rules and
-history) — since a client reads both before it calls anything.
+Genug sends nothing anywhere on its own. But when you ask a question,
+the tool results go into the model's context. For a hosted assistant,
+that means they are sent to the vendor. So are the event definitions
+and the deployment context, which the agent reads first.
 
 Most tools return aggregates: counts, rankings, breakdowns.
 `get_recent_events` is the exception. It returns raw rows, including
@@ -164,7 +110,12 @@ Whether you need a data-processing agreement with the model vendor,
 and what to say in your privacy policy about it, is a question for your
 lawyer. Genug can't answer it for you.
 
-## Claude Code / Cursor
+## Setting up your client
+
+Client setups change over time. If a snippet doesn't work, check that
+client's current docs.
+
+### Claude Code / Cursor
 
 Both support a remote HTTP server with a custom header directly. Add to
 `.mcp.json` (Claude Code, project-scoped) or `.cursor/mcp.json`
@@ -189,7 +140,7 @@ claude mcp add --transport http genug https://data.your-domain.com/mcp \
   --header "Authorization: Bearer YOUR_MCP_API_KEY"
 ```
 
-## VS Code
+### VS Code
 
 VS Code (with GitHub Copilot's agent mode) supports a remote HTTP
 server with a custom header too, but its config uses a `servers` key
@@ -219,7 +170,7 @@ or run **MCP: Open User Configuration** for every workspace:
 The `inputs` entry makes VS Code ask for the key once and store it
 itself, so a `.vscode/mcp.json` you commit doesn't carry it.
 
-## Claude Desktop
+### Claude Desktop
 
 Claude Desktop's remote-server support doesn't cover a static Bearer
 header directly (as of writing) — it needs a local stdio bridge via
@@ -241,7 +192,7 @@ header directly (as of writing) — it needs a local stdio bridge via
 }
 ```
 
-## claude.ai
+### claude.ai
 
 Add a custom connector in claude.ai's settings, with the URL
 `https://data.your-domain.com/mcp` and an `Authorization` header of
@@ -255,6 +206,3 @@ lawyer whether your plan's terms are enough for your data before you
 connect (see [what leaves your server](#what-leaves-your-server-when-you-ask)).
 
 Then try the [weekly digest](digest.md) as a first prompt.
-
-MCP client config support changes over time — check each client's
-current docs if a snippet above doesn't work.

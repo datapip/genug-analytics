@@ -165,7 +165,7 @@ pulling the published image:
 ## Configuration
 
 Copy `.env.example` to `.env` and fill it in — it lists everything below,
-including the `openssl rand -hex 32` commands for the three secrets. The
+including the `openssl rand -hex 32` command for the two secrets. The
 server refuses to start if any required variable is missing, rather than
 coming up in an insecure state.
 

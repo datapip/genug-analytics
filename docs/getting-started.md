@@ -1,85 +1,38 @@
 # Getting started
 
-The short path from nothing to asking your first question. Every step
-links to the page that has the details; this one has none of its own.
+The short path from nothing to your first question. Each step links to
+the details.
 
-**On a fresh Ubuntu server, one command does steps 1–4 for you** — asks
-for the hostname, generates the three secrets, runs the container, and
-puts Caddy in front with a real certificate:
+**On a fresh Ubuntu server, one command does steps 1–4:** it asks for
+the hostname and a password, generates the MCP key, and puts Caddy in
+front for HTTPS. Point the DNS record at the server first (step 1).
 
 ```sh
 curl -fsSL https://genug-analytics.com/install.sh | sudo bash
 ```
 
-It prints the cockpit password and MCP key once at the end — save them,
-then skip to [step 5](#5-put-the-script-on-your-site). Steps 1–4 below
-are exactly what it automates, for doing it by hand instead — including
-if you're on Coolify or behind Cloudflare Tunnel, where you'd skip step
-4 either way, since they handle HTTPS for you and
-[deploying](deploying.md#installing) covers both.
-
-## What you need first
-
-- **A server reachable on the internet, with Docker installed** — or
-  just your own machine for step 3's local option, to look around
-  before committing to a domain and a server.
-- **A domain you already manage DNS for**, to add the subdomain in
-  step 1.
-- **Either a reverse proxy** (Caddy, nginx, Traefik — step 4) **or a
-  platform that terminates TLS for you** (Coolify, Cloudflare Tunnel).
-- **`openssl`**, for step 2's three secrets — already on virtually
-  every Linux and macOS machine.
-
-![The Genug Analytics cockpit: an Overview band with session, event, rejected and bot counts, then a traffic trend chart and cards ranking top pages, top referrers and device types](assets/cockpit.png)
+Save the key and password it prints, then go to [step 5](#5-put-the-script-on-your-site).
+On Coolify or anything else, see [installing](deploying.md#installing).
 
 ## 1. Pick a hostname
 
-The collector has to live on a **subdomain of the site it tracks**:
-`data.your-domain.com` for `your-domain.com`. Not a different
-domain, not a hosting provider's shared one. Get this wrong and nothing
-looks broken, but consenting visitors are forgotten every day.
+Use a **subdomain of the site you track**, such as
+`data.your-domain.com`. Add an `A` record for it pointing at your
+server, **unproxied** (DNS-only on Cloudflare). Give it a few minutes.
 → [The hostname](deploying.md#the-hostname)
-
-Add the DNS record now: an `A` record for the subdomain (e.g. `data`)
-pointing at your server's IP address (e.g. `1.23.45.67`), **unproxied**
-— on Cloudflare that means DNS-only rather than the orange cloud, or
-step 4's certificate request never completes. It needs a few minutes
-to propagate, and step 4 needs it already working.
 
 ## 2. Generate your secrets
 
-Two secrets, no defaults — the server refuses to start without them,
-deliberately, rather than coming up in an insecure state. Run this
-twice and keep both results somewhere safe, like a password manager;
-you'll paste them into the next step:
+Run this twice, once for `MCP_API_KEY` and once for
+`COCKPIT_PASSWORD`, and keep both in a password manager:
 
 ```sh
 openssl rand -hex 32
 ```
 
-Which one is which doesn't matter yet — you'll assign them to
-`MCP_API_KEY` and `COCKPIT_PASSWORD` in a moment. Just
-don't lose track of which value you used where.
-
 ## 3. Run it
 
-For a first look on your own machine, with no server or domain needed
-yet:
-
-```sh
-npm install
-npm run build
-DB_PATH=./genug.db \
-ALLOWED_ORIGIN=https://your-tracked-site.com \
-TIMEZONE=Europe/Berlin \
-MCP_API_KEY=<first-secret> \
-COCKPIT_PASSWORD=<second-secret> \
-node server/dist/index.js
-```
-
-For a real deployment, on a server with Docker installed, use the
-image instead, with `/data` on a persistent volume so the database
-survives a redeploy:
+On a server with Docker, keeping `/data` on a volume:
 
 ```sh
 docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
@@ -87,25 +40,19 @@ docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
   -e TIMEZONE=Europe/Berlin \
   -e MCP_API_KEY=<first-secret> \
   -e COCKPIT_PASSWORD=<second-secret> \
+  -e TRUST_PROXY=1 \
   -v genug-data:/data \
   ghcr.io/datapip/genug-analytics:v0.11.0
 ```
 
-`-p 127.0.0.1:3000:3000` binds the container to the machine itself,
-not the internet — step 4 puts a reverse proxy in front of it, and
-nothing else needs to reach port 3000 directly.
-→ [Build and run with Docker](deploying.md#build-and-run-with-docker),
-[Deploying on Coolify](deploying.md#deploying-on-coolify),
-[Configuration](deploying.md#configuration) for what each variable does
+It listens only on the machine itself; step 4 puts HTTPS in front.
+`TRUST_PROXY=1` tells it there is one proxy.
+→ [Configuration](deploying.md#configuration)
 
 ## 4. Put a reverse proxy in front of it
 
-The browser needs `https://data.your-domain.com` — the cockpit's
-login cookie won't even be set over plain HTTP — and the `docker run`
-above only gives you HTTP on a port number. [Caddy](https://caddyserver.com/docs/install)
-is the least fiddly way to close that gap on a fresh Linux box: it
-requests and renews the TLS certificate itself, no separate `certbot`
-step. Install it, then put this in `/etc/caddy/Caddyfile`:
+[Install Caddy](https://caddyserver.com/docs/install), put this in
+`/etc/caddy/Caddyfile`, and run `sudo systemctl reload caddy`:
 
 ```
 data.your-domain.com {
@@ -113,31 +60,12 @@ data.your-domain.com {
 }
 ```
 
-```sh
-sudo systemctl reload caddy
-```
-
-That's it, as long as the DNS record from step 1 already resolves to
-this server and ports 80/443 are open in its firewall — Caddy answers
-Let's Encrypt's validation request itself on first load.
-
-One thing changes on the container now that something sits in front
-of it: **add `-e TRUST_PROXY=1`** to the `docker run` command and
-restart it. Without it the server logs Caddy's own address for every
-visitor instead of theirs, which breaks both the daily visitor-id hash
-and the `/events` rate limiter. → [Configuration](deploying.md#configuration)
-for what the number means and when to raise it to `2` instead (Cloudflare
-in front of Caddy, for instance).
-
-Already on Coolify, or behind Cloudflare Tunnel, or terminating TLS
-some other way? Skip this step — [deploying](deploying.md) has the
-`TRUST_PROXY` value and the Cloudflare-specific caveats for those
-setups instead.
+Caddy gets the certificate itself, once the DNS record resolves and
+ports 80/443 are open.
 
 ## 5. Put the script on your site
 
-Early in `<head>`. Nothing fires on its own until you turn page
-tracking on, which is what the config object does:
+Early in `<head>`:
 
 ```html
 <script>
@@ -152,33 +80,27 @@ and your own events
 
 ## 6. Watch the first event arrive
 
-Open `https://data.your-domain.com/cockpit` with the
-`COCKPIT_PASSWORD` you set (any username). Load a page on your site and
-it shows up under **Recent events**. If it doesn't:
+Open `https://data.your-domain.com/cockpit` and sign in with
+`COCKPIT_PASSWORD`. Load a page on your site, and it shows up under
+**Recent events**. If it doesn't:
 
-- Check the **Rejected** count in the top strip — it says why.
-- Check the browser's console on your tracked site — an origin that
-  isn't in `ALLOWED_ORIGIN` fails there as a CORS error, and never
-  reaches the server's logs at all.
-- If signing in to the cockpit seems to work but immediately asks you
-  to sign in again, it's being served over plain HTTP — the session
-  cookie needs HTTPS to be set. Confirm step 4 is actually in front of
-  it: load the `https://` URL, not `http://` or the bare `:3000` port.
+- The **Rejected** count says why the server refused it.
+- A CORS error in the browser console means the site isn't in
+  `ALLOWED_ORIGIN`.
+- If sign-in keeps asking again, you're on plain HTTP. Use the
+  `https://` address.
 
 ## 7. Connect an AI agent
 
-Point any MCP client at `/mcp` with the `MCP_API_KEY`. For Claude Code
-it is one line:
+For Claude Code it is one line; other clients are in [mcp.md](mcp.md):
 
 ```sh
 claude mcp add --transport http genug https://data.your-domain.com/mcp \
   --header "Authorization: Bearer YOUR_MCP_API_KEY"
 ```
 
-Then ask it: _"What were my top pages this week, and where did that
+Then ask: _"What were my top pages this week, and where did that
 traffic come from?"_
-→ [Connecting an AI agent](mcp.md), including what you can ask and
-what leaves your server when you do
 
 ## Before you go live
 
