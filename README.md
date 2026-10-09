@@ -33,7 +33,8 @@ The shape of things may still change before 1.0; see
 - **Radically small.** One Node process, one SQLite file. Your own
   events are one JSON file each, live the moment you save.
 - **Privacy by architecture.** No cookie by default: the visitor ID is
-  a daily-changing hash, and the address it comes from is never stored.
+  a daily-changing hash, and the address it comes from is never stored
+  in the database.
   Query strings are filtered before storage. Consent switches on a
   first-party cookie, and an opt-out is built in.
 

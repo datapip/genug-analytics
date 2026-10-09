@@ -28,6 +28,9 @@ The config options:
   `genug_vid` cookie. Unset leaves a returning visitor's cookie alone.
   To switch without a reload, call
   `window.genugAnalytics.setConsent(true)` from your banner's callback.
+  `setConsent(false)` deletes the cookie only with the next event sent,
+  usually the next page view. `optOut()` deletes it at once, but also
+  stops all counting in that browser.
 - **`enableAutoPageTracking`** (default `false`): see
   [tracking page loads](#tracking-page-loads).
 - **`enableAutoLinkTracking`** (default `false`): see

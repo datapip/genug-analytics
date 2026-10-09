@@ -10,8 +10,8 @@ whether your setup is lawful is a question for your lawyer.
 nothing on the visitor's device: no `localStorage` or
 `sessionStorage`, and no fingerprinting (no canvas, screen, font or
 hardware probing). The script reads the page URL, title and
-`<html lang>`, the referrer, and any clicked link.
-The visitor ID is a hash of three things:
+`<html lang>`, the referrer, its own opt-out cookie, and clicked links
+once `enableAutoLinkTracking` is on. The visitor ID is a hash of three things:
 
 - the visitor's address, cut to its network block (IPv4 to `/24`, IPv6
   to `/48`: `203.0.113.47` becomes `203.0.113.0`);
@@ -20,18 +20,27 @@ The visitor ID is a hash of three things:
 
 So the same person gets a new ID every day, and two people sharing a
 network block and a browser count as one. The salt lives in one file
-beside the database (`daily-salt.json`), and no backup copies it.
-While today's salt exists, someone with access to the server can
+beside the database (`daily-salt.json`), and Genug's own backup never
+copies it. While today's salt exists, someone with access to the server can
 recompute today's ID from a known address and User-Agent. After
-midnight, nobody can.
+midnight, nobody can, with two exceptions:
+
+- A server stopped over midnight keeps the old salt until it starts
+  again, and replaces it then.
+- A snapshot of the whole volume or server, taken by your hosting
+  provider, copies the salt file with everything else. Exclude it, or
+  keep such snapshots no longer than a day.
 
 **With consent**, Genug sets a first-party cookie, `genug_vid`, so a
 returning visitor is recognised across days. It holds the visitor ID
 and nothing else. Its value is that day's hash, so the visitor's
 earlier events from the same day join the same ID. It is
 `HttpOnly; Secure; SameSite=Lax`, and it expires 13 months after the
-visitor's last event, so a regular visitor keeps it. It is cleared when
-the visitor withdraws consent.
+visitor's last event, so a regular visitor keeps it. Only the server
+can delete it. That happens with the next event sent after
+`setConsent(false)`, usually the next page view, or at once on
+`optOut()`. `optOut()` also stops all counting in that browser, so use
+it for withdrawal only if that is what you want.
 
 Consent decides _how_ a visitor is identified, not _whether_ events
 are recorded. Without consent, events are still stored under the daily
@@ -83,15 +92,18 @@ them. Ad click ids
 person, and `*` keeps everything, emails and tokens included.
 
 **Two side tables** hold almost no visitor data. Rejected requests keep
-a reason and a message of up to 200 characters, which can quote part of
-the bad request. Bot activity keeps an hourly count. Both are deleted
+the time, the event name tried, a reason and a message of up to 200
+characters, which can quote part of the bad request. Bot activity keeps an hourly count. Both are deleted
 with everything else after `RETENTION_DAYS`
 ([retention](operations.md#retention), 396 days by default).
 
-**The server log** is the one place an address is written. When the
+**Genug's own log** is the one place it writes an address. When the
 rate limiter refuses a client, it logs that client once a minute, so
-you can tell a runaway script from a busy office. IPv4 addresses are
-logged whole, IPv6 addresses as a `/48` block.
+you can tell a runaway script from a busy office. Too many wrong
+danger-zone passwords in the cockpit log the address that typed them.
+IPv4 addresses are logged whole, IPv6 addresses as a `/48` block. The
+reverse proxy in front of Genug usually logs every visitor's full
+address too; that is your proxy's setting, not Genug's.
 
 ## Keeping personal data out
 
@@ -154,6 +166,9 @@ Genug can't answer these for you:
 - Which data-processing agreements do you need: with your hosting
   provider, with the AI vendor, with anyone running the server for
   you?
+- Does hashing the address and User-Agent without consent need
+  consent itself (§ 25 TDDDG, Art. 5(3) ePrivacy)? Regulators read
+  that rule broadly, and "no cookie" doesn't settle it.
 - How do you answer an access or erasure request? Read
   [erasure](operations.md#deletion-and-erasure) first: a consentless
   visitor can't be looked up.
@@ -184,7 +199,7 @@ apply, and have your lawyer add the legal basis and check the rest.
 > with your browser's identification string and a key that changes
 > every day, and store only a hash of the result. We can therefore
 > recognise repeated visits on the same day, but not across days. The
-> key is random and is deleted at the end of each day. After that,
+> key is random and is replaced at the end of each day. After that,
 > nobody, including us, can link the stored code to an IP address. If
 > our server blocks unusually many requests from one address, it writes
 > that address to a log, which is kept for [period].
@@ -198,9 +213,10 @@ apply, and have your lawyer add the legal basis and check the rest.
 > string. Events from earlier that day are then linked to it. It
 > expires 13 months after your last visit. You can withdraw your
 > consent at any time in [link to cookie settings]; the cookie is then
-> deleted.]
+> deleted [at once / with the next page you view].]
 >
-> **Retention.** Records are deleted automatically after [13 months].
+> **Retention.** Records are deleted automatically after [13 months]
+> [, and from backups up to 7 days later].
 > [The `genug_vid` cookie lasts 13 months after your last visit.] The
 > `genug_optout` cookie lasts 400 days.
 >
@@ -208,17 +224,18 @@ apply, and have your lawyer add the legal basis and check the rest.
 > store a cookie named `genug_optout` in your browser, which says only
 > that you opted out, and record nothing more from this browser. It
 > applies only to this website address and this browser. The website
-> works the same after you opt out. We cannot
-> link data already recorded to you, because we do not know which hash
+> works the same after you opt out. [If you did not consent, we cannot
+> link data from before today to you, because we do not know which hash
 > is yours. So we cannot find or delete it individually; it is deleted
-> with everything else after [13 months].
+> with everything else after [13 months].]
 >
 > **Recipients.** The server is hosted by [name]. [[Name] runs it for
 > us.] [To
 > analyse the statistics we use [AI provider]. It receives aggregated
 > figures and, where needed, individual records: page address, time,
 > referring address, device type, browser, a session code and event
-> details. It does not receive the visitor hash. [It is based in
+> details. It does not receive the visitor hash, except when we ask it
+> to delete one visitor's data. [It is based in
 > [country].]]
 
 Notes on the brackets:
@@ -230,7 +247,19 @@ Notes on the brackets:
   `enableAutoLinkTracking` is on. List your own events by what they
   record, not by their names.
 - **The server log.** State how long your host keeps logs, or point to
-  the policy's general server-log section.
+  the policy's general server-log section. Your reverse proxy's access
+  log belongs there too.
+- **Withdrawal.** "At once" only if your withdrawal button calls
+  `optOut()`, which also stops all counting; otherwise "with the next
+  page you view".
+- **Backups.** Genug's own snapshots keep rows up to 7 days. Name
+  any off-host copy and how long you keep it.
+- **The salt.** "Nobody can link" holds only if your host's volume
+  snapshots skip `daily-salt.json` or last no more than a day.
+- **Opting out, already recorded data.** The bracketed sentences hold
+  for visitors without consent, and only for days before today. A
+  consenting visitor's data can be found by the cookie's value. Ask
+  your lawyer how to word access and erasure requests.
 - **The consent paragraph.** Only if your banner calls `setConsent`.
   If you [load the script only after consent](client.md#loading-only-after-consent),
   remove the first sentence of "How we tell visits apart" and replace

@@ -18,7 +18,8 @@ type Middleware = (req: Request, res: Response, next: NextFunction) => void;
 // refuses the right key is one any stranger on the same address can
 // trigger; one that lets the right key through still tells a guesser
 // right from wrong, so it bounds nothing. What bounds guessing is the
-// keyless budget and the key's length (parseMcpApiKey in env.ts).
+// keyless budget and the key's length (shortMcpApiKeyWarning in env.ts
+// warns when it is short).
 export function createMcpAuthMiddleware(
   apiKey: string,
   limiters: { keyed: Middleware; keyless: Middleware } = {

@@ -89,7 +89,7 @@ don't need to connect this repo. Every release is published to
 ```yaml
 services:
   genug:
-    image: "ghcr.io/datapip/genug-analytics:v0.11.0" # the latest released tag
+    image: "ghcr.io/datapip/genug-analytics:v0.12.0" # the latest released tag
     environment:
       - "ALLOWED_ORIGIN=${ALLOWED_ORIGIN}"
       - "TIMEZONE=${TIMEZONE}"

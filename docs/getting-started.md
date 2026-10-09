@@ -42,7 +42,7 @@ docker run --rm -d --name genug -p 127.0.0.1:3000:3000 \
   -e COCKPIT_PASSWORD=<second-secret> \
   -e TRUST_PROXY=1 \
   -v genug-data:/data \
-  ghcr.io/datapip/genug-analytics:v0.11.0
+  ghcr.io/datapip/genug-analytics:v0.12.0
 ```
 
 It listens only on the machine itself; step 4 puts HTTPS in front.

@@ -7,13 +7,13 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
-## Unreleased
+## 0.12.0 — 2026-10-09
 
 **Added**
 
 - **`get_collection_health` tells the agent whether events are still
   arriving.** It compares the quiet time since the last event with the
-  longest quiet stretch in the last 14 days, for all events and for page
+  longest quiet stretch in the 14 days before it, for all events and for page
   views separately. A long silence is a reason to look, not proof that
   tracking broke.
 - **`get_traffic_change` tells the agent whether a rise or drop is real.**
@@ -34,11 +34,19 @@ how a version is cut.
 - **A warning at startup if `MCP_API_KEY` is shorter than 32
   characters**, since the key's length now carries the protection the
   lockout gave. A key from the install script or `openssl rand -hex 32`
-  is 64.
+  is 64. If yours is shorter, replace it when you upgrade.
 
 **Fixed**
 
 - A restart or redeploy no longer loses up to an hour of bot counts.
+- **The privacy template in `docs/privacy.md` promised too much.** If
+  you copied it, check four sentences: withdrawing consent deletes the
+  `genug_vid` cookie with the next page view, not at once; backups keep
+  rows up to 7 days past retention; your host's server snapshots can
+  copy the daily salt; and "we cannot find your data" holds only
+  without consent and only for past days.
+- Too many wrong danger-zone passwords now log an IPv6 address as its
+  `/48`, like every other address Genug logs.
 
 ## 0.11.0 — 2026-09-30
 

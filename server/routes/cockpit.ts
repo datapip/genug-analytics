@@ -28,6 +28,7 @@ import {
   getTrafficByHour,
 } from "../lib/traffic.js";
 import { getTopPages, getTopReferrers } from "../lib/content.js";
+import { limiterKey } from "../lib/ip.js";
 import { getStoredEventCounts } from "../lib/events.js";
 import {
   getDeviceTypeBreakdown,
@@ -885,7 +886,9 @@ function confirmPassword(
     if (recordConfirmationFailure()) {
       logInfo(
         "Too many wrong danger-zone passwords — every cockpit session was signed out",
-        { ip },
+        // Narrowed like the rate limiter's log, so an IPv6 address is
+        // written as its /48 (docs/privacy.md, "The server log").
+        { ip: limiterKey(ip) },
       );
       res.status(401).json({
         ok: false,
