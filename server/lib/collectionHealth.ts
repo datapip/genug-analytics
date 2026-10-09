@@ -21,8 +21,8 @@ export interface Silence {
   // The newest one stored, over all time (not only the lookback).
   lastSeen: string | null;
   hoursSince: number | null;
-  // The longest quiet stretch between two events in the lookback,
-  // not counting the one that is still going on.
+  // The longest quiet stretch between two events in the lookback that
+  // ends at lastSeen, so never the one that is still going on.
   longestEarlierGapHours: number | null;
   verdict: SilenceVerdict;
 }
@@ -68,7 +68,13 @@ function silence(
   }
 
   const hoursSince = (now.getTime() - Date.parse(range.last)) / HOUR_MS;
-  const since = new Date(now.getTime() - LOOKBACK_DAYS * DAY_MS).toISOString();
+  // The window ends at the last event, not at now. Ending it at now
+  // would leave a site dead for longer than the lookback with no events
+  // to learn from, and it would answer too_little_to_tell exactly when
+  // tracking has been broken longest.
+  const since = new Date(
+    Date.parse(range.last) - LOOKBACK_DAYS * DAY_MS,
+  ).toISOString();
   // LAG pairs each event with the one before it; the biggest difference
   // is the longest silence the site has had inside the window.
   const gap = db
@@ -77,10 +83,10 @@ function silence(
        FROM (
          SELECT ts, LAG(ts) OVER (ORDER BY ts) AS prev
          FROM events
-         WHERE ts BETWEEN @since AND @now${filter}
+         WHERE ts BETWEEN @since AND @last${filter}
        )`,
     )
-    .get({ since, now: nowIso, ...bound }) as { hours: number | null };
+    .get({ since, last: range.last, ...bound }) as { hours: number | null };
 
   const historyDays = (now.getTime() - Date.parse(range.first)) / DAY_MS;
   // Fewer than two events in the window leaves no gap to learn from, and

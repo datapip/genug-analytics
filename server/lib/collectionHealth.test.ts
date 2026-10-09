@@ -67,6 +67,29 @@ test("a single event in the window leaves no gap to learn from", () => {
   assert.equal(health.events.verdict, "too_little_to_tell");
 });
 
+test("a site silent for longer than the lookback is longer_than_usual", () => {
+  const db = setupDb();
+  // Hourly for two months, then nothing for fifteen days. Learned from
+  // the two weeks before now, there would be no events at all and the
+  // answer would be too_little_to_tell for the worst outage there is.
+  seed(db, "page_view", 1, 15 * 24, 60);
+  const health = getCollectionHealth(db, NOW, "page_view");
+  assert.equal(health.events.longestEarlierGapHours, 1);
+  assert.equal(health.events.verdict, "longer_than_usual");
+  assert.equal(health.pageViews.verdict, "longer_than_usual");
+});
+
+test("a quiet site is judged on the gaps before its last event", () => {
+  const db = setupDb();
+  // One event every four days, the last ten days ago: only one of them
+  // falls in the two weeks before now, but several in the two weeks
+  // before the last one.
+  seed(db, "page_view", 96, 10 * 24, 30);
+  const { events } = getCollectionHealth(db, NOW, "page_view");
+  assert.equal(events.longestEarlierGapHours, 96);
+  assert.equal(events.verdict, "longer_than_usual");
+});
+
 test("a silence inside the usual range is normal", () => {
   const db = setupDb();
   seed(db, "page_view", 12, 5, 10);
