@@ -63,79 +63,85 @@ interface Window {
   };
 }
 
-// Extensions treated as a download when clicked. Necessarily a guess —
-// a URL's extension is a hint, not a declaration — so this is
-// best-effort in the same documented way as bot detection: it catches
-// the ordinary cases and doesn't pretend to be exhaustive. A link
-// carrying an explicit `download` attribute skips this list entirely,
-// since that one isn't a guess at all.
-const DOWNLOAD_EXTENSION =
-  /\.(pdf|zip|rar|7z|tar|gz|tgz|doc|docx|xls|xlsx|ppt|pptx|csv|rtf|txt|dmg|exe|msi|pkg|deb|rpm|apk|iso|epub|mp3|wav|mp4|mov|avi|mkv)$/i;
-
-// Long enough to identify which link was clicked, short enough that a
-// whole paragraph wrapped in an <a> doesn't become the prop value.
-const MAX_LINK_TEXT_LENGTH = 120;
-
-function isDownloadLink(anchor: HTMLAnchorElement): boolean {
-  return (
-    anchor.hasAttribute("download") || DOWNLOAD_EXTENSION.test(anchor.pathname)
-  );
-}
-
-function fileExtension(pathname: string): string {
-  const match = /\.([a-z0-9]+)$/i.exec(pathname);
-  return match ? match[1]!.toLowerCase() : "";
-}
-
-// Link text arrives with whatever indentation the page's HTML happens to
-// have, so it's collapsed to single spaces — otherwise the same link
-// yields different prop values on different pages and fragments any
-// grouping by it.
-function collapseLinkText(text: string | null): string {
-  return (text ?? "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAX_LINK_TEXT_LENGTH);
-}
-
-// Query parameters and fragments worth keeping. Everything else is
-// dropped before the URL leaves the browser at all: a newsletter link's
-// ?email=, a magic link's single-use token, a search page's typed query,
-// an OAuth response's access_token in the fragment. The server drops the
-// same set again for anything POSTing to /events directly (see
-// server/lib/url.ts) — this copy is what keeps it out of the request in
-// the first place.
-//
-// This file is an import-free classic script, so it can't read the
-// server's lists. The server writes them in instead, replacing the
-// placeholder string below as it serves the file (server/lib/
-// clientScript.ts). "*" keeps everything; a list keeps only those
-// values. Served without that step, the placeholder is neither, so
-// every parameter and fragment is dropped: fails closed.
-interface KeptUrlParts {
-  params: "*" | string[];
-  hashes: "*" | string[];
-}
-const KEPT_URL_PARTS = "__GENUG_KEPT_URL_PARTS__" as unknown as KeptUrlParts;
-
-function keeps(kept: KeptUrlParts["params"] | undefined, value: string) {
-  return kept === "*" || (Array.isArray(kept) && kept.includes(value));
-}
-
-function strippedUrl(href: string): string {
-  const url = new URL(href);
-  for (const key of [...url.searchParams.keys()]) {
-    // Held lowercased by the server: a hand-typed utm_Source is plainly
-    // the same parameter. Fragments are matched exactly.
-    if (!keeps(KEPT_URL_PARTS.params, key.toLowerCase())) {
-      url.searchParams.delete(key);
-    }
-  }
-  if (!keeps(KEPT_URL_PARTS.hashes, url.hash.slice(1))) url.hash = "";
-  return url.toString();
-}
-
+// Everything, helpers included, lives inside this function. A top-level
+// const or function in a classic script is a global on the site that
+// embeds it: a name the site already uses either throws here, killing
+// tracking, or quietly replaces the site's own. Only window.genugAnalytics
+// is meant to be left behind.
 (function (): void {
+  // Extensions treated as a download when clicked. Necessarily a guess —
+  // a URL's extension is a hint, not a declaration — so this is
+  // best-effort in the same documented way as bot detection: it catches
+  // the ordinary cases and doesn't pretend to be exhaustive. A link
+  // carrying an explicit `download` attribute skips this list entirely,
+  // since that one isn't a guess at all.
+  const DOWNLOAD_EXTENSION =
+    /\.(pdf|zip|rar|7z|tar|gz|tgz|doc|docx|xls|xlsx|ppt|pptx|csv|rtf|txt|dmg|exe|msi|pkg|deb|rpm|apk|iso|epub|mp3|wav|mp4|mov|avi|mkv)$/i;
+
+  // Long enough to identify which link was clicked, short enough that a
+  // whole paragraph wrapped in an <a> doesn't become the prop value.
+  const MAX_LINK_TEXT_LENGTH = 120;
+
+  function isDownloadLink(anchor: HTMLAnchorElement): boolean {
+    return (
+      anchor.hasAttribute("download") ||
+      DOWNLOAD_EXTENSION.test(anchor.pathname)
+    );
+  }
+
+  function fileExtension(pathname: string): string {
+    const match = /\.([a-z0-9]+)$/i.exec(pathname);
+    return match ? match[1]!.toLowerCase() : "";
+  }
+
+  // Link text arrives with whatever indentation the page's HTML happens to
+  // have, so it's collapsed to single spaces — otherwise the same link
+  // yields different prop values on different pages and fragments any
+  // grouping by it.
+  function collapseLinkText(text: string | null): string {
+    return (text ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_LINK_TEXT_LENGTH);
+  }
+
+  // Query parameters and fragments worth keeping. Everything else is
+  // dropped before the URL leaves the browser at all: a newsletter link's
+  // ?email=, a magic link's single-use token, a search page's typed query,
+  // an OAuth response's access_token in the fragment. The server drops the
+  // same set again for anything POSTing to /events directly (see
+  // server/lib/url.ts) — this copy is what keeps it out of the request in
+  // the first place.
+  //
+  // This file is an import-free classic script, so it can't read the
+  // server's lists. The server writes them in instead, replacing the
+  // placeholder string below as it serves the file (server/lib/
+  // clientScript.ts). "*" keeps everything; a list keeps only those
+  // values. Served without that step, the placeholder is neither, so
+  // every parameter and fragment is dropped: fails closed.
+  interface KeptUrlParts {
+    params: "*" | string[];
+    hashes: "*" | string[];
+  }
+  const KEPT_URL_PARTS = "__GENUG_KEPT_URL_PARTS__" as unknown as KeptUrlParts;
+
+  function keeps(kept: KeptUrlParts["params"] | undefined, value: string) {
+    return kept === "*" || (Array.isArray(kept) && kept.includes(value));
+  }
+
+  function strippedUrl(href: string): string {
+    const url = new URL(href);
+    for (const key of [...url.searchParams.keys()]) {
+      // Held lowercased by the server: a hand-typed utm_Source is plainly
+      // the same parameter. Fragments are matched exactly.
+      if (!keeps(KEPT_URL_PARTS.params, key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
+    if (!keeps(KEPT_URL_PARTS.hashes, url.hash.slice(1))) url.hash = "";
+    return url.toString();
+  }
+
   // A second copy of this script on the same page — a tag manager
   // alongside a hardcoded tag, a theme alongside a plugin — would
   // install a second set of listeners and fire a second page event,

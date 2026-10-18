@@ -211,8 +211,9 @@ apply to URLs stored from then on. The privacy template names the
 defaults, so update it if you add any ([privacy](privacy.md#what-gets-stored)).
 
 **`READ_ONLY=true`** removes `delete_visitor_data`, `add_history_note`
-and `get_recent_events`, and the cockpit refuses every edit. Collection
-continues. Use it for a demo or any deployment whose key is public;
+and `get_recent_events`. The cockpit refuses every edit and leaves out
+its list of recent events, for the same reason as that last tool: those
+are raw rows, not totals. Collection continues. Use it for a demo or any deployment whose key is public;
 the context files are then public too.
 
 ## Signing in to the cockpit

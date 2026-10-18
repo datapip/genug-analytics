@@ -211,7 +211,11 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     // with no consent banner (consent UI is out of v1 scope) would
     // otherwise get a card reading 100% consentless forever.
     consentBreakdown: getConsentBreakdown(db, period),
-    recentEvents: getRecentEvents(db, RECENT_EVENTS_LIMIT).rows,
+    // Withheld in read-only mode for the reason get_recent_events is
+    // (rawDataToolModules in mcp/tools.ts): these are raw rows, not an
+    // aggregate, and read-only mode is the one meant for sharing (the
+    // public demo publishes its cockpit password).
+    recentEvents: readOnly ? [] : getRecentEvents(db, RECENT_EVENTS_LIMIT).rows,
     schemaRegistry: serializeRegistry(),
     // Which registered name carries the "_pageView" role. Read from the
     // live binding per request (see AGENTS.md), never cached. The

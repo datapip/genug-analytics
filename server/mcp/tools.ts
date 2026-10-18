@@ -44,7 +44,7 @@ const toolModules: ToolRegistrar[] = [
 // handler. mcp/admin.ts is the only module that writes anything, so
 // this is the one line read-only mode has to know about.
 const writingToolModules: ToolRegistrar[] = [
-  registerAdminTools, // the one tool that writes
+  registerAdminTools, // the two tools that write
 ];
 
 // Same treatment, different reason: get_recent_events doesn't write,
@@ -52,6 +52,8 @@ const writingToolModules: ToolRegistrar[] = [
 // data (see diagnostics.ts and docs/decisions.md, "the agent reads
 // attacker-controlled text"). A public MCP key shouldn't double as a
 // raw event export any more than it should double as a write key.
+// The cockpit's #tools-read-only-note counts the tools these two lists
+// drop, in plain HTML nothing checks — change it when they change.
 const rawDataToolModules: ToolRegistrar[] = [registerRecentEventsTool];
 
 export interface McpServerOptions {

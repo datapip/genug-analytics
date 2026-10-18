@@ -139,6 +139,35 @@ async function beaconBodies(beaconCalls: BeaconCall[]): Promise<unknown[]> {
   );
 }
 
+// This script runs in someone else's page, so every name it declares at
+// the top level is a name that site can no longer use — or one it
+// already uses, which throws before this script does anything. Two
+// checks because the two kinds leak differently: a top-level function
+// or var becomes a property of window, while a const, let or class
+// lands in the global lexical scope, which no property listing shows.
+test("the script leaves nothing on the page's globals but genugAnalytics", () => {
+  const { window } = new JSDOM("<!doctype html><html></html>", {
+    runScripts: "outside-only",
+    url: "http://site.example/page",
+  });
+  const before = new Set(Object.getOwnPropertyNames(window));
+  window.eval(
+    clientScriptSource.replace(
+      '"__GENUG_KEPT_URL_PARTS__"',
+      JSON.stringify(DEFAULT_KEPT_URL_PARTS),
+    ),
+  );
+  const added = Object.getOwnPropertyNames(window).filter(
+    (name) => !before.has(name),
+  );
+  assert.deepEqual(added, ["genugAnalytics"]);
+
+  const topLevelDeclarations = clientScriptSource
+    .split("\n")
+    .filter((line) => /^(const|let|var|class|function|async)\b/.test(line));
+  assert.deepEqual(topLevelDeclarations, []);
+});
+
 test("track() sends the given event and props via sendBeacon", async () => {
   const { window, beaconCalls } = loadClient();
 

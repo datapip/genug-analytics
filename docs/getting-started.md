@@ -56,12 +56,27 @@ It listens only on the machine itself; step 4 puts HTTPS in front.
 
 ```
 data.your-domain.com {
+    encode {
+        zstd
+        gzip
+        match {
+            header Content-Type text/html*
+            header Content-Type text/css*
+            header Content-Type text/javascript*
+            header Content-Type application/javascript*
+            header Content-Type application/json*
+            header Content-Type image/svg+xml*
+        }
+    }
     reverse_proxy localhost:3000
 }
 ```
 
 Caddy gets the certificate itself, once the DNS record resolves and
-ports 80/443 are open.
+ports 80/443 are open. The `encode` block shrinks the tracking script
+every page loads to about a third of its size. It lists types instead
+of compressing everything because `/mcp` answers as an event stream,
+which Caddy can hold back while compressing.
 
 ## 5. Put the script on your site
 

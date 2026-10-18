@@ -2109,6 +2109,20 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
     }),
   });
   assert.equal(collected.status, 204);
+
+  // The stored row is counted, but never handed out as a row: the
+  // cockpit's recent-events list is the same raw export
+  // get_recent_events is, on a page anyone holding the demo link sees.
+  const after = (await (
+    await fetch(`${base}/cockpit/data?range=24h`, {
+      headers: { cookie: auth },
+    })
+  ).json()) as {
+    recentEvents: unknown[];
+    trafficSummary: { visitors: number };
+  };
+  assert.equal(after.trafficSummary.visitors, 1);
+  assert.deepEqual(after.recentEvents, []);
 });
 
 test("refuses to start on a READ_ONLY value that is neither true nor false", async (t) => {

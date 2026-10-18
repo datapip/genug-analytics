@@ -314,6 +314,9 @@
     document.getElementById("business-context-text").readOnly = readOnly;
     document.getElementById("save-business-context").hidden = readOnly;
     document.getElementById("history-form").hidden = readOnly;
+    document.getElementById("recent-read-only-note").hidden = !readOnly;
+    document.getElementById("recent-table").hidden = readOnly;
+    document.getElementById("recent-period-note").hidden = readOnly;
   }
 
   function renderRetentionNote(retentionDays) {
@@ -484,13 +487,32 @@
     if (!e.target.closest(".chart-wrap")) hideTooltip();
   });
 
+  // An empty panel names the period it is empty for. A bare "No data
+  // yet." reads as "nothing has ever arrived", and on Today, shortly
+  // after midnight, a perfectly healthy site shows exactly that. Keyed
+  // on the range the shown data was fetched for, not the picker, which
+  // moves before its data arrives.
+  const EMPTY_PERIOD_TEXT = {
+    today: "No traffic yet today.",
+    "24h": "No traffic in the last 24 hours.",
+    "7d": "No traffic in the 7 days before today.",
+    "30d": "No traffic in the 30 days before today.",
+  };
+  let shownRange = "today";
+
+  function emptyPeriodNote() {
+    return el("p", { className: "empty" }, [
+      EMPTY_PERIOD_TEXT[shownRange] || "No traffic in this period.",
+    ]);
+  }
+
   function renderTrend(rows, mode) {
     const container = document.getElementById("trend-chart");
     hideTooltip();
     clear(container);
 
     if (rows.length === 0) {
-      container.append(el("p", { className: "empty" }, ["No data yet."]));
+      container.append(emptyPeriodNote());
       return;
     }
 
@@ -755,7 +777,7 @@
     const container = document.getElementById(containerId);
     clear(container);
     if (rows.length === 0) {
-      container.append(el("p", { className: "empty" }, ["No data yet."]));
+      container.append(emptyPeriodNote());
       return;
     }
     const max = Math.max(...rows.map(getValue));
@@ -2411,9 +2433,12 @@
     button.disabled = true;
     button.classList.add("is-loading");
     try {
-      const res = await cockpitFetch(`/cockpit/data?range=${windowRange}`);
+      const range = windowRange;
+      const res = await cockpitFetch(`/cockpit/data?range=${range}`);
       if (!res.ok) throw new Error("HTTP " + res.status);
-      render(await readJson(res));
+      const data = await readJson(res);
+      shownRange = range;
+      render(data);
     } catch (err) {
       showError(err.message);
     } finally {

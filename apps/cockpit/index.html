@@ -336,11 +336,22 @@
                  24h on a quiet site and the card empties, implying
                  breakage). Every other card on the page does follow the
                  picker, so the exception has to be stated. -->
-            <span class="card-note"
+            <span class="card-note" id="recent-period-note"
               >Latest 5 overall — not filtered by the selected period</span
             >
           </div>
-          <div class="table-wrap">
+          <!-- The server sends no rows in this mode (routes/cockpit.ts),
+               so without this the table would read "No events recorded
+               yet" — a plausible statement about the site, and false. -->
+          <div class="card-body" id="recent-read-only-note" hidden>
+            <p class="schema-reload-note is-note">
+              Read-only: single events are not listed here, because each one
+              shows what one visitor did rather than a total, and read-only mode
+              is meant for sharing. Every count on this page still includes
+              them.
+            </p>
+          </div>
+          <div class="table-wrap" id="recent-table">
             <table>
               <thead>
                 <tr>
@@ -470,8 +481,10 @@
               id="tools-read-only-note"
               hidden
             >
-              One tool is missing by design: this deployment is read-only, so
-              the tool that erases a visitor's data is not registered.
+              Three tools are missing by design: this deployment is read-only,
+              so the two that write (erasing a visitor's data, adding a history
+              note) and the one that returns single events instead of totals are
+              not registered.
             </p>
             <div class="tool-list" id="mcp-tools"></div>
           </div>
