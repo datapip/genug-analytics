@@ -86,7 +86,8 @@ The built-ins record:
 parameters are kept, and the `#fragment` is dropped. The script filters
 before it sends, and the server again on arrival. That keeps a
 newsletter link's `?email=`, a reset token or a search query out of the
-database. The same filter applies to clicked links and downloads.
+database. The same filter applies to clicked links and downloads. A
+`user:password@` part in front of the host is always removed.
 You can widen the lists with `KEPT_QUERY_PARAMS` and `KEPT_HASH_VALUES`
 ([configuration](deploying.md#configuration)). What they let
 through is stored, shown in the cockpit and returned to the agent. The

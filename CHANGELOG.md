@@ -7,6 +7,90 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
+## Unreleased
+
+**Breaking**
+
+- **The `genug_vid` cookie now lasts 13 months from the last time
+  consent was confirmed, not from the last visit.** Only an event sent
+  with `consent: true`, or `setConsent(true)`, sets it again. Before,
+  every visit extended it, including visits where the page said nothing
+  about consent. Two things to do when you upgrade:
+  - **If your consent banner only reports the click**, pass the stored
+    choice as `consent: true` on every page load
+    (`docs/client.md`). Otherwise a returning visitor who
+    consented once gets a new id 13 months after that click, and counts
+    as new from then on.
+  - **Update your privacy notice** if it says the cookie lasts 13 months
+    from the last visit. The template in
+    `docs/privacy.md` now says "13 months after your
+    consent was last confirmed".
+
+  Cookies set before the upgrade keep the expiry they already have.
+
+**Changed**
+
+- **Every cockpit browser has to sign in again once.** The key that
+  signs the cockpit's session cookie used the same salt on every
+  install. It now uses a random one per install, kept as
+  `cockpit-session-salt` beside the database, so sign-ins survive
+  restarts as before. Losing the file only means signing in again.
+- **The server now sends HSTS**, telling browsers to use only HTTPS for
+  its hostname for a year. It covers that hostname on every port, so
+  anything else you open on it over plain http, such as a dashboard on
+  `:8000`, stops loading in a browser that has visited the cockpit.
+  Your site's other hostnames are not affected.
+- **With less than 512 MB free on the data volume, `/events` answers
+  `503` and stores nothing**, and the daily backup is skipped. Both are
+  logged, and collection resumes by itself once there is room.
+  `docs/operations.md` shows how to put a rate limit in
+  front on Cloudflare.
+- **The cockpit allows 120 requests a minute per address**, about 20
+  page loads. Signed in or not.
+- **`READ_ONLY=true` also hides the cockpit's list of recent events**,
+  for the same reason it hides `get_recent_events`: those are raw rows,
+  not totals. The read-only cockpit's data is cached for 30 seconds.
+- **MCP clients are now told which tools change data.**
+  `delete_visitor_data` is marked as destructive and `add_history_note`
+  as writing, so a client can ask you before calling them. Every other
+  tool is marked read-only.
+
+**Fixed**
+
+- **Erasure now overwrites the deleted rows.** Before, rows removed by
+  `delete_visitor_data` could stay readable in the database file's free
+  space and in its write-ahead log. Now they are overwritten in the file,
+  and the log is emptied once the delete finishes. Rows deleted before
+  the upgrade can still sit in free space. To clear them once, run
+  (with your `DB_PATH`, and free space the size of the database):
+
+  ```sh
+  docker exec genug node -e "require('better-sqlite3')('/data/genug.db').exec('VACUUM')"
+  ```
+
+- **Event files, ground rules, business context and history are
+  written whole or not at all.** A crash or a full disk mid-write could
+  leave an empty file, and an empty event file stops that event being
+  collected.
+- **A `user:password@` part is removed from stored URLs and
+  referrers.**
+- **The tracking script no longer leaves its helper functions on your
+  page's globals.** Only `window.genugAnalytics` remains. Before, a
+  site with a function or variable of the same name could break the
+  script, or be broken by it.
+- **Empty cockpit panels say which period they cover.**
+- **The Caddyfile in `docs/getting-started.md` now
+  compresses responses**, which makes the tracking script about a third
+  of its size. Add the `encode` block to your own Caddyfile if you
+  installed by hand.
+
+**Added**
+
+- **Each release now has a GitHub Release** with its changelog section,
+  so watching the repository for releases tells you about new versions.
+- **`SECURITY.md`** says how to report a vulnerability
+  privately, and **`CONTRIBUTING.md`** how to help.
+
 ## 0.12.0 — 2026-10-09
 
 **Added**

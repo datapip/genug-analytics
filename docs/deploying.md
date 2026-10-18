@@ -227,7 +227,12 @@ the context files are then public too.
 the server sets a session cookie that lasts 12 hours; **Log out** in the
 header clears it. Changing `COCKPIT_PASSWORD` and redeploying signs out
 every browser, which is the way to revoke access if the password has
-been somewhere it shouldn't.
+been somewhere it shouldn't. A restart or an ordinary redeploy keeps
+you signed in.
+
+The cockpit answers 120 requests a minute per address, signed in or
+not. That is about 20 page loads; a script polling `/cockpit/data`
+should leave a second between calls.
 
 The cookie is `Secure`, so the cockpit needs **https** or `localhost`.
 Over plain http on a LAN address, the browser drops the cookie and asks

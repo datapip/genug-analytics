@@ -84,7 +84,10 @@ the entry.
 
 Two tools write: `delete_visitor_data`, which previews and asks for
 confirmation ([erasure](operations.md#deletion-and-erasure)), and
-`add_history_note`. `READ_ONLY=true` removes both.
+`add_history_note`. `READ_ONLY=true` removes both. They are the only
+tools marked as changing data, and `delete_visitor_data` as
+destructive, so a client that reads MCP's tool hints can ask you before
+calling them. Every other tool is marked read-only.
 
 `/mcp` accepts 60 calls a minute per address with the right key, and
 one JSON-RPC message per request. Both are far above what an agent

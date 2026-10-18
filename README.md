@@ -126,6 +126,10 @@ npm install
 npm run build && npm test && npm run lint
 ```
 
+To send a fix back, see [CONTRIBUTING.md](CONTRIBUTING.md). Report a
+security problem privately, as [SECURITY.md](SECURITY.md) describes,
+not in an issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

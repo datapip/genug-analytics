@@ -33,32 +33,34 @@ if (start === -1) {
 const next = lines.findIndex((line, i) => i > start && line.startsWith("## "));
 const section = lines.slice(start + 1, next === -1 ? undefined : next);
 
-const blocks = [];
-let current;
+// Each source line either starts a new output line (a bullet, the first
+// line after a blank one, anything inside a code block) or continues the
+// one before it. Blank lines and indentation are kept, so nested lists
+// and code blocks come out as they were written.
+const out = [];
+let joinable = false;
+let inFence = false;
 for (const line of section) {
-  if (line.trim() === "") {
-    current = undefined;
-  } else if (current === undefined || line.startsWith("- ")) {
-    current = line.trimEnd();
-    blocks.push(current);
+  if (line.trimStart().startsWith("```")) {
+    inFence = !inFence;
+    out.push(line.trimEnd());
+    joinable = false;
+  } else if (inFence) {
+    out.push(line);
+  } else if (line.trim() === "") {
+    out.push("");
+    joinable = false;
+  } else if (joinable && !/^\s*- /.test(line)) {
+    out[out.length - 1] += ` ${line.trim()}`;
   } else {
-    blocks[blocks.length - 1] = current = `${current} ${line.trim()}`;
+    out.push(line.trimEnd());
+    joinable = true;
   }
 }
 
-if (blocks.length === 0) {
+const notes = out.join("\n").trim();
+if (notes === "") {
   console.error(`CHANGELOG.md's ${version} section is empty.`);
   process.exit(1);
 }
-
-// A blank line between paragraphs and headings, none between bullets of
-// one list, as in the source.
-let out = "";
-blocks.forEach((block, i) => {
-  if (i > 0) {
-    out +=
-      block.startsWith("- ") && blocks[i - 1].startsWith("- ") ? "\n" : "\n\n";
-  }
-  out += block;
-});
-console.log(out);
+console.log(notes);

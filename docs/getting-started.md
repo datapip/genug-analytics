@@ -104,6 +104,9 @@ Open `https://data.your-domain.com/cockpit` and sign in with
   `ALLOWED_ORIGIN`.
 - If sign-in keeps asking again, you're on plain HTTP. Use the
   `https://` address.
+- A `503` from `/events` in the browser's Network tab means the
+  server's disk has less than 512 MB free. Nothing is stored until
+  there is room again ([operations](operations.md#when-the-disk-fills-up)).
 
 ## 7. Connect an AI agent
 
