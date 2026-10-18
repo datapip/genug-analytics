@@ -35,6 +35,7 @@ import {
   getConsentBreakdown,
 } from "../lib/audience.js";
 import { getRecentEvents } from "../lib/recentEvents.js";
+import { getLastEventAt } from "../lib/collectionHealth.js";
 import { editEventFile } from "../lib/editEvent.js";
 import { createEventFile } from "../lib/createEvent.js";
 import { addEventProp } from "../lib/addEventProp.js";
@@ -171,14 +172,14 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
       return;
     }
   }
-  const body = cockpitData(windowPeriod(parsed.range, now, timezone));
+  const body = cockpitData(windowPeriod(parsed.range, now, timezone), now);
   if (readOnly) {
     readOnlyDataCache.set(parsed.range, { at: now.getTime(), body });
   }
   res.json(body);
 });
 
-function cockpitData(period: ReturnType<typeof windowPeriod>) {
+function cockpitData(period: ReturnType<typeof windowPeriod>, now: Date) {
   return {
     period,
     // The zone every day and hour on the page is in. The page formats
@@ -200,6 +201,11 @@ function cockpitData(period: ReturnType<typeof windowPeriod>) {
     retentionDays: parseRetentionDays(process.env.RETENTION_DAYS) ?? null,
     trafficSummary: getTrafficSummary(db, period, pageViewEventType),
     botActivityCount: getBotActivityCount(db, period),
+    // All time, not the selected period: "is anything arriving" is the
+    // question, and 7d and 30d leave today out. The page prints it
+    // beside its own fetch time, so a stalled script shows as a gap
+    // between the two.
+    lastEventAt: getLastEventAt(db, now),
     rejectedEventCount: getRejectedEventCount(db, period),
     // The count alone is a number nobody can act on — "1 rejected" says
     // something is broken but not what, and finding out meant asking

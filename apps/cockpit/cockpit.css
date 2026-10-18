@@ -1362,6 +1362,11 @@ td.empty {
   .updated {
     text-align: left;
   }
+  /* The zone is also in the chart caption, and here it was the part
+     that wrapped the period onto a second line of the sticky header. */
+  .period-zone {
+    display: none;
+  }
 
   /* The header is sticky, so on a phone every line it occupies is a
      line of data permanently off screen — stacked, these two captions

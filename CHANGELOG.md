@@ -7,7 +7,7 @@ While the version starts with `0.`, breaking changes are expected and
 are marked **Breaking**. See [docs/releasing.md](docs/releasing.md) for
 how a version is cut.
 
-## Unreleased
+## 0.13.0 — 2026-10-18
 
 **Breaking**
 
@@ -54,6 +54,12 @@ how a version is cut.
   `delete_visitor_data` is marked as destructive and `add_history_note`
   as writing, so a client can ask you before calling them. Every other
   tool is marked read-only.
+- **The cockpit shows when the last event arrived**, beside the time
+  it was updated, and says what the chosen period counts ("7 full days
+  before today: …") instead of only in a tooltip. It remembers the
+  period you picked last, per browser. The traffic chart is one tab
+  stop, moved through with the arrow keys, and the danger zone's
+  password fields are no longer filled in by the browser.
 
 **Fixed**
 

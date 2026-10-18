@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { migrate } from "../db/migrations.js";
 import { insertEvent } from "../db/events.js";
 import { insertRejectedEvent } from "../db/rejectedEvents.js";
-import { getCollectionHealth } from "./collectionHealth.js";
+import { getCollectionHealth, getLastEventAt } from "./collectionHealth.js";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = new Date("2026-10-07T12:00:00.000Z");
@@ -222,5 +222,17 @@ test("a row dated after now is ignored", () => {
   assert.equal(
     events.lastSeen,
     new Date(NOW.getTime() - 5 * HOUR).toISOString(),
+  );
+});
+
+test("the last event is the newest row up to now, or null", () => {
+  const db = setupDb();
+  assert.equal(getLastEventAt(db, NOW), null);
+  add(db, "page_view", new Date(NOW.getTime() - 3 * HOUR));
+  add(db, "cta_click", new Date(NOW.getTime() - HOUR));
+  add(db, "page_view", new Date(NOW.getTime() + HOUR));
+  assert.equal(
+    getLastEventAt(db, NOW),
+    new Date(NOW.getTime() - HOUR).toISOString(),
   );
 });

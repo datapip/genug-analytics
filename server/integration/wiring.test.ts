@@ -1653,9 +1653,13 @@ test("answers /cockpit/data on a database with nothing in it", async (t) => {
     "businessContext",
     "proseFieldMaxBytes",
     "history",
+    "lastEventAt",
   ]) {
     assert.ok(key in data, `/cockpit/data is missing ${key}`);
   }
+  // Null, not absent: the page reads a missing value as "no events
+  // stored", which on a healthy site would be false.
+  assert.equal(data.lastEventAt, null);
 
   // A script still on the old parameter gets told, not 7-day numbers.
   // 400, not 401: cockpitFetch treats 401 as "session ran out".

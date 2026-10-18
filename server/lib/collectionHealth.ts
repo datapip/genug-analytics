@@ -107,6 +107,20 @@ function silence(
   };
 }
 
+// The newest stored event of any kind, for the cockpit's "last event"
+// line. The same bound as silence(): a row dated after now, left by a
+// clock that was set back, would otherwise read as an event still to
+// come.
+export function getLastEventAt(
+  db: Database.Database,
+  now: Date,
+): string | null {
+  const { last } = db
+    .prepare(`SELECT MAX(ts) AS last FROM events WHERE ts <= @now`)
+    .get({ now: now.toISOString() }) as { last: string | null };
+  return last;
+}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }

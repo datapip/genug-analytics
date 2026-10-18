@@ -60,7 +60,7 @@
                 data-range="today"
                 class="active"
                 aria-pressed="true"
-                title="Since midnight in the site's time zone — updates continuously"
+                title="Since midnight in the site's time zone, including today so far"
               >
                 <span class="range-long">Today</span
                 ><span class="range-short" aria-hidden="true">T</span>
@@ -69,7 +69,7 @@
                 type="button"
                 data-range="24h"
                 aria-pressed="false"
-                title="Rolling last 24 hours — updates continuously"
+                title="Rolling last 24 hours, up to now"
               >
                 24h
               </button>
@@ -160,7 +160,10 @@
             </button>
           </div>
           <div class="header-captions">
-            <p class="period num" id="period"></p>
+            <p class="period num">
+              <span id="period"></span
+              ><span class="period-zone" id="period-zone"></span>
+            </p>
             <p class="updated num" id="updated-at"></p>
           </div>
         </div>
@@ -662,6 +665,14 @@
                 meant for clearing out test traffic before going live — it
                 cannot be undone.
               </p>
+              <!-- The password is typed again so that resetting is a
+                   deliberate act. Filled in by the browser, it is one click
+                   away, so neither field may be autofilled. "off" is
+                   ignored for passwords, and "new-password" makes Safari
+                   and Chrome offer a generated one, which they then save
+                   as the cockpit's password. "one-time-code" is filled by
+                   neither. The data attributes ask the common password
+                   managers the same. -->
               <form id="reset-form" class="danger-zone-form">
                 <label for="reset-password" class="visually-hidden"
                   >Password to reset the database</label
@@ -670,7 +681,10 @@
                   type="password"
                   id="reset-password"
                   placeholder="Cockpit password"
-                  autocomplete="current-password"
+                  autocomplete="one-time-code"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore
                   required
                 />
                 <button id="reset-database" type="submit" class="danger-button">
@@ -705,7 +719,10 @@
                   type="password"
                   id="reset-events-password"
                   placeholder="Cockpit password"
-                  autocomplete="current-password"
+                  autocomplete="one-time-code"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore
                   required
                 />
                 <button id="reset-events" type="submit" class="danger-button">

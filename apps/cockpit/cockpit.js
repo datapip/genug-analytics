@@ -266,12 +266,31 @@
   // browser's: 7d/30d are fixed local calendar days there (see
   // windowPeriod), so a viewer travelling elsewhere would otherwise see
   // a date the chart directly underneath disagrees with.
-  function renderPeriod(period, timezone) {
+  //
+  // What each range counts is said here, beside the dates, and not only
+  // in the picker's tooltips: a tooltip needs a mouse, and "7d" leaving
+  // out today is the one thing about these numbers nobody would guess.
+  function renderPeriod(period, timezone, range) {
     const opts = { timeZone: timezone };
-    const from = new Date(period.from).toLocaleDateString(DATE_LOCALE, opts);
-    const to = new Date(period.to).toLocaleDateString(DATE_LOCALE, opts);
-    document.getElementById("period").textContent =
-      from + " – " + to + " (" + zoneLabel(timezone) + ")";
+    const date = (iso) => new Date(iso).toLocaleDateString(DATE_LOCALE, opts);
+    const dateTime = (iso) =>
+      new Date(iso).toLocaleString(DATE_LOCALE, {
+        ...opts,
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+    const span = date(period.from) + " – " + date(period.to);
+    const text = {
+      today: "Since midnight, " + date(period.from),
+      "24h": "Rolling 24 hours, since " + dateTime(period.from),
+      "7d": "7 full days before today: " + span,
+      "30d": "30 full days before today: " + span,
+    }[range];
+    document.getElementById("period").textContent = text || span;
+    // A span of its own so a phone can drop it: the sticky header has
+    // no line to spare there, and the chart caption names the zone too.
+    document.getElementById("period-zone").textContent =
+      " (" + zoneLabel(timezone) + ")";
   }
 
   // The name exactly as the owner set it, which is the label they will
@@ -456,6 +475,11 @@
   // can ignore the height change its own render causes and only
   // redraw on a real width change.
   let lastTrendWidth = null;
+  // Which bucket holds the chart's one tab stop. Kept across redraws (a
+  // resize redraws), and dropped when the buckets change, since the
+  // same position then means a different hour or day. null is the
+  // newest bucket, the one most often wanted.
+  let trendFocus = { index: null, key: null };
 
   function showTooltip(x, label, sessions, events) {
     clear(tooltip);
@@ -508,6 +532,9 @@
 
   function renderTrend(rows, mode) {
     const container = document.getElementById("trend-chart");
+    // Taken before the redraw removes the focused bucket, so focus can
+    // be put back on its replacement instead of falling to <body>.
+    const hadFocus = container.contains(document.activeElement);
     hideTooltip();
     clear(container);
 
@@ -671,9 +698,18 @@
     // line or the bar itself. Focusable and labelled, unlike the
     // decorative group above: this is the chart's actual accessible
     // surface for a sighted keyboard-only visitor, who can see the
-    // shape but has no pointer to hover with — Tab reaches each bucket
-    // and reads the same values the mouse tooltip shows.
+    // shape but has no pointer to hover with.
+    //
+    // One tab stop for the whole chart, moved with the arrow keys (a
+    // roving tabindex). A stop per bucket put 24 or 30 of them between
+    // the period picker and the rest of the page.
+    const focusKey = mode + ":" + rows.length;
+    if (trendFocus.key !== focusKey)
+      trendFocus = { index: null, key: focusKey };
+    const activeIndex =
+      trendFocus.index === null ? rows.length - 1 : trendFocus.index;
     const interactive = [];
+    const hits = [];
     rows.forEach((row, i) => {
       const label = `${getFullLabel(row)}: ${fullNumber.format(row.sessions)} sessions, ${fullNumber.format(totalEvents(row))} events`;
       const hit = svgEl("rect", {
@@ -682,7 +718,7 @@
         y: TREND_PADDING.top,
         width: slotWidth,
         height: innerHeight,
-        tabindex: "0",
+        tabindex: i === activeIndex ? "0" : "-1",
         role: "img",
         "aria-label": label,
       });
@@ -708,10 +744,22 @@
       hit.addEventListener("mouseenter", show);
       // Touch has no hover, so a tap does the same job.
       hit.addEventListener("click", show);
-      hit.addEventListener("focus", show);
+      hit.addEventListener("focus", () => {
+        moveTabStop(i);
+        show();
+      });
       hit.addEventListener("blur", hideTooltip);
       interactive.push(hit, highlight);
+      hits.push(hit);
     });
+
+    function moveTabStop(i) {
+      hits[
+        trendFocus.index === null ? hits.length - 1 : trendFocus.index
+      ]?.setAttribute("tabindex", "-1");
+      hits[i].setAttribute("tabindex", "0");
+      trendFocus.index = i;
+    }
 
     const svg = svgEl(
       "svg",
@@ -720,14 +768,33 @@
         width,
         height: TREND_HEIGHT,
         class: "trend-svg",
+        role: "group",
+        // The caption alone, no "use the arrow keys": a screen reader
+        // in browse mode moves through the buckets with its own keys,
+        // and the arrow keys are only for a sighted keyboard user.
+        "aria-label": TREND_MODES[mode].caption,
       },
       [svgEl("g", { "aria-hidden": "true" }, children), ...interactive],
     );
     svg.addEventListener("mouseleave", hideTooltip);
+    svg.addEventListener("keydown", (event) => {
+      const current = hits.indexOf(document.activeElement);
+      if (current === -1) return;
+      const next = {
+        ArrowLeft: current - 1,
+        ArrowRight: current + 1,
+        Home: 0,
+        End: hits.length - 1,
+      }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      hits[Math.max(0, Math.min(hits.length - 1, next))].focus();
+    });
     container.append(svg);
+    if (hadFocus) hits[activeIndex].focus();
 
     // The same numbers as a real table, visually hidden — a
-    // read-it-all-at-once alternative to tabbing through each hit rect
+    // read-it-all-at-once alternative to stepping through each hit rect
     // above. Built from the same `rows`, so the two cannot drift.
     container.append(trendTable(rows, mode));
   }
@@ -2348,7 +2415,7 @@
     hideError();
     latestData = data;
     renderVersion(data.version, data.latestVersion);
-    renderPeriod(data.period, data.timezone);
+    renderPeriod(data.period, data.timezone, shownRange);
     renderRetentionNote(data.retentionDays);
     renderReadOnly(data.readOnly === true);
     // A form left open when the server came back read-only would render
@@ -2395,7 +2462,33 @@
     // whose last bar was 20.
     document.getElementById("updated-at").textContent =
       "Updated " +
-      new Date().toLocaleTimeString(DATE_LOCALE, { timeZone: data.timezone });
+      new Date().toLocaleTimeString(DATE_LOCALE, { timeZone: data.timezone }) +
+      " · " +
+      lastEventText(data.lastEventAt, data.timezone);
+  }
+
+  // A clock time, not "3 min ago": the page does not refresh by itself,
+  // so a relative time would go on claiming "just now" an hour later.
+  // Beside the fetch time, the gap between the two is the reading.
+  function lastEventText(lastEventAt, timezone) {
+    // "Stored", not "received": after Reset database, or on a site silent
+    // for longer than the retention period, events did arrive once.
+    if (!lastEventAt) return "no events stored";
+    const at = new Date(lastEventAt);
+    const opts = { timeZone: timezone, hour: "2-digit", minute: "2-digit" };
+    const sameDay =
+      at.toLocaleDateString(DATE_LOCALE, { timeZone: timezone }) ===
+      new Date().toLocaleDateString(DATE_LOCALE, { timeZone: timezone });
+    return (
+      "last event " +
+      (sameDay
+        ? at.toLocaleTimeString(DATE_LOCALE, opts)
+        : at.toLocaleString(DATE_LOCALE, {
+            ...opts,
+            day: "2-digit",
+            month: "2-digit",
+          }))
+    );
   }
 
   function showError(message) {
@@ -2739,27 +2832,57 @@
     .addEventListener("click", (event) => {
       const button = event.target.closest("button[data-range]");
       if (!button) return;
-      // Only crossing Today moves the trend view. Into it, Hour is the
-      // useful picture of one day — Daily or Weekday would be a single
-      // point or bar. Out of it, the view from before Today comes back,
-      // so a round trip through Today leaves the owner's choice alone.
-      const previous = windowRange;
-      windowRange = button.dataset.range;
-      if (windowRange === "today" && previous !== "today") {
-        trendModeBeforeToday = trendMode;
-        selectTrendMode("hour");
-      } else if (previous === "today" && windowRange !== "today") {
-        selectTrendMode(trendModeBeforeToday);
-      }
-      for (const b of event.currentTarget.querySelectorAll("button")) {
-        b.classList.toggle("active", b === button);
-        // Selection is otherwise conveyed by a class alone, which a
-        // screen reader cannot see: it hears three plain buttons and
-        // nothing at all changing when one is pressed.
-        b.setAttribute("aria-pressed", String(b === button));
+      selectRange(button.dataset.range);
+      try {
+        localStorage.setItem(RANGE_KEY, windowRange);
+      } catch {
+        // Storage blocked: the choice simply isn't remembered.
       }
       load();
     });
+
+  // The period picked last time, so a cockpit opened every morning on
+  // 7d does not have to be switched back from Today each time. Per
+  // browser, like the theme. Checked against the buttons: a value left
+  // by an older page, or typed in by hand, falls back to the default
+  // rather than asking the server for a range it refuses.
+  const RANGE_KEY = "genug-range";
+
+  // Sets the range and its buttons together, for a click and for the
+  // remembered choice alike. Loading is left to the caller.
+  function selectRange(range) {
+    const picker = document.getElementById("window-picker");
+    const button = [...picker.querySelectorAll("button[data-range]")].find(
+      (b) => b.dataset.range === range,
+    );
+    if (!button) return;
+    // Only crossing Today moves the trend view. Into it, Hour is the
+    // useful picture of one day — Daily or Weekday would be a single
+    // point or bar. Out of it, the view from before Today comes back,
+    // so a round trip through Today leaves the owner's choice alone.
+    const previous = windowRange;
+    windowRange = range;
+    if (windowRange === "today" && previous !== "today") {
+      trendModeBeforeToday = trendMode;
+      selectTrendMode("hour");
+    } else if (previous === "today" && windowRange !== "today") {
+      selectTrendMode(trendModeBeforeToday);
+    }
+    for (const b of picker.querySelectorAll("button")) {
+      b.classList.toggle("active", b === button);
+      // Selection is otherwise conveyed by a class alone, which a
+      // screen reader cannot see: it hears three plain buttons and
+      // nothing at all changing when one is pressed.
+      b.setAttribute("aria-pressed", String(b === button));
+    }
+  }
+
+  try {
+    const saved = localStorage.getItem(RANGE_KEY);
+    if (saved) selectRange(saved);
+  } catch {
+    // Storage blocked: start on the default, Today.
+  }
 
   document
     .getElementById("trend-granularity")
