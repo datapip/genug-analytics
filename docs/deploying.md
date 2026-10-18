@@ -29,6 +29,18 @@ breaks two things:
   consentless visitors merge into one, and the rate limiter treats your
   whole audience as one client.
 
+**Safari keeps the consent cookie for 7 days, not 13 months, when the
+collector's IP address doesn't share the first half of the website's.**
+Since Safari 16.4, a cookie set by a server whose address differs from
+the website's in its first half (for IPv4, the first two numbers) is
+capped at 7 days, however long it was set for. A consenting
+Safari visitor who comes back after more than a week counts as a new
+visitor. Nothing else changes: consentless counting doesn't use the
+cookie, and other browsers keep it for the full 13 months. Serving the
+website and the collector from the same server, or the same address
+range, avoids the cap.
+Otherwise, read returning-visitor numbers with Safari's share in mind.
+
 ### Several sites
 
 One installation can collect for several sites of **one controller**:

@@ -367,6 +367,12 @@ This detail matters architecturally, not just operationally:
   `SameSite=Lax; Secure`, host-only, no explicit `Domain` attribute
   needed) is first-party from the browser's perspective — not blocked by
   ITP, no `SameSite=None` workaround, no localStorage fallback needed.
+  One limit remains: since Safari 16.4, ITP caps a server-set cookie at
+  7 days when the server's IP address differs from the website's in its
+  first half, so a collector in another address range loses its consenting
+  Safari visitors after a week away. Documented in `docs/deploying.md`
+  rather than worked around in code: the fix is where the collector
+  runs, which is the deployment's choice.
 - **CORS can be strict, not permissive.** Since it's single-tenant, the
   collector's `/events` route only ever needs to accept requests from
   one known origin: the client's own domain, read from config. Do not
