@@ -88,6 +88,69 @@ export function getTopLanguages(
   );
 }
 
+export interface CountryCount {
+  // A two-letter code; "ZZ" when the lookup ran and found none (see
+  // lib/country.ts).
+  country: string;
+  sessions: number;
+}
+
+// Where visitors are, by the country of their shortened address
+// (lib/country.ts). Counted in sessions, attributed to the session's
+// first event, for the same reasons as getTopLanguages above: one
+// consentless visitor_id can cover several people behind one address,
+// and a session must land in exactly one row or the shares overrun.
+//
+// Sessions no lookup ran for (stored before COUNTRY_LOOKUP was on, or
+// with it off) are counted beside the ranking, not in it: as a row they
+// could be cut by the limit while still inside `total`, and then no
+// share read off the result would be right.
+export function getTopCountries(
+  db: Database.Database,
+  period: Period,
+  limit: number,
+  segment: SegmentClause = NO_SEGMENT,
+): Ranked<CountryCount> & { notLookedUp: number } {
+  const rows = db
+    .prepare(
+      `SELECT country, MIN(ts) AS first_ts
+       FROM events
+       WHERE ts BETWEEN @from AND @to${segment.sql}
+       GROUP BY session_id`,
+    )
+    .all({
+      from: period.from,
+      to: period.to,
+      ...segment.params,
+    }) as { country: string | null }[];
+
+  const lookedUp = rows.filter((row) => row.country !== null);
+  return {
+    ...mapRanked(
+      rankSessionsBy(lookedUp, (row) => row.country!, limit),
+      ({ key, sessions }) => ({ country: key, sessions }),
+    ),
+    notLookedUp: rows.length - lookedUp.length,
+  };
+}
+
+// Whether any row in the period has a country, which tells a country
+// that really had no sessions from a lookup that never ran.
+export function periodHasCountries(
+  db: Database.Database,
+  period: Period,
+): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM events
+         WHERE ts BETWEEN @from AND @to AND country IS NOT NULL
+         LIMIT 1`,
+      )
+      .get({ from: period.from, to: period.to }) !== undefined
+  );
+}
+
 export interface ConsentModeCount {
   events: number;
   visitors: number;

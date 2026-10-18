@@ -134,3 +134,14 @@ export function parseUpdateCheckEnabled(value: string | undefined): boolean {
   if (value === "false") return false;
   throw new Error(`UPDATE_CHECK must be "true" or "false", got: ${value}`);
 }
+
+// Off unless set to "true": turning it on stores something a
+// deployment's privacy notice has to mention (docs/privacy.md), so an
+// upgrade must never start it unasked. A misspelling throws, like
+// READ_ONLY, rather than quietly meaning either answer.
+export function parseCountryLookup(value: string | undefined): boolean {
+  if (value === undefined || value === "") return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`COUNTRY_LOOKUP must be "true" or "false", got: ${value}`);
+}

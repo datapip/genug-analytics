@@ -26,6 +26,15 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+# The IP-to-country table COUNTRY_LOOKUP=true reads, fetched whenever
+# the source changed since the last build, which every release does.
+# Fetched whether or not a deployment turns the lookup on, so one image
+# serves both; a failed download fails the build.
+RUN node scripts/fetch-country-data.mjs
+# Loaded once, here, so a table upstream changed the shape of fails the
+# build rather than the first deployment that turns the lookup on.
+RUN node -e "import('./server/dist/lib/country.js').then((m) => m.loadCountryTable('server/country-data'))"
+
 # Drop devDependencies (typescript, eslint, ...) from node_modules —
 # nothing past this point needs them to run the already-built output.
 RUN npm prune --omit=dev

@@ -565,6 +565,7 @@ function visit(
     deviceType?: string;
     browser?: string;
     visitorLanguage?: string;
+    country?: string;
     ts?: string;
   } = {},
 ) {
@@ -578,6 +579,7 @@ function visit(
     deviceType: extra.deviceType,
     browser: extra.browser,
     visitorLanguage: extra.visitorLanguage,
+    country: extra.country,
     props: {},
   });
 }
@@ -613,6 +615,32 @@ test("a deviceType or browser condition selects the sessions on it", () => {
     ]).sessions,
     1,
   );
+});
+
+test("a country condition selects the sessions from it, ZZ included", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://example.com/", { country: "DE" });
+  visit(db, "s2", "https://example.com/", { country: "DE" });
+  visit(db, "s3", "https://example.com/", { country: "ZZ" });
+  visit(db, "s4", "https://example.com/");
+
+  assert.equal(summaryFor(db, [{ kind: "country", value: "DE" }]).sessions, 2);
+  assert.equal(summaryFor(db, [{ kind: "country", value: "ZZ" }]).sessions, 1);
+});
+
+// A session that changed network midway (a VPN switched on) is filed
+// under its first country by getTopCountries, so the segment has to
+// agree, or one session is counted under DE and segmented as AT.
+test("a country condition goes by the session's first event", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://example.com/", { country: "DE" });
+  visit(db, "s1", "https://example.com/next", {
+    country: "AT",
+    ts: "2026-01-01T10:05:00.000Z",
+  });
+
+  assert.equal(summaryFor(db, [{ kind: "country", value: "DE" }]).sessions, 1);
+  assert.equal(summaryFor(db, [{ kind: "country", value: "AT" }]).sessions, 0);
 });
 
 test("a language condition matches regional variants of a bare language, and null the missing header", () => {

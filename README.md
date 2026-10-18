@@ -25,7 +25,7 @@ The shape of things may still change before 1.0; see
 
 ## Why
 
-- **Ask, don't read.** 34 MCP tools, each answering one question a site
+- **Ask, don't read.** 35 MCP tools, each answering one question a site
   owner actually asks: top pages, where traffic comes from, which
   campaign converted, whether a drop is real. Every tool can be narrowed
   to a segment, so "where did the buyers of product X come from" is one
@@ -34,7 +34,8 @@ The shape of things may still change before 1.0; see
   events are one JSON file each, live the moment you save.
 - **Privacy by architecture.** No cookie by default: the visitor ID is
   a daily-changing hash, and the address it comes from is never stored
-  in the database.
+  in the database. An optional country lookup reads the shortened
+  address on your own server and stores only the country code.
   Query strings are filtered before storage. Consent switches on a
   first-party cookie, and an opt-out is built in.
 

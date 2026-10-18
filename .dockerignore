@@ -20,3 +20,6 @@ cockpit-session-salt
 .claude
 CLAUDE.local.md
 .playwright-mcp
+# Downloaded fresh by the build itself, so a stale local copy must not
+# be the one that ships.
+server/country-data

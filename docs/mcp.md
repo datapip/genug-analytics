@@ -8,7 +8,7 @@ track and how you want answers, then picks the tool.
 ## What you can ask
 
 Each tool answers one question, and its description tells the agent
-what the number means and where it misleads. The 34 tools cover:
+what the number means and where it misleads. The 35 tools cover:
 
 - **How much, and when** — sessions, visitors and events for a period;
   per day, per weekday, per hour; one event's trend over time; how
@@ -20,8 +20,8 @@ what the number means and where it misleads. The 34 tools cover:
 - **What happened** — every event type ranked, any event broken down
   by one of its own props, a numeric prop summed, and an ordered
   funnel of any events you name.
-- **Who is visiting** — device types and browsers, languages, new
-  versus returning, consent mix, and whether one period's visitors
+- **Who is visiting** — device types and browsers, languages,
+  countries (with `COUNTRY_LOOKUP` on), new versus returning, consent mix, and whether one period's visitors
   came back in a later one.
 - **Is tracking working** — the latest raw events, rejected requests
   with the reason, bot traffic, whether events are still arriving, and
@@ -29,7 +29,8 @@ what the number means and where it misleads. The 34 tools cover:
 
 Every tool that takes a period also takes a **segment**, which narrows
 the answer to some sessions: those with an event or prop value, a
-referrer, an entry page or campaign, a device, browser or language. So
+referrer, an entry page or campaign, a device, browser, language or
+country. So
 "where did the buyers of product X come from" is one question. There
 is no raw-SQL tool and no row export, on purpose.
 

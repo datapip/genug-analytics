@@ -32,6 +32,25 @@ app.use(
     diskGuard: createDiskGuard(tmpDir),
   }),
 );
+// The same route with the country lookup on. The table is a stand-in
+// that records what it was asked, which is the point of the test using
+// it: it must only ever see the shortened address.
+const askedForCountry: string[] = [];
+app.use(
+  "/with-country/events",
+  createEventsRouter({
+    db,
+    allowedOrigins: new Set(["https://site.example"]),
+    dailySalt: createDailySalt(join(tmpDir, "daily-salt.json"), "UTC"),
+    diskGuard: createDiskGuard(tmpDir),
+    countries: {
+      lookup(truncated) {
+        askedForCountry.push(truncated);
+        return truncated === "203.0.113.0" ? "DE" : "ZZ";
+      },
+    },
+  }),
+);
 const server = app.listen(0);
 const { port } = server.address() as AddressInfo;
 
@@ -54,6 +73,7 @@ interface EventRow {
   device_type: string | null;
   browser: string | null;
   visitor_language: string | null;
+  country: string | null;
   consent_mode: string;
   props: string;
 }
@@ -74,8 +94,9 @@ function lastRejection() {
 async function post(
   body: unknown,
   headers: Record<string, string> = {},
+  path = "/events",
 ): Promise<Response> {
-  return fetch(`http://localhost:${port}/events`, {
+  return fetch(`http://localhost:${port}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -906,5 +927,33 @@ test("an event body carrying optOut is recorded as an event, not an opt-out", as
     res.headers.get("set-cookie"),
     null,
     "an event body must not clear the visitor cookie",
+  );
+});
+
+test("the country is looked up from the shortened address only, and stays empty with the lookup off", async () => {
+  const body = {
+    event: "page_view",
+    url: "https://site.example/",
+    props: { page_title: "Home", document_language: "en" },
+  };
+  await post(
+    body,
+    { "user-agent": "test-country-1", "x-forwarded-for": "203.0.113.77" },
+    "/with-country/events",
+  );
+  await post(
+    body,
+    { "user-agent": "test-country-2", "x-forwarded-for": "198.51.100.9" },
+    "/with-country/events",
+  );
+  await post(body, {
+    "user-agent": "test-country-3",
+    "x-forwarded-for": "203.0.113.77",
+  });
+
+  assert.deepEqual(askedForCountry, ["203.0.113.0", "198.51.100.0"]);
+  assert.deepEqual(
+    newRows().map((row) => row.country),
+    ["DE", "ZZ", null],
   );
 });

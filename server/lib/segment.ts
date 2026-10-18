@@ -31,6 +31,9 @@ export type SegmentCondition =
   // null = the request carried no Accept-Language header. A bare
   // language ("en") also matches its regional variants ("en-US").
   | { kind: "language"; value: string | null }
+  // A two-letter code, or "ZZ" for looked up and not found
+  // (lib/country.ts).
+  | { kind: "country"; value: string }
   // Where the session's entry page view came from; null = direct.
   | { kind: "referrerHost"; value: string | null }
   // The path of the session's entry page view.
@@ -138,6 +141,17 @@ export function buildSegment(
             : `(lower(visitor_language) = ${bind("value", lowered)} OR substr(lower(visitor_language), 1, ${bind("prefixLength", prefix.length)}) = ${bind("prefix", prefix)})`;
         fragments.push(
           `SELECT session_id FROM events WHERE ${match} AND ts BETWEEN @from AND @to`,
+        );
+        break;
+      }
+      case "country": {
+        // By the session's first event in the period, the row
+        // getTopCountries files it under, so a session that changed
+        // network midway (a VPN switched on) is in one country's
+        // segment and that country's row, never in another's segment
+        // while counted under the first.
+        fragments.push(
+          `SELECT session_id FROM (SELECT session_id, country, MIN(ts) FROM events WHERE ts BETWEEN @from AND @to GROUP BY session_id) WHERE country = ${bind("value", condition.value)}`,
         );
         break;
       }

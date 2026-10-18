@@ -15,6 +15,8 @@ export interface EventRow {
   deviceType?: string;
   browser?: string;
   visitorLanguage?: string;
+  // undefined (NULL) when no lookup ran; see migration 1.
+  country?: string;
   props: unknown;
   idempotencyKey?: string;
   // Optional here, but never NULL in the database — this default is
@@ -35,8 +37,8 @@ export interface EventRow {
 export function insertEvent(db: Database.Database, row: EventRow): boolean {
   const result = db
     .prepare(
-      `INSERT INTO events (event, visitor_id, session_id, ts, url, referrer, device_type, browser, visitor_language, props, idempotency_key, consent_mode)
-       VALUES (@event, @visitorId, @sessionId, @ts, @url, @referrer, @deviceType, @browser, @visitorLanguage, @props, @idempotencyKey, @consentMode)
+      `INSERT INTO events (event, visitor_id, session_id, ts, url, referrer, device_type, browser, visitor_language, country, props, idempotency_key, consent_mode)
+       VALUES (@event, @visitorId, @sessionId, @ts, @url, @referrer, @deviceType, @browser, @visitorLanguage, @country, @props, @idempotencyKey, @consentMode)
        ON CONFLICT (event, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
     )
     .run({
@@ -49,6 +51,7 @@ export function insertEvent(db: Database.Database, row: EventRow): boolean {
       deviceType: row.deviceType ?? null,
       browser: row.browser ?? null,
       visitorLanguage: row.visitorLanguage ?? null,
+      country: row.country ?? null,
       props: JSON.stringify(row.props),
       idempotencyKey: row.idempotencyKey ?? null,
       consentMode: row.consentMode ?? "consentless",

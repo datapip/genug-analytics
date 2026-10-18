@@ -2,7 +2,8 @@
 // because two different callers need two different widths and the
 // reasoning for each only makes sense beside the other.
 //
-// `truncateIp` narrows for the **visitor hash** (lib/identity.ts).
+// `truncateIp` narrows for the **visitor hash** (lib/identity.ts) and,
+// through `blockIndex`, for the **country lookup** (lib/country.ts).
 // `limiterKey` narrows for the **counters** that bound abuse: the
 // /events and /mcp request limits and the cockpit password lockout
 // (lib/rateLimit.ts).
@@ -53,7 +54,8 @@ function isIpv4(ip: string): boolean {
 }
 
 // Narrows an address to its block: IPv4 to a /24, IPv6 to a /48.
-// Used *only* for the visitor hash.
+// Used for the visitor hash and, through blockIndex, the country
+// lookup — never for the abuse counters, which need limiterKey.
 //
 // Never move limiterKey's *canonicalisation* into this function —
 // lowercasing, leading-zero stripping, rewriting a v4-mapped address
@@ -102,6 +104,35 @@ export function truncateIp(ip: string): string {
   const groups = expandIpv6(address);
   if (groups === undefined) return UNKNOWN;
   return `${groups[0]}:${groups[1]}:${groups[2]}::`;
+}
+
+// Which block a truncateIp result is, as a number the country table
+// (lib/country.ts) can search: the /24's index for IPv4 (its first
+// three octets), the /48's prefix for IPv6. Taking truncateIp's output
+// rather than an address is the point — the country is looked up from
+// the same shortened address the hash uses, so the full one is never
+// consulted for it. undefined for "unknown" or anything unreadable.
+//
+// A v4-mapped address is IPv4 here; "2001:db8::1.2.3.0" stays IPv6, for
+// the reason embeddedIpv4 gives.
+export function blockIndex(
+  truncated: string,
+): { family: 4 | 6; index: number } | undefined {
+  const quad = embeddedIpv4(truncated);
+  if (quad !== undefined) {
+    const [a, b, c] = quad.split(".").map(Number) as [number, number, number];
+    return { family: 4, index: (a * 256 + b) * 256 + c };
+  }
+
+  const groups = expandIpv6(hexifyEmbeddedQuad(truncated));
+  if (groups === undefined) return undefined;
+  const [g0, g1, g2] = groups.map((group) => parseInt(group, 16)) as [
+    number,
+    number,
+    number,
+  ];
+  // 48 bits, inside a double's exact integer range.
+  return { family: 6, index: (g0 * 65536 + g1) * 65536 + g2 };
 }
 
 // What every abuse counter keys on. The two families are treated

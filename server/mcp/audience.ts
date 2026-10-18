@@ -3,6 +3,7 @@ import {
   getBrowserBreakdown,
   getNewVsReturningVisitors,
   getTopLanguages,
+  getTopCountries,
   getConsentBreakdown,
   getCohortReturn,
 } from "../lib/audience.js";
@@ -149,6 +150,35 @@ export const registerAudienceTools: ToolRegistrar = (
       return withSegment(db, segment, { from, to }, (clause) =>
         jsonContent(getTopLanguages(db, { from, to }, limit, clause)),
       );
+    },
+  );
+
+  server.registerTool(
+    "get_top_countries",
+    {
+      description:
+        'Get the countries visitors came from in a given time period, ranked by sessions descending, as two-letter codes ("DE", "US"). The country is looked up on the server from the visitor\x27s shortened IP address, so it is where the connection came from: a VPN, a company network or mobile roaming shows the exit\x27s country, and a server behind a proxy that is not configured to pass the real address on shows the proxy\x27s country for everyone. Counted in SESSIONS, attributed to each session\x27s first event — the same unit as get_top_languages and get_device_breakdown. "ZZ" means the address was looked up and matched no country. notLookedUp counts the sessions no lookup ran for — stored before COUNTRY_LOOKUP was turned on, or while it was off. They are not an unknown country and are in neither items nor total, so shares read off total are shares of the sessions that have a country; say so if notLookedUp is large. Returns an error if no session in the period has a country at all. ' +
+        rankedShape("sessions") +
+        " " +
+        SEGMENT_HINT,
+      inputSchema: {
+        ...period,
+        ...segmentInput,
+        limit: limitInput("Max number of countries to return"),
+      },
+    },
+    async ({ from, to, segment, limit }) => {
+      return withSegment(db, segment, { from, to }, (clause) => {
+        const countries = getTopCountries(db, { from, to }, limit, clause);
+        // Every session unlooked-up reads as "no data" when it is
+        // really "the feature is off" — the mistake has to look like one.
+        if (countries.total === 0 && countries.notLookedUp > 0) {
+          return toolError(
+            "No session in this period has a country. The lookup is off unless the server runs with COUNTRY_LOOKUP=true, and rows stored before it was turned on never get one.",
+          );
+        }
+        return jsonContent(countries);
+      });
     },
   );
 

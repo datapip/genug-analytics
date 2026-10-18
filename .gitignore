@@ -23,3 +23,8 @@ cockpit-session-salt
 
 # Personal, machine-local Claude Code instructions (see docs/developing.md)
 CLAUDE.local.md
+
+# The IP-to-country table, downloaded by scripts/fetch-country-data.mjs
+# (the Docker build runs it). Fetched, not committed: 30 MB that changes
+# daily upstream.
+server/country-data/

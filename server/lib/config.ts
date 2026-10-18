@@ -1,5 +1,7 @@
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  parseCountryLookup,
   parsePort,
   parseReadOnly,
   parseTimezone,
@@ -45,6 +47,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     retentionDaysIsDefault: env.RETENTION_DAYS === undefined,
     localBackups: parseLocalBackupsEnabled(env.LOCAL_BACKUPS),
     updateCheck: parseUpdateCheckEnabled(env.UPDATE_CHECK),
+    countryLookup: parseCountryLookup(env.COUNTRY_LOOKUP),
+    // Where scripts/fetch-country-data.mjs puts the table, which is
+    // where the image has it. Overridable for a table kept elsewhere.
+    countryDataDir:
+      env.COUNTRY_DATA_DIR ??
+      fileURLToPath(new URL("../../country-data/", import.meta.url)),
   };
 }
 

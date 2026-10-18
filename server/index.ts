@@ -34,6 +34,21 @@ if (config.readOnly) {
   );
 }
 
+// Said for the same reason: it changes what every row stores, and the
+// deployment's privacy notice has to say so (docs/privacy.md).
+if (config.countryLookup) {
+  logInfo(
+    "COUNTRY_LOOKUP is on — each event stores the country of the shortened address, looked up on this server.",
+  );
+  // With no proxy trusted, a proxy in front is the address every
+  // request comes from, and every visitor gets its country.
+  if (config.trustProxyHops === 0) {
+    logInfo(
+      "COUNTRY_LOOKUP is on with TRUST_PROXY=0. If a reverse proxy sits in front of this server, every visitor gets the proxy’s country: set TRUST_PROXY to the number of proxies.",
+    );
+  }
+}
+
 const keyWarning = shortMcpApiKeyWarning(config.mcpApiKey, config.readOnly);
 if (keyWarning) logInfo(keyWarning);
 

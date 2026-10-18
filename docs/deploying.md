@@ -189,6 +189,7 @@ rather than coming up in an insecure state.
 | `KEPT_HASH_VALUES`  | no (default none)             | `#fragments` kept on stored URLs, e.g. `pricing,faq`. `*` keeps all.             |
 | `LOCAL_BACKUPS`     | no (default `true`)           | A daily backup beside the database, 7 days kept.                                 |
 | `UPDATE_CHECK`      | no (default `true`)           | Asks GitHub once a day whether a newer version exists. Sends no data.            |
+| `COUNTRY_LOOKUP`    | no (default `false`)          | Stores each visitor's country, looked up on the server. See below.               |
 | `READ_ONLY`         | no (default `false`)          | Turns off every write, for a deployment whose MCP key is public. See below.      |
 
 **`TIMEZONE`** sets where a day and an hour begin, everywhere: the
@@ -214,6 +215,16 @@ refused, since it would also keep `utm_email=`. `*` keeps everything,
 emails and tokens included. Changes reach browsers within an hour and
 apply to URLs stored from then on. The privacy template names the
 defaults, so update it if you add any ([privacy](privacy.md#what-gets-stored)).
+
+**`COUNTRY_LOOKUP=true`** stores each event's country, looked up from
+the shortened address in a table the image ships, and adds
+`get_top_countries` and a `country` segment. Add the bracketed
+sentences from the [privacy template](privacy.md#the-country) to your
+notice before turning it on. Rows stored before then have no country.
+Behind a proxy, set `TRUST_PROXY` first, or every visitor gets the
+proxy's country. Outside Docker, fetch the table with
+`node scripts/fetch-country-data.mjs`, or point `COUNTRY_DATA_DIR` at
+one; the server refuses to start with the lookup on and no table.
 
 **`READ_ONLY=true`** removes `delete_visitor_data`, `add_history_note`
 and `get_recent_events`. The cockpit refuses every edit and leaves out

@@ -39,15 +39,15 @@ export function runMigrations(
   }
 }
 
-// The ordered list of schema changes, currently one entry holding the
-// whole schema.
+// The ordered list of schema changes: the whole first schema, then
+// each change since.
 //
 // APPEND ONLY. A database records in its own user_version which steps
 // it has already run, so editing or removing an entry below fixes
 // nothing on a database that ran the old version — it only makes this
 // file lie about what that database went through. Add new schema
 // changes as new entries at the end.
-const migrations: ((db: Database.Database) => void)[] = [
+export const migrations: ((db: Database.Database) => void)[] = [
   // Migration 0: the whole schema.
   //
   // auto_vacuum has to be set before any table exists to take effect
@@ -157,6 +157,14 @@ const migrations: ((db: Database.Database) => void)[] = [
       CREATE INDEX idx_bot_activity_ts
         ON bot_activity (ts);
     `);
+  },
+
+  // Migration 1: the visitor's country (lib/country.ts). A two-letter
+  // code, "ZZ" when the lookup found none, and NULL when no lookup ran
+  // — every row stored before this, and every row with COUNTRY_LOOKUP
+  // off — so "not looked up" never reads as "unknown country".
+  (db) => {
+    db.exec(`ALTER TABLE events ADD COLUMN country TEXT`);
   },
 ];
 

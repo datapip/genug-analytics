@@ -5497,3 +5497,70 @@ top of that router and cannot be skipped by mounting a piece elsewhere.
 startup. `requireSegment` and the annotation check used to run only on
 the first `/mcp` request or cockpit load, so "the server refuses to
 start" was true only of the tests. It is now true of the server.
+
+### Country, from the shortened address
+
+The review asked for visitors' countries without storing the address.
+`COUNTRY_LOOKUP=true` stores a two-letter code per event in a new
+`country` column (migration 1), reported by `get_top_countries` and
+usable as a segment.
+
+**Looked up from the shortened address.** `lib/country.ts` takes
+`truncateIp`'s output, the same /24 or /48 the visitor hash uses, so
+the full address is never consulted for it. A block the table splits
+between countries takes the country of its lowest part. That is wrong
+for a sliver of addresses near a border and costs nothing a country
+report would notice.
+
+**An offline table, shipped in the image.** ip-location-db's
+"user-country" is public domain (PDDL), so it needs no attribution and
+no account, unlike GeoLite2. The Docker build fetches it
+(`scripts/fetch-country-data.mjs`), so the table is as old as the
+image. A download at runtime was rejected: it adds network access,
+state in `/data` and a failure that would itself need reporting. The
+loader refuses a code that is not two capital letters and a table with
+implausibly few ranges, so a damaged download stops the start instead
+of storing `ZZ` for everyone, and the column stays a closed list the
+agent can read without the visitor-text caveat.
+
+**Two-letter codes only.** No region or city: a country is much
+coarser than the /24 already in the hash, and nothing a site owner asks
+needs finer.
+
+**Both modes.** It is stored for consentless and consented events
+alike, since it comes from the request, not the device. For a consented
+visitor it does add a travel history under one `genug_vid`; that is the
+strongest reason the default is off.
+
+**NULL is not `ZZ`.** NULL means no lookup ran: every row stored before
+migration 1, and every row with the lookup off. `ZZ` means it ran and
+found nothing. Folding the two together would report a deployment's
+whole history as "unknown country". `get_top_countries` and a country
+segment return an error when no row in the period has a country, for
+the same reason. A period that is only partly looked up answers, with
+the sessions that have no country counted in `notLookedUp`, beside the
+ranking rather than as a row in it: as a row, a small `limit` could cut
+it while it still counted toward `total`.
+
+**One session, one country.** A session is filed under its first event
+in the period, like languages, and the country segment matches the same
+event. A visitor who switches on a VPN midway is then in one country's
+row and that country's segment, never counted under one and segmented
+as the other.
+
+**Off by default.** On by default, every upgraded deployment would
+start storing something its privacy notice does not mention. Widening
+`KEPT_QUERY_PARAMS` is the same kind of change and is also left to the
+operator. If it is ever turned on by default, that release is
+**Breaking** and carries the notice sentence.
+
+**Not done.** Small countries are not folded into "other". Languages
+are not folded either, and a segment plus `get_recent_events` can
+isolate a rare value anyway. `get_recent_events` and the cockpit do not
+show the country yet.
+
+**The migration.** A new numbered migration rather than an edit to
+migration 0, because live databases already ran migration 0 and would
+never get the column, and every insert would then fail. The cost: an
+older image refuses to start on an upgraded database, so going back
+means restoring a backup.

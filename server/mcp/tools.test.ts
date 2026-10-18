@@ -579,6 +579,65 @@ test("a segment refuses a URL as a host, a slashless path, a non-locale language
   await client.close();
 });
 
+// With the lookup off no row has a country, so any country would
+// match nothing and read as "nobody from there".
+test("countries refuse to answer when no lookup ran, and a country segment too", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(db, pageView());
+  });
+  const countries = await callRaw(client, "get_top_countries", PERIOD);
+  assert.equal(countries.isError, true);
+  assert.match(countries.text, /COUNTRY_LOOKUP=true/);
+
+  const segmented = await call(client, "get_traffic_summary", {
+    segment: [{ country: "DE" }],
+    ...PERIOD,
+  });
+  assert.match(String(segmented.error), /COUNTRY_LOOKUP=true/);
+  await client.close();
+});
+
+test("a country segment takes a two-letter code in either case", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(db, pageView({ sessionId: "s1", country: "DE" }));
+    insertEvent(db, pageView({ sessionId: "s2", country: "US" }));
+  });
+  const refused = await call(client, "get_traffic_summary", {
+    segment: [{ country: "Germany" }],
+    ...PERIOD,
+  });
+  assert.match(String(refused.error), /two-letter code/);
+
+  const lower = await call(client, "get_top_countries", {
+    segment: [{ country: "de" }],
+    ...PERIOD,
+  });
+  assert.deepEqual(lower, {
+    items: [{ country: "DE", sessions: 1 }],
+    groups: 1,
+    total: 1,
+    notLookedUp: 0,
+  });
+  await client.close();
+});
+
+// The day the lookup is turned on, a period holds both kinds of
+// session. Only a period with no country at all is the mistake.
+test("countries answer for a period that is only partly looked up", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(db, pageView({ sessionId: "s1" }));
+    insertEvent(db, pageView({ sessionId: "s2", country: "DE" }));
+    insertEvent(db, pageView({ sessionId: "s3", country: "DE" }));
+  });
+  assert.deepEqual(await call(client, "get_top_countries", PERIOD), {
+    items: [{ country: "DE", sessions: 2 }],
+    groups: 1,
+    total: 2,
+    notLookedUp: 1,
+  });
+  await client.close();
+});
+
 test("a segment on a query parameter ingestion strips is refused, naming the kept ones", async () => {
   const { client } = await connect();
   const result = await call(client, "get_traffic_summary", {
@@ -639,6 +698,7 @@ test("every segment-taking tool gives a different answer for a segment", async (
         deviceType: "mobile",
         browser: "Safari",
         visitorLanguage: "de",
+        country: "DE",
         url: "https://example.com/m?utm_campaign=m",
         referrer: "https://www.google.com/",
         props: { page_title: "M", document_language: "de" },
@@ -653,6 +713,7 @@ test("every segment-taking tool gives a different answer for a segment", async (
           deviceType: "desktop",
           browser: "Chrome",
           visitorLanguage: "en",
+          country: "US",
           consentMode: "consentful",
           ts: "2026-01-01T14:00:00.000Z",
           url: "https://example.com/d?utm_campaign=d",

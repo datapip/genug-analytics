@@ -19,6 +19,7 @@ import {
 } from "./lib/securityHeaders.js";
 import { rateLimitCockpit, rateLimitEvents } from "./lib/rateLimit.js";
 import { createDailySalt, startRotation } from "./lib/dailySalt.js";
+import { loadCountryTable } from "./lib/country.js";
 import { createDiskGuard } from "./lib/diskSpace.js";
 import { getToolManifest } from "./mcp/tools.js";
 import { renderClientScript } from "./lib/clientScript.js";
@@ -80,6 +81,11 @@ export function createApp({
       allowedOrigins: config.allowedOrigins,
       dailySalt,
       diskGuard: createDiskGuard(config.dataDir),
+      // Loaded here, so a missing or broken table stops the start
+      // rather than storing "ZZ" for every visitor.
+      countries: config.countryLookup
+        ? loadCountryTable(config.countryDataDir)
+        : undefined,
     }),
   );
 

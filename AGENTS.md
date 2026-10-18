@@ -60,7 +60,7 @@ visibly broken, which is the failure mode this project cares most about.
 
 - The stored envelope is fixed: `event`, `visitor_id`, `session_id`,
   `ts`, `url`, `referrer`, `device_type`, `browser`, `visitor_language`,
-  `consent_mode`, `props`. Everything type-specific goes in `props` as
+  `country`, `consent_mode`, `props`. Everything type-specific goes in `props` as
   JSON. **Adding an event never needs a database change.**
 - `visitor_id`, `session_id` and `ts` are always assigned server-side.
   Never accept any of them from the client.
@@ -302,6 +302,12 @@ false` and a `destructiveHint`), so a client knows to ask before
   the next one, and the counter bounds nothing.
 - Don't add a new field that identifies a visitor more precisely
   without saying so in `docs/decisions.md` and in the README.
+- The country (`lib/country.ts`) is looked up from `truncateIp`'s
+  output, never `req.ip`, in the table the image ships, never a
+  remote service. It is off unless `COUNTRY_LOOKUP=true`, because
+  turning it on changes what the owner's privacy notice must say. NULL
+  means no lookup ran and `ZZ` that it found nothing; a query must
+  not report the first as an unknown country.
 - The default kept URL parts are the six `utm_*` parameters and no
   fragment (`lib/url.ts`). A click id or free-text parameter like `ref`
   identifies a visitor, so widening that default is the same kind of

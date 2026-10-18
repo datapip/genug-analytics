@@ -59,3 +59,17 @@ test("the data directory is the database's own", () => {
   );
   assert.equal(loadConfig(REQUIRED).dataDir, "/data");
 });
+
+// Turning it on changes what a deployment's privacy notice has to say,
+// so an upgrade must never turn it on, and a typo must not either.
+test("COUNTRY_LOOKUP is off unless set to true, and a typo is refused", () => {
+  assert.equal(loadConfig(REQUIRED).countryLookup, false);
+  assert.equal(
+    loadConfig({ ...REQUIRED, COUNTRY_LOOKUP: "true" }).countryLookup,
+    true,
+  );
+  assert.throws(
+    () => loadConfig({ ...REQUIRED, COUNTRY_LOOKUP: "yes" }),
+    /COUNTRY_LOOKUP must be "true" or "false"/,
+  );
+});

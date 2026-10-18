@@ -69,9 +69,25 @@ the database. This is the list to write your privacy notice from.
 | `device_type`      | What the `User-Agent` header classified to: `mobile`, `tablet`, `desktop` or `other` |
 | `browser`          | Likewise: `Chrome`, `Safari`, `Firefox`, `Edge` or `Other`                           |
 | `visitor_language` | The first entry of the `Accept-Language` header, e.g. `de-DE`, if it is a locale tag |
+| `country`          | Only with `COUNTRY_LOOKUP=true`; see [the country](#the-country) below               |
 | `consent_mode`     | `consentful` or `consentless`                                                        |
 | `props`            | Whatever that event type declares — see below                                        |
 | `idempotency_key`  | Only when you pass one yourself; see order numbers below                             |
+
+### The country
+
+Off unless you set `COUNTRY_LOOKUP=true`. Then each event also stores
+the country the shortened address belongs to (`203.0.113.0`, never the
+full address), as a two-letter code such as `DE`, or `ZZ` when the
+table lists no country for it. The lookup runs on your server, in a
+table shipped with the image (ip-location-db's public-domain
+"user-country"), and asks no outside service. It is where the
+connection came from: a VPN, a company network or mobile roaming shows
+the exit's country. Rows stored while it was off have no country, and
+turning it on does not fill them in.
+
+Turn it on only once your privacy notice says so: the template below
+has the sentences, in brackets.
 
 **Props** are yours to define ([defining events](client.md#defining-your-own-events)).
 The built-ins record:
@@ -146,8 +162,9 @@ the link on each host. Link it from your privacy notice.
 
 ## What leaves your server
 
-Genug sends nothing to an analytics vendor; there is none. Two things
-do leave the server:
+Genug sends nothing to an analytics vendor; there is none. The country
+lookup, when on, asks no outside service either. Two things do leave
+the server:
 
 - **What your AI agent fetches.** Tool results go to the model vendor
   when you ask a question. See
@@ -195,7 +212,8 @@ apply, and have your lawyer add the legal basis and check the rest.
 > and utm_id kept from its query string, and no `#fragment`], the
 > address of the page you came from, the time, the device type (e.g.
 > mobile), the browser family, the browser's preferred language, [the
-> page title and the page's language,] [links you click to other sites
+> country your shortened IP address belongs to,] [the page title and
+> the page's language,] [links you click to other sites
 > and files you download,] [further events: list them].
 >
 > **How we tell visits apart.** We do not store your IP address in
@@ -205,7 +223,9 @@ apply, and have your lawyer add the legal basis and check the rest.
 > every day, and store only a hash of the result. We can therefore
 > recognise repeated visits on the same day, but not across days. The
 > key is random and is replaced at the end of each day. After that,
-> nobody, including us, can link the stored code to an IP address. If
+> nobody, including us, can link the stored code to an IP address.
+> [We also look up, in a table on our own server, which country the
+> shortened address belongs to, and store only the country code.] If
 > our server blocks unusually many requests from one address, it writes
 > that address to a log, which is kept for [period].
 >
@@ -239,8 +259,8 @@ apply, and have your lawyer add the legal basis and check the rest.
 > us.] [To
 > analyse the statistics we use [AI provider]. It receives aggregated
 > figures and, where needed, individual records: page address, time,
-> referring address, device type, browser, a session code and event
-> details. It does not receive the visitor hash, except when we ask it
+> referring address, device type, browser, [country,] a session code
+> and event details. It does not receive the visitor hash, except when we ask it
 > to delete one visitor's data. [It is based in
 > [country].]]
 
@@ -249,6 +269,7 @@ Notes on the brackets:
 - **The page address.** The defaults are filled in. If you changed
   `KEPT_QUERY_PARAMS` or `KEPT_HASH_VALUES`, list what you run, or say
   "with its query string and fragment kept in full" for `*`.
+- **Country.** Only if `COUNTRY_LOOKUP` is on.
 - **Page title and links.** Only if `enableAutoPageTracking` or
   `enableAutoLinkTracking` is on. List your own events by what they
   record, not by their names.

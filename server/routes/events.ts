@@ -29,6 +29,7 @@ import { stripUnknownParams } from "../lib/url.js";
 import { recordBotHit, botActivityCounter } from "../lib/botActivity.js";
 import { parseCookies } from "../lib/cookies.js";
 import type { DailySalt } from "../lib/dailySalt.js";
+import type { CountryTable } from "../lib/country.js";
 import type { DiskGuard } from "../lib/diskSpace.js";
 
 const VISITOR_ID_COOKIE = "genug_vid";
@@ -152,6 +153,8 @@ export interface EventsRouterDeps {
   dailySalt: DailySalt;
   // Stops storing a little before the volume is full (lib/diskSpace.ts).
   diskGuard: DiskGuard;
+  // Absent unless COUNTRY_LOOKUP=true; the column then stays NULL.
+  countries?: CountryTable;
 }
 
 // express.json() defaults to a 100KB body, which is far more than any
@@ -422,17 +425,18 @@ function reject(rejection: Rejection): { ok: false; rejection: Rejection } {
 // Who sent it, which session it belongs to, and the row itself. Also
 // sets or clears the visitor cookie, which is why it takes the response.
 function storeEvent(
-  { db, dailySalt }: EventsRouterDeps,
+  { db, dailySalt, countries }: EventsRouterDeps,
   req: Request,
   res: Response,
   event: ValidEvent,
   now: Date,
 ): void {
-  // Narrowed to a block before it is hashed (see lib/ip.ts). The rate
-  // limiter narrows differently, and less: it keeps an IPv4 address
-  // whole, because it has to tell one abuser from the office around
-  // them.
+  // Narrowed to a block before it is hashed or looked up (see
+  // lib/ip.ts). The rate limiter narrows differently, and less: it keeps
+  // an IPv4 address whole, because it has to tell one abuser from the
+  // office around them.
   const ip = truncateIp(req.ip ?? "");
+  const country = countries?.lookup(ip);
   const userAgent = req.headers["user-agent"];
   // The header itself goes no further than this request: it feeds the
   // bot check and the consentless hash below, and only what it
@@ -475,6 +479,7 @@ function storeEvent(
     deviceType: device?.deviceType,
     browser: device?.browser,
     visitorLanguage,
+    country,
     props: event.props,
     idempotencyKey: event.envelope.idempotencyKey,
     consentMode: consentful ? "consentful" : "consentless",

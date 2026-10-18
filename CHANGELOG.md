@@ -30,6 +30,10 @@ how a version is cut.
 
 **Changed**
 
+- **The database gains a `country` column on first start**, empty
+  unless the lookup is on. An older image then refuses to start on that
+  database; to go back to 0.12, restore a backup taken before the
+  upgrade.
 - **Every cockpit browser has to sign in again once.** The key that
   signs the cockpit's session cookie used the same salt on every
   install. It now uses a random one per install, kept as
@@ -97,6 +101,14 @@ how a version is cut.
 
 **Added**
 
+- **An optional country lookup.** With `COUNTRY_LOOKUP=true`, each
+  event stores the visitor's country as a two-letter code, looked up on
+  your server from the shortened address in a table the image ships.
+  No address is stored and no outside service is asked. It adds
+  `get_top_countries` and a `country` segment. Off by default: add
+  the bracketed country sentences from the template in
+  `docs/privacy.md` to your privacy notice before turning it on. Rows
+  stored before then have no country.
 - **Each release now has a GitHub Release** with its changelog section,
   so watching the repository for releases tells you about new versions.
 - **`SECURITY.md`** says how to report a vulnerability

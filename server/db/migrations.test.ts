@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
-import { runMigrations, migrate } from "./migrations.js";
+import { runMigrations, migrate, migrations } from "./migrations.js";
 
 test("migrate creates a queryable events table on a fresh database", () => {
   const db = new Database(":memory:");
@@ -154,7 +154,33 @@ test("migrate is safe to call twice — the second call is a no-op", () => {
   const db = new Database(":memory:");
   migrate(db);
   assert.doesNotThrow(() => migrate(db));
-  assert.equal(db.pragma("user_version", { simple: true }), 1);
+  assert.equal(db.pragma("user_version", { simple: true }), migrations.length);
+});
+
+// Every live database was created at version 1, with rows in it. The
+// column has to arrive on those, and arrive empty: NULL is what tells a
+// row from before the lookup apart from one it found nothing for.
+test("a version-1 database gains an empty country column and keeps its rows", () => {
+  const db = new Database(":memory:");
+  runMigrations(db, migrations.slice(0, 1));
+  db.prepare(
+    `INSERT INTO events (event, visitor_id, session_id, ts, url, props, consent_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "page_view",
+    "visitor-1",
+    "session-1",
+    "2026-01-01T00:00:00.000Z",
+    "https://example.com",
+    "{}",
+    "consentless",
+  );
+
+  migrate(db);
+
+  assert.equal(db.pragma("user_version", { simple: true }), 2);
+  const rows = db.prepare("SELECT visitor_id, country FROM events").all();
+  assert.deepEqual(rows, [{ visitor_id: "visitor-1", country: null }]);
 });
 
 // Every event-type-plus-period query depends on this composite index,

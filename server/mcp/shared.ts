@@ -12,6 +12,7 @@ import {
   type SegmentCondition,
 } from "../lib/segment.js";
 import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
+import { periodHasCountries } from "../lib/audience.js";
 
 // What every tool module exports: it registers its own tools onto the
 // shared server. Nothing is returned — createMcpServer's registerTool
@@ -282,6 +283,12 @@ const segmentCondition = z
       .describe(
         'Sessions whose Accept-Language locale is this; a bare language ("en") also matches its regional variants ("en-US"). null = the request carried no Accept-Language header.',
       ),
+    country: z
+      .string()
+      .optional()
+      .describe(
+        'Sessions from this country, as a two-letter code such as "DE" (see get_top_countries); "ZZ" = looked up, matched no country.',
+      ),
     referrerHost: z
       .string()
       .nullable()
@@ -316,7 +323,7 @@ export const segmentInput = {
     .max(5)
     .optional()
     .describe(
-      'Optional. Narrows every number in the answer to the sessions matching ALL of these conditions (AND; there is no OR). Each condition names exactly one dimension: event (with optional property + value), deviceType, browser, language, referrerHost, entryPath, or entryParam + entryParamValue. Entry-based dimensions look at the page view that started the session, for sessions that started in the period. Example: with get_top_referrers, [{"event": "order_completed", "property": "product_id", "value": "abc"}] answers "where did buyers of abc come from"; with get_top_pages, [{"deviceType": "mobile"}] answers "what do phone visitors read".',
+      'Optional. Narrows every number in the answer to the sessions matching ALL of these conditions (AND; there is no OR). Each condition names exactly one dimension: event (with optional property + value), deviceType, browser, language, country, referrerHost, entryPath, or entryParam + entryParamValue. Entry-based dimensions look at the page view that started the session, for sessions that started in the period. Example: with get_top_referrers, [{"event": "order_completed", "property": "product_id", "value": "abc"}] answers "where did buyers of abc come from"; with get_top_pages, [{"deviceType": "mobile"}] answers "what do phone visitors read".',
     ),
 };
 
@@ -326,6 +333,7 @@ const DIMENSIONS = [
   "deviceType",
   "browser",
   "language",
+  "country",
   "referrerHost",
   "entryPath",
   "entryParam",
@@ -455,6 +463,27 @@ export function resolveSegment(
           };
         }
         conditions.push({ kind: "language", value: language });
+        break;
+      }
+      case "country": {
+        const country = condition.country!.toUpperCase();
+        if (!/^[A-Z]{2}$/.test(country)) {
+          return {
+            error: toolError(
+              `Segment condition: "country" is a two-letter code such as "DE" ("${condition.country}" is not one).`,
+            ),
+          };
+        }
+        // With the lookup off every country matches no session, which
+        // would read as "nobody from there" rather than as the setting.
+        if (!periodHasCountries(db, period)) {
+          return {
+            error: toolError(
+              "No event in this period has a country, so a country segment cannot match anything. The lookup is off unless the server runs with COUNTRY_LOOKUP=true, and rows stored before it was turned on never get one.",
+            ),
+          };
+        }
+        conditions.push({ kind: "country", value: country });
         break;
       }
       case "referrerHost": {

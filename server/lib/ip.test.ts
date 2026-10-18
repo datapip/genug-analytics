@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { truncateIp, limiterKey } from "./ip.js";
+import { truncateIp, limiterKey, blockIndex } from "./ip.js";
 
 test("truncateIp drops the last octet of an IPv4 address", () => {
   assert.equal(truncateIp("203.0.113.47"), "203.0.113.0");
@@ -178,4 +178,26 @@ test("limiterKey does not mistake an embedded quad for an IPv4 address", () => {
 test("limiterKey reads a v4-mapped or v4-compatible address as IPv4", () => {
   assert.equal(limiterKey("::ffff:1.2.3.4"), "1.2.3.4");
   assert.equal(limiterKey("::1.2.3.4"), "1.2.3.4");
+});
+
+// The country table is searched by block, so the index has to be the
+// block of truncateIp's output, whichever spelling it came in.
+test("blockIndex numbers the /24 or /48 of a truncated address", () => {
+  assert.deepEqual(blockIndex(truncateIp("1.2.3.4")), {
+    family: 4,
+    index: (1 * 256 + 2) * 256 + 3,
+  });
+  assert.deepEqual(blockIndex(truncateIp("::ffff:1.2.3.4")), {
+    family: 4,
+    index: (1 * 256 + 2) * 256 + 3,
+  });
+  assert.deepEqual(blockIndex(truncateIp("2001:db8:5:6::1")), {
+    family: 6,
+    index: (0x2001 * 65536 + 0xdb8) * 65536 + 5,
+  });
+  // Not v4-mapped, so an IPv6 address whose low bits are written as a
+  // quad (see embeddedIpv4).
+  assert.equal(blockIndex(truncateIp("2001:db8::1.2.3.4"))?.family, 6);
+  assert.equal(blockIndex(truncateIp("garbage")), undefined);
+  assert.equal(blockIndex(""), undefined);
 });

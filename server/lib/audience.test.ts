@@ -11,6 +11,7 @@ import {
   getCohortReturn,
   getNewVsReturningVisitors,
   getTopLanguages,
+  getTopCountries,
 } from "./audience.js";
 import { buildSegment } from "./segment.js";
 
@@ -30,6 +31,7 @@ function event(overrides: {
   sessionId?: string;
   ts: string;
   visitorLanguage?: string;
+  country?: string;
   consentMode?: "consentful" | "consentless";
 }) {
   return {
@@ -615,4 +617,72 @@ test("getCohortReturn can see a consentless cohort visitor return once they cons
       returnRate: 1,
     },
   );
+});
+
+// "Not looked up" (null) and "looked up, no match" (ZZ) are different
+// answers and must stay two rows; a session lands in one row only, by
+// its first event, however its later events were looked up.
+test("getTopCountries counts sessions by their first event, keeping not-looked-up and ZZ apart", () => {
+  const db = setupDb();
+  insertEvent(
+    db,
+    event({ visitorId: "v1", ts: "2026-01-01T10:00:00.000Z", country: "DE" }),
+  );
+  insertEvent(
+    db,
+    event({ visitorId: "v1", ts: "2026-01-01T10:05:00.000Z", country: "AT" }),
+  );
+  insertEvent(
+    db,
+    event({ visitorId: "v2", ts: "2026-01-01T11:00:00.000Z", country: "DE" }),
+  );
+  insertEvent(
+    db,
+    event({ visitorId: "v3", ts: "2026-01-01T12:00:00.000Z", country: "ZZ" }),
+  );
+  insertEvent(db, event({ visitorId: "v4", ts: "2026-01-01T13:00:00.000Z" }));
+
+  assert.deepEqual(getTopCountries(db, PERIOD, 10), {
+    items: [
+      { country: "DE", sessions: 2 },
+      { country: "ZZ", sessions: 1 },
+    ],
+    groups: 2,
+    total: 3,
+    notLookedUp: 1,
+  });
+});
+
+// As a row, the not-looked-up sessions could fall below the limit and
+// vanish while still inside total, and no share read off it is right.
+test("getTopCountries keeps the not-looked-up count whatever the limit", () => {
+  const db = setupDb();
+  for (let i = 0; i < 3; i++) {
+    insertEvent(
+      db,
+      event({ visitorId: `n${i}`, ts: "2026-01-01T09:00:00.000Z" }),
+    );
+  }
+  for (const [country, count] of [
+    ["DE", 5],
+    ["AT", 4],
+  ] as const) {
+    for (let i = 0; i < count; i++) {
+      insertEvent(
+        db,
+        event({
+          visitorId: `${country}${i}`,
+          ts: "2026-01-01T10:00:00.000Z",
+          country,
+        }),
+      );
+    }
+  }
+
+  assert.deepEqual(getTopCountries(db, PERIOD, 1), {
+    items: [{ country: "DE", sessions: 5 }],
+    groups: 2,
+    total: 9,
+    notLookedUp: 3,
+  });
 });
