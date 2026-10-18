@@ -8,10 +8,15 @@ import { isValidPropertyKey } from "../lib/events.js";
 import { pageViewEventType } from "@genug/schema-registry";
 import {
   buildSegment,
+  periodHosts,
   type SegmentClause,
   type SegmentCondition,
 } from "../lib/segment.js";
-import { isKeptQueryParam, describeKeptQueryParams } from "../lib/url.js";
+import {
+  bareHost,
+  isKeptQueryParam,
+  describeKeptQueryParams,
+} from "../lib/url.js";
 import { periodHasCountries } from "../lib/audience.js";
 
 // What every tool module exports: it registers its own tools onto the
@@ -63,7 +68,25 @@ export const VISITOR_TEXT_CAVEAT =
 // answering. It is not a substitute for the resource/tool pair, since
 // not every client surfaces `instructions` either — see the comment on
 // registerContextResources.
-export const SERVER_INSTRUCTIONS =
+//
+// It also names the sites the installation collects for (ALLOWED_ORIGIN,
+// set by the owner, so trusted text). Three installations all calling
+// themselves "genug" give an agent connected to all of them no way to
+// tell which one answered, and on an installation with several sites a
+// whole-site number is every site's together unless it is narrowed.
+export function serverInstructions(siteHosts: readonly string[]): string {
+  return [sitesSentence(siteHosts), INSTRUCTIONS].filter(Boolean).join(" ");
+}
+
+function sitesSentence(siteHosts: readonly string[]): string {
+  if (siteHosts.length === 0) return "";
+  if (siteHosts.length === 1) {
+    return `This installation collects for ${siteHosts[0]}.`;
+  }
+  return `This installation collects for ${siteHosts.join(", ")}. Every number covers all of these sites together unless narrowed with the host segment.`;
+}
+
+const INSTRUCTIONS =
   'Before answering anything about this deployment, read the deployment-context resource (genug://deployment-context), or call get_deployment_context if your client does not surface MCP resources. It carries the site owner\'s ground rules, business context and history — most "why did this change" questions are answered there rather than by guessing. Every other tool is intent-shaped, one tool per question; read its description rather than assuming from its name, since that is where units, exclusions and caveats are documented.';
 
 // Normalized in the schema rather than in each of the ~25 handlers that
@@ -252,6 +275,9 @@ const DEVICE_TYPES = ["mobile", "tablet", "desktop", "other"] as const;
 // Mirrors the shape routes/events.ts stores for visitor_language.
 const LOCALE_TAG = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 const BROWSERS = ["Chrome", "Safari", "Firefox", "Edge", "Other"] as const;
+// Enough for any one owner's sites; past it the list is noise.
+const MAX_HOSTS_LISTED = 10;
+const PLAIN_HOST = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
 
 const segmentCondition = z
   .object({
@@ -289,6 +315,12 @@ const segmentCondition = z
       .describe(
         'Sessions from this country, as a two-letter code such as "DE" (see get_top_countries); "ZZ" = looked up, matched no country.',
       ),
+    host: z
+      .string()
+      .optional()
+      .describe(
+        'Sessions on this site, by the host of its pages, e.g. "shop.example.com" (apex and www fold together). Only useful when the installation collects for several sites; the error for a host with no session in the period lists the ones that have one.',
+      ),
     referrerHost: z
       .string()
       .nullable()
@@ -323,7 +355,7 @@ export const segmentInput = {
     .max(5)
     .optional()
     .describe(
-      'Optional. Narrows every number in the answer to the sessions matching ALL of these conditions (AND; there is no OR). Each condition names exactly one dimension: event (with optional property + value), deviceType, browser, language, country, referrerHost, entryPath, or entryParam + entryParamValue. Entry-based dimensions look at the page view that started the session, for sessions that started in the period. Example: with get_top_referrers, [{"event": "order_completed", "property": "product_id", "value": "abc"}] answers "where did buyers of abc come from"; with get_top_pages, [{"deviceType": "mobile"}] answers "what do phone visitors read".',
+      'Optional. Narrows every number in the answer to the sessions matching ALL of these conditions (AND; there is no OR). Each condition names exactly one dimension: event (with optional property + value), deviceType, browser, language, country, host, referrerHost, entryPath, or entryParam + entryParamValue. Entry-based dimensions look at the page view that started the session, for sessions that started in the period. Example: with get_top_referrers, [{"event": "order_completed", "property": "product_id", "value": "abc"}] answers "where did buyers of abc come from"; with get_top_pages, [{"deviceType": "mobile"}] answers "what do phone visitors read".',
     ),
 };
 
@@ -334,6 +366,7 @@ const DIMENSIONS = [
   "browser",
   "language",
   "country",
+  "host",
   "referrerHost",
   "entryPath",
   "entryParam",
@@ -484,6 +517,52 @@ export function resolveSegment(
           };
         }
         conditions.push({ kind: "country", value: country });
+        break;
+      }
+      case "host": {
+        const raw = condition.host!;
+        // Parsed the way the stored url's host was, so "bücher.de"
+        // matches the punycode a browser sends for it.
+        let parsed: string | undefined;
+        if (raw !== "" && !/[/:\s]/.test(raw)) {
+          try {
+            parsed = new URL(`http://${raw}`).hostname;
+          } catch {
+            parsed = undefined;
+          }
+        }
+        if (parsed === undefined) {
+          return {
+            error: toolError(
+              `Segment condition: "host" takes a host name such as "shop.example.com", not a URL or an empty string ("${raw}").`,
+            ),
+          };
+        }
+        const host = bareHost(parsed);
+        // An empty period is let through: its zeros are true of every
+        // site. A host the period has never seen is a typo or the wrong
+        // installation, and gets the list instead.
+        // The hosts come from stored urls, which anyone posting to
+        // /events writes, so the list is capped and carries the caveat.
+        const hosts = periodHosts(db, period);
+        if (hosts.length > 0 && !hosts.includes(host)) {
+          // /events refuses a host ALLOWED_ORIGIN doesn't list, but rows
+          // from before 0.13.0 could carry any; only a plain host name
+          // is repeated to the agent.
+          const shown = hosts
+            .filter((h) => h.length <= 253 && PLAIN_HOST.test(h))
+            .slice(0, MAX_HOSTS_LISTED);
+          const more =
+            hosts.length > shown.length
+              ? ` and ${hosts.length - shown.length} more`
+              : "";
+          return {
+            error: toolError(
+              `No session in this period was on "${host}". Hosts with sessions in this period, busiest first: ${shown.join(", ")}${more}. ${VISITOR_TEXT_CAVEAT}`,
+            ),
+          };
+        }
+        conditions.push({ kind: "host", value: host });
         break;
       }
       case "referrerHost": {

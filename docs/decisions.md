@@ -450,6 +450,10 @@ Single-tenant. One deployed instance = one client/company. No
 multi-tenant data isolation logic needed — do not add tenant_id
 scaffolding, it adds complexity this project doesn't need.
 
+One owner may still collect for several sites in one instance; see
+"Several sites of one owner" at the end of this file for how they are
+told apart without a site column.
+
 ## Data model
 
 Fixed envelope + open payload. The client script sends event data;
@@ -1530,7 +1534,8 @@ one place in the data model where the distinction between `false` and
 - **`consent: false` — an explicit decline or withdrawal.** No cookie is
   set, and any cookie already on the request is ignored for
   identification and actively removed. `visitor_id` is a hash of
-  `IP + User-Agent + daily rotating salt`. The salt is random, one per
+  `site + IP + User-Agent + daily rotating salt` (the site since
+  0.13.0, see "Several sites of one owner"). The salt is random, one per
   UTC day, and replaced at midnight (see "The daily salt is random"
   below). No per-visitor state persists anywhere. Rotating daily means the same visitor gets a new
   `visitor_id` each day — an accepted privacy tradeoff, not a bug. A
@@ -2831,7 +2836,8 @@ With it, the shape and naming findings from the same audit:
   deployment serving two domains sees both `/pricing` pages merged. The
   referrer tool already handles several domains per row; this one is
   documented rather than changed until a real multi-domain deployment
-  turns up.
+  turns up. (It turned up: since 0.13.0 every page row carries its
+  host, see "Several sites of one owner".)
 
 ### Segments: one argument instead of one tool per question
 
@@ -5564,3 +5570,105 @@ migration 0, because live databases already ran migration 0 and would
 never get the column, and every insert would then fail. The cost: an
 older image refuses to start on an upgraded database, so going back
 means restoring a backup.
+
+### Several sites of one owner
+
+One installation can collect for several sites of one controller: list
+their origins in `ALLOWED_ORIGIN`, and ask about all of them together
+or about one through the `host` segment. Asked for in a review ("one
+site per installation"). The site is the host of each row's `url`,
+with `www.` folded into the apex (`siteHost` in `lib/url.ts`).
+
+**What was considered.** Four shapes, with the architect:
+
+- N containers behind one proxy. Fully isolated, and still the answer
+  for several owners, but cross-site questions need one connector each.
+- One process running an isolated app per site. Days of refactoring:
+  the event registry, rate limiters, bot counter and cockpit sign-in
+  are process-wide, and one site's startup failure would stop them all.
+- A site column. Weeks, a migration on every live database, and per-site
+  events, context and time zone on top.
+- Sites told apart by the host the stored url already carries. No
+  migration, and the segment machinery already pastes a session filter
+  into every period query. Chosen.
+
+**The site is in the visitor hash.** Without it, the consentless hash
+(address block + User-Agent + daily salt) is the same on every site,
+so one person reading two of them is one visitor: tracked across sites,
+which is what the hash exists to avoid. Plausible, Umami and Matomo all
+key their visitor on the site for the same reason. The cost is that a
+visitor count over all sites is a sum, counting someone on two sites
+twice. Adding the site changed every consentless visitor id on the
+day 0.13.0 was deployed, so a visitor seen both before and after the
+deploy that day counts twice, with two sessions.
+
+**A change of site ends the session.** The hash already keeps sites
+apart for consentless visitors, but a consent cookie belongs to the
+collector, not the site, so two sites on subdomains of one domain can
+share it. A session spanning both would sit under one site in the host
+segment, end there without an exit page and give the other an entry
+with no visit before it.
+
+**A collector hostname per site, not per domain.** A shared collector
+would also let consent given on one site be used on the other while its
+banner has not yet answered: a request with no consent signal and a
+cookie is counted as consented (`lib/identity.ts`), which § 25 TDDDG
+does not allow, since consent covers the site it was asked on. So the
+setup (docs/deploying.md, "Several sites") requires a collector hostname
+per site. The session split is the backstop for a deployment that
+ignores that. Supporting a shared collector would need a cookie name
+per site, and nothing has asked for it.
+
+**The host segment goes by the session's first event**, like country,
+not its entry page view, so a session of custom events only has a site
+too. A host with no session in the period is refused with the list of
+hosts that have one: a typo, or a site another installation collects
+for, would otherwise read as a site nobody visited. An empty period is
+let through, since its zeros are true of every site.
+
+**What the sites share.** Events, ground rules and history, `TIMEZONE`,
+retention, the MCP key and the cockpit password are the installation's.
+That is fine for one controller and wrong for several: one key would
+read every client's data, and an erasure or a published `READ_ONLY` key
+would cover them all, disclosing one controller's visitor data to
+another. A freelancer running clients' sites is each client's
+processor, and sister companies are separate controllers. So several
+controllers are still several installations, and `tenant_id` stays out.
+
+**Only listed sites are stored.** The url is the sender's to write, so
+before this a hand-made request could plant any host: a lookalike for
+the agent to pick from the host segment's error, or text in that list.
+`/events` now refuses a url whose site is not one of `ALLOWED_ORIGIN`'s
+(`invalid_envelope`, counted like any rejection). It refuses nothing
+real: a browser only sends from a page whose origin passed the CORS
+preflight, and the script sends that page's own address. A deployment
+whose pages sit on the collector's own origin never needed the entry
+for CORS and now does, which its rejected count shows at once. The
+error still lists hosts from the data rather than the config, because
+rows from before 0.13.0 may carry any host; it lists only plain host
+names, at most ten, with the visitor-text caveat.
+
+**A page is a path on a site.** The four page tools (top, entry, exit
+and bounce pages) group by host and path, and every row carries its
+`host`, so `/` on two sites is two rows instead of one merged one. The
+field is there on a one-site installation too: a row whose shape
+depended on the configuration would be one more thing for the agent to
+get wrong. The cockpit's top pages card shows the host on a second
+line under the path when `ALLOWED_ORIGIN` lists several sites. That is
+decided from the configuration, not from the rows: a top eight that
+happened to be all one site's would otherwise read as both sites'
+together. It is a second line rather than a prefix because a phone cut
+the path, the part that tells rows apart, off a `host/path` label.
+
+**The agent is told which sites it is looking at.** The MCP server's
+name is `genug (brotrechner.de, datapip.de)` rather than `genug`, and
+its instructions open with the sites and, when there are several, that
+an unsegmented number is all of them together. Both come from
+`ALLOWED_ORIGIN`, which the owner writes, so it is not visitor text.
+Several installations connected to one agent were otherwise three
+servers of the same name. The tool descriptions do not list the sites:
+they are built once per mode for the cockpit's manifest, and the
+instructions already reach the agent before its first call.
+
+**Not done.** Merging existing installations into one is a data copy
+nothing here does.

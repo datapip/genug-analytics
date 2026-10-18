@@ -163,7 +163,9 @@ function baseEnv(dbPath: string, port: number): Record<string, string> {
     DB_PATH: dbPath,
     MCP_API_KEY: "test-key-0123456789abcdef0123456789",
     COCKPIT_PASSWORD: "test-cockpit-password",
-    ALLOWED_ORIGIN: `http://localhost:${port}`,
+    // example.com because the events these tests send are on it, and
+    // /events stores a url only on a site listed here.
+    ALLOWED_ORIGIN: `http://localhost:${port},https://example.com`,
     TIMEZONE: "UTC",
     LOCAL_BACKUPS: "false",
     // Beside DB_PATH, and for a blunter reason than tidiness: the
@@ -336,6 +338,11 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   assert.equal(script.headers.get("cache-control"), "private, no-cache");
   const data = await fetch(`${base}/cockpit/data`, { headers: { cookie } });
   assert.equal(data.headers.get("cache-control"), "private, no-store");
+  // The top pages card names each row's site once there are several.
+  assert.deepEqual(((await data.json()) as { siteHosts: string[] }).siteHosts, [
+    "localhost",
+    "example.com",
+  ]);
   // The login page stays public, and so does every versioned file it
   // loads: the gate matches the path without the query string.
   const login = await fetch(`${base}/cockpit/login.html`);
@@ -373,6 +380,40 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
     },
   });
   assert.notEqual(authorized.status, 401);
+
+  // The sites reach the agent through the real route, not only through
+  // createMcpServer in a unit test: a router that stopped passing them
+  // would still compile, since the option is optional for the cockpit.
+  const initialized = await fetch(`${base}/mcp`, {
+    ...mcpBody,
+    headers: {
+      ...mcpBody.headers,
+      accept: "application/json, text/event-stream",
+      authorization: "Bearer test-key-0123456789abcdef0123456789",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "wiring-test", version: "1" },
+      },
+    }),
+  });
+  const initLine = (await initialized.text())
+    .split("\n")
+    .find((line) => line.startsWith("data: "));
+  assert.ok(initLine, "expected a data: line in the MCP response");
+  const { result } = JSON.parse(initLine.slice("data: ".length)) as {
+    result: { serverInfo: { name: string }; instructions: string };
+  };
+  assert.equal(result.serverInfo.name, "genug (localhost, example.com)");
+  assert.match(
+    result.instructions,
+    /collects for localhost, example\.com\..*host segment/,
+  );
 });
 
 test("prunes events older than RETENTION_DAYS once at startup, not just on the 24h interval", async (t) => {
@@ -1398,7 +1439,7 @@ test("renames an event from the cockpit and keeps collecting under the new name"
   const summary = await callTool("get_traffic_summary");
   assert.equal(summary.viewEvents, 2);
   const pages = await callTool("get_top_pages");
-  assert.deepEqual(pages.items, [{ path: "/", views: 2 }]);
+  assert.deepEqual(pages.items, [{ host: "example.com", path: "/", views: 2 }]);
 });
 
 // Deleting the event tagged _pageView is safe exactly when the

@@ -10,6 +10,7 @@ import {
   requireEnv,
 } from "./env.js";
 import { parseRetentionDays } from "./retention.js";
+import { siteHost } from "./url.js";
 import { parseLocalBackupsEnabled } from "./backup.js";
 
 // Every setting the server is started with, read once, in one place,
@@ -28,8 +29,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   // mount a persistent volume, so most deployments never set DB_PATH.
   // Overridable for running outside Docker.
   const dbPath = env.DB_PATH ?? "/data/genug.db";
+  const allowedOrigins = parseAllowedOrigins(requireEnv("ALLOWED_ORIGIN", env));
   return {
-    allowedOrigins: parseAllowedOrigins(requireEnv("ALLOWED_ORIGIN", env)),
+    allowedOrigins,
+    siteHosts: siteHostsOf(allowedOrigins),
     timezone: parseTimezone(requireEnv("TIMEZONE", env)),
     mcpApiKey: requireEnv("MCP_API_KEY", env),
     cockpitPassword: requireEnv("COCKPIT_PASSWORD", env),
@@ -81,4 +84,22 @@ function parseAllowedOrigins(value: string): ReadonlySet<string> {
     );
   }
   return origins;
+}
+
+// The sites the origins belong to, as siteHost (lib/url.ts) names them:
+// the only hosts /events stores a url on. An entry that is no origin at
+// all matched no browser's Origin header before either, so it fails here
+// rather than quietly allowing nothing.
+function siteHostsOf(origins: ReadonlySet<string>): ReadonlySet<string> {
+  return new Set(
+    [...origins].map((origin) => {
+      const host = siteHost(origin);
+      if (host === "") {
+        throw new Error(
+          `ALLOWED_ORIGIN entry "${origin}" is not an origin such as https://example.com`,
+        );
+      }
+      return host;
+    }),
+  );
 }

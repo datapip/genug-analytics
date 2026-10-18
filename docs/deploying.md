@@ -29,6 +29,40 @@ breaks two things:
   consentless visitors merge into one, and the rate limiter treats your
   whole audience as one client.
 
+### Several sites
+
+One installation can collect for several sites of **one controller**:
+the person or company named as responsible in each site's privacy
+notice. List every origin in `ALLOWED_ORIGIN`, comma-separated, and
+give **each site its own collector hostname** pointing at the same
+server, even when two sites share a domain: `data.site-a.com` and
+`data.site-b.com`, and `data.shop.example.com` and
+`data.blog.example.com`, never one `data.example.com` for both. Embed
+the script from the site's own collector hostname.
+
+The consent cookie belongs to the collector hostname. Shared, a
+visitor's consent on one site would be used on the other before that
+site's own banner has answered, and their visits on both would carry
+one identifier.
+
+An event whose page is not on a site `ALLOWED_ORIGIN` lists is refused
+and counted as rejected, so a site missing from the list shows up in
+the cockpit's rejected count rather than as missing traffic.
+
+The agent then answers for all sites together, or for one with the
+`host` segment (`www.` counts as the same site). Each site has its own
+visitors and sessions: one person on two sites counts once on each, so
+a total over all sites counts them twice.
+
+The sites share the events, the ground rules, `TIMEZONE`, retention,
+the MCP key and the cockpit password. **Sites of different controllers
+each need their own installation.** That includes clients' sites you
+build, host or run for them, where you act as their processor, and
+sister companies in one group, which are separate controllers. One
+installation shares its key, its cockpit, its retention and every
+erasure across all its sites, so it would mix one controller's visitor
+data with another's.
+
 ### If you must proxy through Cloudflare
 
 The usual reason is a firewall that only lets in Cloudflare's address

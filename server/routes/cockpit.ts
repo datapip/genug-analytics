@@ -20,6 +20,9 @@ export interface CockpitRouterDeps {
   // Refuses every write, see below.
   readOnly: boolean;
   timezone: string;
+  // The sites ALLOWED_ORIGIN lists; the top pages card names a row's
+  // site whenever there is more than one.
+  siteHosts: ReadonlySet<string>;
   // Typed again to confirm a danger-zone action (cockpit/danger.ts).
   cockpitPassword: string;
   // undefined keeps events forever; shown in the page's footnote.

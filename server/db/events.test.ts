@@ -15,7 +15,7 @@ test("findLastEventForVisitor returns undefined for an unknown visitor", () => {
   assert.equal(findLastEventForVisitor(db, "nobody"), undefined);
 });
 
-test("insertEvent then findLastEventForVisitor round-trips session_id and ts", () => {
+test("insertEvent then findLastEventForVisitor round-trips session_id, ts and url", () => {
   const db = setupDb();
   insertEvent(db, {
     event: "page_view",
@@ -30,6 +30,7 @@ test("insertEvent then findLastEventForVisitor round-trips session_id and ts", (
   assert.deepEqual(last, {
     sessionId: "session-1",
     ts: "2026-01-01T00:00:00.000Z",
+    url: "https://example.com",
   });
 });
 

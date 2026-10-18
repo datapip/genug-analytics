@@ -11,15 +11,20 @@ nothing on the visitor's device: no `localStorage` or
 `sessionStorage`, and no fingerprinting (no canvas, screen, font or
 hardware probing). The script reads the page URL, title and
 `<html lang>`, the referrer, its own opt-out cookie, and clicked links
-once `enableAutoLinkTracking` is on. The visitor ID is a hash of three things:
+once `enableAutoLinkTracking` is on. The visitor ID is a hash of four things:
 
 - the visitor's address, cut to its network block (IPv4 to `/24`, IPv6
   to `/48`: `203.0.113.47` becomes `203.0.113.0`);
 - the browser's User-Agent;
+- the site the page is on (its host, with `www.` dropped);
 - a random salt that is replaced every midnight in your `TIMEZONE`.
 
 So the same person gets a new ID every day, and two people sharing a
-network block and a browser count as one. The salt lives in one file
+network block and a browser count as one. If one installation collects
+for several of your sites, the same person on two of them gets two IDs,
+so without consent the analytics data never links their visits across
+sites. With consent neither does it, as long as each site has its own
+collector hostname ([several sites](deploying.md#several-sites)). The salt lives in one file
 beside the database (`daily-salt.json`), and Genug's own backup never
 copies it. While today's salt exists, someone with access to the server can
 recompute today's ID from a known address and User-Agent. After
@@ -56,14 +61,15 @@ only after the visitor accepts.
 ## What gets stored
 
 Every event is one row with these fields and nothing else. There is no
-profile, no cross-site identifier, and no raw address or User-Agent in
-the database. This is the list to write your privacy notice from.
+profile, no identifier shared between sites (as long as each has its
+own collector hostname, see [several sites](deploying.md#several-sites)),
+and no raw address or User-Agent in the database. This is the list to write your privacy notice from.
 
 | Field              | Where it comes from                                                                  |
 | ------------------ | ------------------------------------------------------------------------------------ |
 | `event`            | The event name, e.g. `page_view`                                                     |
 | `visitor_id`       | Derived server-side: the daily hash, or the cookie value once consented              |
-| `session_id`       | Assigned server-side; a new one after 30 minutes of inactivity                       |
+| `session_id`       | Assigned server-side; a new one after 30 minutes of inactivity, or on another site   |
 | `ts`               | The server's clock, UTC — never the visitor's                                        |
 | `url`, `referrer`  | Sent by the script, with query strings filtered as below                             |
 | `device_type`      | What the `User-Agent` header classified to: `mobile`, `tablet`, `desktop` or `other` |
@@ -219,8 +225,9 @@ apply, and have your lawyer add the legal basis and check the rest.
 > **How we tell visits apart.** We do not store your IP address in
 > the analytics data, and we set no cookie for this. Instead we shorten
 > your IP address (e.g. 203.0.113.47 becomes 203.0.113.0), combine it
-> with your browser's identification string and a key that changes
-> every day, and store only a hash of the result. We can therefore
+> with your browser's identification string, the address of this
+> website (e.g. example.com) and a key that changes every day, and store only a hash of the
+> result. We can therefore
 > recognise repeated visits on the same day, but not across days. The
 > key is random and is replaced at the end of each day. After that,
 > nobody, including us, can link the stored code to an IP address.
@@ -228,14 +235,17 @@ apply, and have your lawyer add the legal basis and check the rest.
 > shortened address belongs to, and store only the country code.] If
 > our server blocks unusually many requests from one address, it writes
 > that address to a log, which is kept for [period].
+> [We use the same analytics installation for our websites [list].
+> Your visits to each are counted separately and are not linked to
+> each other, with or without consent.]
 >
 > **Legal basis.** [Your lawyer fills this in.]
 >
 > [**With your consent.** If you agree in our cookie settings, we set a
 > cookie named `genug_vid`, so that we can tell returning visitors from
 > new ones. It holds an identifier, computed on the day you consent
-> from your shortened IP address and your browser's identification
-> string. Events from earlier that day are then linked to it. It
+> from your shortened IP address, your browser's identification string
+> and the address of this website. Events from earlier that day are then linked to it. It
 > expires 13 months after your consent was last confirmed to us [, in
 > practice after your last visit with consent given]. You can withdraw
 > your consent at any time in [link to cookie settings]; the cookie is then
@@ -270,6 +280,8 @@ Notes on the brackets:
   `KEPT_QUERY_PARAMS` or `KEPT_HASH_VALUES`, list what you run, or say
   "with its query string and fragment kept in full" for `*`.
 - **Country.** Only if `COUNTRY_LOOKUP` is on.
+- **Several sites.** Only if one installation collects for several of
+  your sites, each with its own collector hostname. List the sites.
 - **Page title and links.** Only if `enableAutoPageTracking` or
   `enableAutoLinkTracking` is on. List your own events by what they
   record, not by their names.

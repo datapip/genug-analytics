@@ -60,7 +60,7 @@ const REJECTED_EVENTS_LIMIT = 5;
 const READ_ONLY_DATA_CACHE_MS = 30 * 1000;
 
 function cockpitData(
-  { db, readOnly, timezone, retentionDays }: CockpitRouterDeps,
+  { db, readOnly, timezone, siteHosts, retentionDays }: CockpitRouterDeps,
   period: ReturnType<typeof windowPeriod>,
   now: Date,
 ) {
@@ -83,6 +83,10 @@ function cockpitData(
     // hasn't resolved yet; the cockpit treats both the same way.
     latestVersion,
     retentionDays: retentionDays ?? null,
+    // From the configuration, not from the rows a period returned, so a
+    // two-site installation names the site on every page row even when
+    // the top ones all happen to be one site's.
+    siteHosts: [...siteHosts],
     trafficSummary: getTrafficSummary(db, period, pageViewEventType),
     botActivityCount: getBotActivityCount(db, period),
     // All time, not the selected period: "is anything arriving" is the

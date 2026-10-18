@@ -686,11 +686,15 @@ button.is-loading svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bar-main,
 .bar-sub {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-sub {
   font-size: 0.72rem;
   color: var(--ink-muted);
-  text-transform: capitalize;
 }
 .bar-value {
   position: relative;

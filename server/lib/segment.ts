@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Period } from "./period.js";
-import { parseUrl } from "./url.js";
+import { bareHost, parseUrl, siteHost } from "./url.js";
 import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
 
 // A segment is a set of sessions, described by conditions that are all
@@ -34,6 +34,9 @@ export type SegmentCondition =
   // A two-letter code, or "ZZ" for looked up and not found
   // (lib/country.ts).
   | { kind: "country"; value: string }
+  // The site the session was on, folded through bareHost: one
+  // installation may collect for several (siteHost in lib/url.ts).
+  | { kind: "host"; value: string }
   // Where the session's entry page view came from; null = direct.
   | { kind: "referrerHost"; value: string | null }
   // The path of the session's entry page view.
@@ -69,6 +72,8 @@ export function buildSegment(
   let entries: EntryPageView[] | undefined;
   const entryPageViews = () =>
     (entries ??= entrySessions(db, period, pageViewEvent));
+  let hosts: SessionHost[] | undefined;
+  const sessionHostRows = () => (hosts ??= sessionHosts(db, period));
 
   conditions.forEach((condition, index) => {
     const p = (name: string) => `s${index}_${name}`;
@@ -155,6 +160,20 @@ export function buildSegment(
         );
         break;
       }
+      case "host": {
+        // By the session's first event in the period, like country, and
+        // not its entry page view: a session of custom events only has
+        // a site too. A session stored since 0.13.0 never changes site
+        // (lib/session.ts); an older one that did is filed under its
+        // first, as periodHosts files it.
+        const ids = sessionHostRows()
+          .filter((row) => siteHost(row.url) === condition.value)
+          .map((row) => row.sessionId);
+        fragments.push(
+          `SELECT value FROM json_each(${bind("ids", JSON.stringify(ids))})`,
+        );
+        break;
+      }
       case "referrerHost":
       case "entryPath":
       case "entryParam": {
@@ -181,6 +200,40 @@ export function buildSegment(
       .join(""),
     params,
   };
+}
+
+interface SessionHost {
+  sessionId: string;
+  url: string;
+}
+
+// The first event of every session in the period, for its url.
+function sessionHosts(db: Database.Database, period: Period): SessionHost[] {
+  return db
+    .prepare(
+      `SELECT session_id AS sessionId, url, MIN(ts) AS first_ts
+       FROM events
+       WHERE ts BETWEEN @from AND @to
+       GROUP BY session_id`,
+    )
+    .all({ from: period.from, to: period.to }) as SessionHost[];
+}
+
+// The sites with a session in the period, so a host segment naming
+// none of them is refused with the list rather than matched against
+// nothing — a typo'd host would otherwise read as a site with no
+// visitors. Busiest first: the url is the sender's to write, so a
+// stranger posting to /events can add hosts, and the caller lists only
+// the first few.
+export function periodHosts(db: Database.Database, period: Period): string[] {
+  const sessions = new Map<string, number>();
+  for (const row of sessionHosts(db, period)) {
+    const host = siteHost(row.url);
+    if (host !== "") sessions.set(host, (sessions.get(host) ?? 0) + 1);
+  }
+  return [...sessions.entries()]
+    .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+    .map(([host]) => host);
 }
 
 interface EntryPageView {
@@ -246,8 +299,4 @@ export function queryParam(url: string, name: string): string | null {
     if (key.toLowerCase() === wanted) return value;
   }
   return null;
-}
-
-export function bareHost(host: string): string {
-  return host.replace(/^www\./i, "").toLowerCase();
 }

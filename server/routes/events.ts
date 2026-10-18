@@ -25,7 +25,7 @@ import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
 import { isBotUserAgent } from "../lib/bots.js";
 import { classifyUserAgent } from "../lib/userAgent.js";
-import { stripUnknownParams } from "../lib/url.js";
+import { siteHost, stripUnknownParams } from "../lib/url.js";
 import { recordBotHit, botActivityCounter } from "../lib/botActivity.js";
 import { parseCookies } from "../lib/cookies.js";
 import type { DailySalt } from "../lib/dailySalt.js";
@@ -150,6 +150,10 @@ function cors(
 export interface EventsRouterDeps {
   db: Database.Database;
   allowedOrigins: ReadonlySet<string>;
+  // The sites of those origins (siteHost, lib/url.ts). An event's url
+  // must be on one: the url is the sender's to write, and its host
+  // decides the visitor, the session and what the host segment lists.
+  siteHosts: ReadonlySet<string>;
   dailySalt: DailySalt;
   // Stops storing a little before the volume is full (lib/diskSpace.ts).
   diskGuard: DiskGuard;
@@ -247,7 +251,7 @@ function receiveEvent(
     return;
   }
 
-  const checked = checkEvent(req.body);
+  const checked = checkEvent(req.body, deps.siteHosts);
   if (!checked.ok) {
     const { reason, event, detail, error } = checked.rejection;
     insertRejectedEvent(deps.db, reason, now.toISOString(), event, detail);
@@ -265,10 +269,27 @@ function receiveEvent(
 
 // Every check a body goes through before it may become a row, in order.
 // Each step refuses with the reason the cockpit then counts it under.
-function checkEvent(body: unknown): Checked<ValidEvent> {
+function checkEvent(
+  body: unknown,
+  siteHosts: ReadonlySet<string>,
+): Checked<ValidEvent> {
   const parsed = parseEnvelope(body);
   if (!parsed.ok) return parsed;
   const { envelope, url, referrer } = parsed.value;
+
+  // A browser only gets this far from a page on an allowed origin (the
+  // CORS preflight), and the script sends that page's own address, so
+  // this refuses nothing real. Anything else is a hand-made request
+  // planting a site: a lookalike host for the agent to pick, or text in
+  // the host list the host segment's error shows it.
+  if (!siteHosts.has(siteHost(url))) {
+    return reject({
+      reason: "invalid_envelope",
+      event: envelope.event,
+      detail: "url is not on a site ALLOWED_ORIGIN lists",
+      error: "invalid envelope",
+    });
+  }
 
   const name = resolveEventName(envelope);
   if (!name.ok) return name;
@@ -444,6 +465,9 @@ function storeEvent(
   const device =
     userAgent === undefined ? undefined : classifyUserAgent(userAgent);
   const visitorLanguage = parsePrimaryLanguage(req.headers["accept-language"]);
+  // Which of the installation's sites this event is from, for the
+  // visitor hash and the session (lib/url.ts).
+  const site = siteHost(event.url);
 
   // Who this request belongs to, and what that means for their cookie.
   // The decision is lib/identity.ts's; applying it is this route's,
@@ -452,6 +476,7 @@ function storeEvent(
   const { visitorId, consentful, cookie } = resolveVisitorIdentity({
     consent: event.envelope.consent,
     visitorCookie: parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE],
+    site,
     ip,
     userAgent,
     salt: dailySalt.saltFor(now),
@@ -467,7 +492,7 @@ function storeEvent(
   }
 
   const lastEvent = findLastEventForVisitor(db, visitorId);
-  const sessionId = resolveSessionId(lastEvent, now);
+  const sessionId = resolveSessionId(lastEvent, now, site);
 
   insertEvent(db, {
     event: event.name,

@@ -117,8 +117,8 @@ visibly broken, which is the failure mode this project cares most about.
   served as the `get_deployment_context` tool, word-for-word the same
   text — a client that never calls `resources/read` (several
   connector UIs don't) otherwise has no path to this document at all.
-  The server's own MCP `instructions` (`SERVER_INSTRUCTIONS` in
-  `mcp/shared.ts`) point at both, since that field reaches the agent
+  The server's own MCP `instructions` (`serverInstructions` in
+  `mcp/shared.ts`, which also names the installation's sites) point at both, since that field reaches the agent
   before it has decided to call anything — the one guaranteed delivery
   of the three, for clients that honor it. It names the resource and the
   tool, never repeats their content, so there is still exactly one place
@@ -180,7 +180,17 @@ visibly broken, which is the failure mode this project cares most about.
 - A cockpit rename knows both names, so it offers to carry the stored
   rows across. Moving rows onto rows already under the target name is
   refused (a permanent merge); inheriting them is allowed but disclosed.
-- Single-tenant. Never add `tenant_id` or any multi-tenancy scaffolding.
+- Single-tenant: one installation is one controller. It may collect for
+  several of that controller's sites (`ALLOWED_ORIGIN`), told apart only by
+  the host of each row's `url` — `siteHost` in `lib/url.ts`, which the
+  visitor hash, the session and the `host` segment all go through, so
+  they agree on which site a session was on. Never add `tenant_id`, a
+  site column or per-site settings; several controllers are several
+  installations. Each site needs its own collector hostname, or the
+  consent cookie is shared between sites. `/events` refuses a url on a
+  host `ALLOWED_ORIGIN` does not list (`siteHosts` in `lib/config.ts`):
+  the url is the sender's to write, and an unlisted host would become a
+  site the agent is offered.
 
 **Queries and tools**
 
@@ -290,7 +300,9 @@ false` and a `destructiveHint`), so a client knows to ask before
 
 - Consentless is the default and sets no identifying cookie:
   `visitor_id` hashes a **truncated** address (IPv4 /24, IPv6 /48,
-  `truncateIp` in `lib/ip.ts`) + User-Agent + a daily salt. The salt is
+  `truncateIp` in `lib/ip.ts`) + User-Agent + the site + a daily salt.
+  The site is there so one person on two of the installation's sites is
+  two visitors, never linked across them. The salt is
   random and kept only for its day (`lib/dailySalt.ts`); never derive
   it from a lasting secret, or every past day's IDs can be rebuilt. Never
   persist anything per-visitor in that mode; the one exception written

@@ -30,6 +30,22 @@ test("an ALLOWED_ORIGIN naming no origin is refused", () => {
   );
 });
 
+test("ALLOWED_ORIGIN's sites fold www into the apex", () => {
+  const config = loadConfig({
+    ...REQUIRED,
+    ALLOWED_ORIGIN:
+      "https://example.com, https://www.example.com, https://shop.example.com",
+  });
+  assert.deepEqual([...config.siteHosts], ["example.com", "shop.example.com"]);
+});
+
+test("an ALLOWED_ORIGIN entry that is no origin is refused by name", () => {
+  assert.throws(
+    () => loadConfig({ ...REQUIRED, ALLOWED_ORIGIN: "example.com" }),
+    /"example\.com" is not an origin/,
+  );
+});
+
 test("a missing required setting is refused by name", () => {
   for (const name of Object.keys(REQUIRED)) {
     const env: Record<string, string> = { ...REQUIRED };

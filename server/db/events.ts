@@ -62,6 +62,7 @@ export function insertEvent(db: Database.Database, row: EventRow): boolean {
 export interface LastEvent {
   sessionId: string;
   ts: string;
+  url: string;
 }
 
 export function findLastEventForVisitor(
@@ -70,10 +71,11 @@ export function findLastEventForVisitor(
 ): LastEvent | undefined {
   const row = db
     .prepare(
-      `SELECT session_id, ts FROM events WHERE visitor_id = ? ORDER BY ts DESC LIMIT 1`,
+      `SELECT session_id, ts, url FROM events WHERE visitor_id = ? ORDER BY ts DESC LIMIT 1`,
     )
-    .get(visitorId) as { session_id: string; ts: string } | undefined;
+    .get(visitorId) as
+    { session_id: string; ts: string; url: string } | undefined;
 
   if (!row) return undefined;
-  return { sessionId: row.session_id, ts: row.ts };
+  return { sessionId: row.session_id, ts: row.ts, url: row.url };
 }

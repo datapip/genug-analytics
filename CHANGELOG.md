@@ -30,6 +30,23 @@ how a version is cut.
 
 **Changed**
 
+- **The visitor hash now includes the site**, so one person on two
+  sites of one installation is two visitors, never linked across them
+  without consent. Give each site its own collector hostname so the
+  consent cookie isn't shared either. If two subdomain sites share one
+  collector hostname today, split it.
+  Every consentless visitor id changes once on upgrade: a visitor seen
+  both before and after it that day counts twice. A visitor moving to
+  another site also starts a new session. If your privacy notice
+  follows the template, add "the address of this website" to how
+  visits are told apart and to the consent paragraph (`docs/privacy.md`).
+- **`/events` refuses an event whose page is not on a site
+  `ALLOWED_ORIGIN` lists**, counted as rejected (`invalid_envelope`).
+  Browsers could already only send from those origins, so this only
+  stops hand-made requests planting other sites. If your pages are on
+  the collector's own origin, add it to `ALLOWED_ORIGIN` before
+  upgrading. An `ALLOWED_ORIGIN` entry that is not an origin, such as
+  `example.com` without `https://`, now stops the server at startup.
 - **The database gains a `country` column on first start**, empty
   unless the lookup is on. An older image then refuses to start on that
   database; to go back to 0.12, restore a backup taken before the
@@ -109,6 +126,13 @@ how a version is cut.
   the bracketed country sentences from the template in
   `docs/privacy.md` to your privacy notice before turning it on. Rows
   stored before then have no country.
+- **Several sites of one controller in one installation.** List their origins
+  in `ALLOWED_ORIGIN` and ask about all of them, or about one with the
+  new `host` segment on every period tool. Rows from the four page tools
+  carry a `host` field, so `/` on two sites is two rows, and the MCP
+  server's name and instructions say which sites the installation
+  collects for. `docs/deploying.md` has the setup: a collector hostname
+  per site, and an installation per controller.
 - **Each release now has a GitHub Release** with its changelog section,
   so watching the repository for releases tells you about new versions.
 - **`SECURITY.md`** says how to report a vulnerability

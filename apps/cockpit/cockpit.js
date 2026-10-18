@@ -859,9 +859,22 @@
           }),
           el(
             "div",
-            { className: "bar-label", title: getLabel(row) },
+            {
+              className: "bar-label",
+              title: sub ? `${getLabel(row)} on ${sub}` : getLabel(row),
+            },
+            // Two lines, each cut short on its own: on one, a long sub-label
+            // in front would push the part that tells rows apart out of
+            // a phone's width. The hidden " on " makes the pair read as
+            // one phrase ("/cart on shop.example.com").
             sub
-              ? [getLabel(row), el("span", { className: "bar-sub" }, [sub])]
+              ? [
+                  el("span", { className: "bar-main" }, [getLabel(row)]),
+                  el("span", { className: "bar-sub" }, [
+                    el("span", { className: "visually-hidden" }, [" on "]),
+                    sub,
+                  ]),
+                ]
               : [getLabel(row)],
           ),
           el("div", { className: "bar-value" }, [compactNumber.format(value)]),
@@ -870,12 +883,18 @@
     }
   }
 
-  function renderTopPages(topPages) {
+  // A row is a path on one site (lib/content.ts). On an installation
+  // with several sites every row names its site, even when the top ones
+  // are all one site's, or they read as both sites' together; with one
+  // it would only repeat the same name on every row.
+  function renderTopPages(topPages, siteHosts) {
+    const severalSites = siteHosts.length > 1;
     renderBarList(
       "top-pages",
       topPages,
       (page) => page.path,
       (page) => page.views,
+      { getSubLabel: severalSites ? (page) => page.host : undefined },
     );
   }
 
@@ -2436,7 +2455,7 @@
     renderConsentNote(data.consentBreakdown);
     renderRejectedEvents(data.topRejectedEvents);
     renderCurrentTrend();
-    renderTopPages(data.topPages);
+    renderTopPages(data.topPages, data.siteHosts);
     renderTopReferrers(data.topReferrers);
     renderDeviceBreakdown(data.deviceBreakdown);
     schemaEditable = data.schemaEditable === true;

@@ -61,8 +61,8 @@ test("getTopPages ranks paths by page_view count within the period, respecting l
   ).items;
 
   assert.deepEqual(result, [
-    { path: "/", views: 3 },
-    { path: "/pricing", views: 2 },
+    { host: "example.com", path: "/", views: 3 },
+    { host: "example.com", path: "/pricing", views: 2 },
   ]);
 });
 
@@ -92,7 +92,68 @@ test("getTopPages merges URLs that only differ by query string or hash", () => {
     "page_view",
   ).items;
 
-  assert.deepEqual(result, [{ path: "/blog/post-1", views: 4 }]);
+  assert.deepEqual(result, [
+    { host: "example.com", path: "/blog/post-1", views: 4 },
+  ]);
+});
+
+// One installation may collect for several sites, and "/" on two of
+// them is two pages; www is the same site, so it folds into the apex.
+test("the page queries keep one site's path apart from another's", () => {
+  const db = setupDb();
+  const views: [string, string][] = [
+    ["s1", "https://shop.example.com/"],
+    ["s2", "https://shop.example.com/"],
+    ["s3", "https://example.com/"],
+    ["s4", "https://www.example.com/"],
+    ["s5", "https://Blog.Example.com/"],
+  ];
+  views.forEach(([sessionId, url], i) => {
+    insertEvent(db, {
+      event: "page_view",
+      visitorId: sessionId,
+      sessionId,
+      ts: `2026-01-01T10:0${i}:00.000Z`,
+      url,
+      props: {},
+    });
+  });
+
+  for (const query of [
+    getTopPages,
+    getEntryPages,
+    getExitPages,
+    getBouncePages,
+  ]) {
+    const counted = Object.fromEntries(
+      query(db, PERIOD, 10, "page_view").items.map((row) => [
+        `${row.host}${row.path}`,
+        "views" in row ? row.views : row.sessions,
+      ]),
+    );
+    assert.deepEqual(
+      counted,
+      { "shop.example.com/": 2, "example.com/": 2, "blog.example.com/": 1 },
+      query.name,
+    );
+  }
+
+  // A url that does not parse keeps its whole text as the path, on no
+  // site, and a newline in it must not move where the key splits.
+  insertEvent(db, {
+    event: "page_view",
+    visitorId: "s6",
+    sessionId: "s6",
+    ts: "2026-01-01T10:09:00.000Z",
+    url: "not-a-url\nsecond line",
+    props: {},
+  });
+  assert.deepEqual(
+    getTopPages(db, PERIOD, 10, "page_view").items.find(
+      (row) => row.host === "",
+    ),
+    { host: "", path: "not-a-url\nsecond line", views: 1 },
+  );
 });
 
 test("getTopReferrers counts sessions and buckets no-referrer as direct (null)", () => {
@@ -359,8 +420,8 @@ test("getEntryPages ranks sessions by their first page-view path", () => {
   const result = getEntryPages(db, PERIOD, 10, "page_view").items;
 
   assert.deepEqual(result, [
-    { path: "/home", sessions: 2 },
-    { path: "/pricing", sessions: 1 },
+    { host: "example.com", path: "/home", sessions: 2 },
+    { host: "example.com", path: "/pricing", sessions: 1 },
   ]);
 });
 
@@ -411,8 +472,8 @@ test("getExitPages ranks sessions by their last page-view path", () => {
   const result = getExitPages(db, PERIOD, 10, "page_view").items;
 
   assert.deepEqual(result, [
-    { path: "/checkout", sessions: 2 },
-    { path: "/about", sessions: 1 },
+    { host: "example.com", path: "/checkout", sessions: 2 },
+    { host: "example.com", path: "/about", sessions: 1 },
   ]);
 });
 
@@ -472,8 +533,20 @@ test("getBouncePages reports bounce rate per entry page, sessions and bounced co
   const result = getBouncePages(db, PERIOD, 10, "page_view").items;
 
   assert.deepEqual(result, [
-    { path: "/home", sessions: 2, bounced: 2, bounceRate: 1 },
-    { path: "/landing", sessions: 3, bounced: 2, bounceRate: 0.6667 },
+    {
+      host: "example.com",
+      path: "/home",
+      sessions: 2,
+      bounced: 2,
+      bounceRate: 1,
+    },
+    {
+      host: "example.com",
+      path: "/landing",
+      sessions: 3,
+      bounced: 2,
+      bounceRate: 0.6667,
+    },
   ]);
 });
 
@@ -581,7 +654,7 @@ test("getEntryPages counts a page view landing exactly on the period's start", (
   });
 
   assert.deepEqual(getEntryPages(db, STRADDLE_PERIOD, 10, "page_view").items, [
-    { path: "/first", sessions: 1 },
+    { host: "example.com", path: "/first", sessions: 1 },
   ]);
 });
 
@@ -589,7 +662,7 @@ test("getEntryPages ignores a session that began before the period", () => {
   const db = setupDb();
   straddlingSessions(db);
   assert.deepEqual(getEntryPages(db, STRADDLE_PERIOD, 10, "page_view").items, [
-    { path: "/blog", sessions: 1 },
+    { host: "example.com", path: "/blog", sessions: 1 },
   ]);
 });
 
@@ -597,7 +670,7 @@ test("getExitPages reports a session's real last page, even after the period's e
   const db = setupDb();
   straddlingSessions(db);
   assert.deepEqual(getExitPages(db, STRADDLE_PERIOD, 10, "page_view").items, [
-    { path: "/contact", sessions: 1 },
+    { host: "example.com", path: "/contact", sessions: 1 },
   ]);
 });
 
@@ -606,7 +679,13 @@ test("getBouncePages judges a session on its full length, not the part inside th
   straddlingSessions(db);
   // s1 is not this period's; s2 read two pages, so nothing bounced.
   assert.deepEqual(getBouncePages(db, STRADDLE_PERIOD, 10, "page_view").items, [
-    { path: "/blog", sessions: 1, bounced: 0, bounceRate: 0 },
+    {
+      host: "example.com",
+      path: "/blog",
+      sessions: 1,
+      bounced: 0,
+      bounceRate: 0,
+    },
   ]);
 });
 
@@ -633,7 +712,7 @@ test("getTopPages reports groups and total beyond the limit", () => {
   }
 
   assert.deepEqual(getTopPages(db, PERIOD, 1, "page_view"), {
-    items: [{ path: "/a", views: 3 }],
+    items: [{ host: "example.com", path: "/a", views: 3 }],
     groups: 3,
     total: 6,
   });
@@ -674,8 +753,20 @@ test("getBouncePages ranks by bounced sessions, keeping the rate on the row", ()
 
   assert.deepEqual(getBouncePages(db, PERIOD, 10, "page_view"), {
     items: [
-      { path: "/big", sessions: 3, bounced: 2, bounceRate: 0.6667 },
-      { path: "/tiny", sessions: 1, bounced: 1, bounceRate: 1 },
+      {
+        host: "example.com",
+        path: "/big",
+        sessions: 3,
+        bounced: 2,
+        bounceRate: 0.6667,
+      },
+      {
+        host: "example.com",
+        path: "/tiny",
+        sessions: 1,
+        bounced: 1,
+        bounceRate: 1,
+      },
     ],
     groups: 2,
     total: 3,

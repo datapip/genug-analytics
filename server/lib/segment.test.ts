@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { migrate } from "../db/migrations.js";
 import { insertEvent } from "../db/events.js";
-import { buildSegment, type SegmentCondition } from "./segment.js";
+import { buildSegment, periodHosts, type SegmentCondition } from "./segment.js";
 import { getTrafficSummary, getSessionSummary } from "./traffic.js";
 import { getEntryPages } from "./content.js";
 import type { Period } from "./period.js";
@@ -643,6 +643,82 @@ test("a country condition goes by the session's first event", () => {
   assert.equal(summaryFor(db, [{ kind: "country", value: "AT" }]).sessions, 0);
 });
 
+test("a host condition selects the sessions on that site, www folded into the apex", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://example.com/");
+  visit(db, "s2", "https://www.example.com/pricing");
+  visit(db, "s3", "https://shop.example.com/");
+  // A session of custom events only still has a site.
+  insertEvent(db, {
+    event: "signup",
+    visitorId: "v-s4",
+    sessionId: "s4",
+    ts: "2026-01-01T10:00:00.000Z",
+    url: "https://shop.example.com/checkout",
+    props: {},
+  });
+
+  assert.equal(
+    summaryFor(db, [{ kind: "host", value: "example.com" }]).sessions,
+    2,
+  );
+  assert.equal(
+    summaryFor(db, [{ kind: "host", value: "shop.example.com" }]).sessions,
+    2,
+  );
+});
+
+// Sessions stored before 0.13.0 could cross sites under one consent
+// cookie. The segment and the host list must file one under the same
+// site — its first — or it is counted under one and listed under another.
+test("a session that crossed sites is filed under its first one", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://blog.example.com/");
+  visit(db, "s1", "https://shop.example.com/", {
+    ts: "2026-01-01T10:05:00.000Z",
+  });
+
+  assert.equal(
+    summaryFor(db, [{ kind: "host", value: "blog.example.com" }]).sessions,
+    1,
+  );
+  assert.equal(
+    summaryFor(db, [{ kind: "host", value: "shop.example.com" }]).sessions,
+    0,
+  );
+  assert.deepEqual(periodHosts(db, PERIOD), ["blog.example.com"]);
+});
+
+test("a host condition intersects with the others", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://shop.example.com/", { deviceType: "mobile" });
+  visit(db, "s2", "https://shop.example.com/", { deviceType: "desktop" });
+  visit(db, "s3", "https://example.com/", { deviceType: "mobile" });
+
+  assert.equal(
+    summaryFor(db, [
+      { kind: "host", value: "shop.example.com" },
+      { kind: "deviceType", value: "mobile" },
+    ]).sessions,
+    1,
+  );
+});
+
+test("periodHosts lists each site with a session in the period once", () => {
+  const db = setupDb();
+  visit(db, "s1", "https://example.com/");
+  visit(db, "s2", "https://www.example.com/");
+  visit(db, "s3", "https://shop.example.com/");
+  visit(db, "s4", "https://elsewhere.example/", {
+    ts: "2025-06-01T10:00:00.000Z",
+  });
+
+  assert.deepEqual(periodHosts(db, PERIOD), [
+    "example.com",
+    "shop.example.com",
+  ]);
+});
+
 test("a language condition matches regional variants of a bare language, and null the missing header", () => {
   const db = setupDb();
   visit(db, "s1", "https://example.com/", { visitorLanguage: "en-US" });
@@ -758,7 +834,7 @@ test("an event condition keeps a session that started in the period and did the 
 
   assert.equal(getSessionSummary(db, PERIOD, "page_view", clause).sessions, 1);
   assert.deepEqual(getEntryPages(db, PERIOD, 10, "page_view", clause).items, [
-    { path: "/", sessions: 1 },
+    { host: "example.com", path: "/", sessions: 1 },
   ]);
 });
 

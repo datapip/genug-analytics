@@ -79,6 +79,7 @@ export function createApp({
     createEventsRouter({
       db,
       allowedOrigins: config.allowedOrigins,
+      siteHosts: config.siteHosts,
       dailySalt,
       diskGuard: createDiskGuard(config.dataDir),
       // Loaded here, so a missing or broken table stops the start
@@ -98,6 +99,7 @@ export function createApp({
       mcpApiKey: config.mcpApiKey,
       readOnly: config.readOnly,
       timezone: config.timezone,
+      siteHosts: config.siteHosts,
     }),
   );
 
@@ -179,6 +181,7 @@ function mountCockpit(
       db,
       readOnly: config.readOnly,
       timezone: config.timezone,
+      siteHosts: config.siteHosts,
       cockpitPassword: config.cockpitPassword,
       retentionDays: config.retentionDays,
     }),

@@ -92,9 +92,10 @@ the disk limits how fast events are written. Run
     `HttpOnly`, so you read it from a request that person makes, not by
     asking them to look it up.
   - **A consentless visitor's** ID can be recomputed only on the day of
-    the visit, before midnight in your `TIMEZONE`, from their address
-    and their browser's User-Agent. After that the salt is gone, and
-    their rows can't be found.
+    the visit, before midnight in your `TIMEZONE`, from their address,
+    their browser's User-Agent and the site they visited (one ID per
+    site, `www.` folded). After that the salt is gone, and their rows
+    can't be found.
 
   How to answer an access or erasure request you can't match is a
   question for your lawyer.

@@ -26,6 +26,12 @@ import {
 // event, which the schema registry guarantees exists (exactly one
 // registered event carries the pageView tag), so none of them has an
 // "unavailable here" case to report.
+
+// The four page tools group by site as well as path (lib/content.ts),
+// so "/" on two of an installation's sites never merges into one row.
+const PAGE_ROW =
+  'Each row is one page on one site: "host" is the site (www folded into the apex) and "path" the page on it, so the same path on two sites is two rows. Narrow to one site with the host segment.';
+
 export const registerContentTools: ToolRegistrar = (
   server,
   db,
@@ -35,7 +41,7 @@ export const registerContentTools: ToolRegistrar = (
   server.registerTool(
     "get_top_pages",
     {
-      description: `Get the most-visited pages for a given time period, ranked by views (page-view events) descending. Pages are grouped by path: query string and fragment are dropped, and so is the host, so a deployment serving several domains sees the same path on each merged into one row. ${rankedShape("views")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get the most-visited pages for a given time period, ranked by views (page-view events) descending. Query string and fragment are dropped. ${PAGE_ROW} ${rankedShape("views")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         ...period,
         ...segmentInput,
@@ -54,7 +60,7 @@ export const registerContentTools: ToolRegistrar = (
   server.registerTool(
     "get_top_entry_pages",
     {
-      description: `Get the pages visitors most often land on first, ranked by number of sessions that started there, descending. Counts sessions that STARTED in the period, by their first page view — a session already under way when the period began belongs to the earlier period and is not counted here, so these totals can be lower than get_traffic_summary's session count for the same period, which counts every session active in it. Different from get_top_pages, which counts every view regardless of position in the session. ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get the pages visitors most often land on first, ranked by number of sessions that started there, descending. Counts sessions that STARTED in the period, by their first page view — a session already under way when the period began belongs to the earlier period and is not counted here, so these totals can be lower than get_traffic_summary's session count for the same period, which counts every session active in it. Different from get_top_pages, which counts every view regardless of position in the session. ${PAGE_ROW} ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         ...period,
         ...segmentInput,
@@ -73,7 +79,7 @@ export const registerContentTools: ToolRegistrar = (
   server.registerTool(
     "get_top_exit_pages",
     {
-      description: `Get the pages visitors most often leave the site from, ranked by number of sessions that ended there, descending. Counts sessions that STARTED in the period and reports each one's genuine last page view, even where it fell after the period's end — so a session that began late in the period is attributed to its real exit page, not to whatever it happened to be viewing at the cutoff. A high count here isn't necessarily bad — it can mean a natural end point (e.g. a checkout confirmation page) or a place people give up. ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get the pages visitors most often leave the site from, ranked by number of sessions that ended there, descending. Counts sessions that STARTED in the period and reports each one's genuine last page view, even where it fell after the period's end — so a session that began late in the period is attributed to its real exit page, not to whatever it happened to be viewing at the cutoff. A high count here isn't necessarily bad — it can mean a natural end point (e.g. a checkout confirmation page) or a place people give up. ${PAGE_ROW} ${rankedShape("sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         ...period,
         ...segmentInput,
@@ -92,7 +98,7 @@ export const registerContentTools: ToolRegistrar = (
   server.registerTool(
     "get_top_bounce_pages",
     {
-      description: `Get the entry pages that lose the most visitors: of the sessions that entered on each page, how many viewed no other page ("bounced"), ranked by that bounced count descending — not by rate, which would put a page with one session and one bounce above one with 500 sessions and 400 bounces. Each row also carries the entry sessions and the bounce rate (0-1) for reading. Only sessions that STARTED in the period count, and each is judged on its full length, so a session that read three pages before the period began is never mistaken for a bounce. A bounce is one page view, whatever else happened: a one-view session that downloaded a file still bounced. For the site-wide bounce rate use get_session_summary. ${rankedShape("bounced sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
+      description: `Get the entry pages that lose the most visitors: of the sessions that entered on each page, how many viewed no other page ("bounced"), ranked by that bounced count descending — not by rate, which would put a page with one session and one bounce above one with 500 sessions and 400 bounces. Each row also carries the entry sessions and the bounce rate (0-1) for reading. Only sessions that STARTED in the period count, and each is judged on its full length, so a session that read three pages before the period began is never mistaken for a bounce. A bounce is one page view, whatever else happened: a one-view session that downloaded a file still bounced. For the site-wide bounce rate use get_session_summary. ${PAGE_ROW} ${rankedShape("bounced sessions")} ${SEGMENT_HINT} ${VISITOR_TEXT_CAVEAT}`,
       inputSchema: {
         ...period,
         ...segmentInput,

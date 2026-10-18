@@ -182,3 +182,21 @@ export function parseUrl(rawUrl: string): ParsedUrl {
     return { path: rawUrl, params: "", hash: "", host: "" };
   }
 }
+
+// Apex and www fold together: a site reachable at both is one site
+// served twice. Only `www` is folded — anything more (blog.example.com
+// and shop.example.com as one site) needs a public suffix list to tell
+// a subdomain from a separate registrable domain, and that is a
+// dependency this project won't take.
+export function bareHost(host: string): string {
+  return host.replace(/^www\./i, "").toLowerCase();
+}
+
+// The site a page belongs to. One installation may collect for several
+// sites of one owner (ALLOWED_ORIGIN), and the page's host is what tells
+// them apart — in the visitor hash, in where a session ends and in the
+// host segment, which must all agree or a session would sit under one
+// site and be counted under another. An unparseable url gives "".
+export function siteHost(rawUrl: string): string {
+  return bareHost(parseUrl(rawUrl).host);
+}

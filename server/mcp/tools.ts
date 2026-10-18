@@ -3,7 +3,7 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type Database from "better-sqlite3";
 import {
   invertedPeriodError,
-  SERVER_INSTRUCTIONS,
+  serverInstructions,
   type ToolRegistrar,
 } from "./shared.js";
 import { registerRegistryTools } from "./registry.js";
@@ -64,6 +64,10 @@ export interface McpServerOptions {
   // The site's zone (TIMEZONE). Required: the tools' descriptions name
   // it, and a bare date in a period means a day in it.
   timezone: string;
+  // The sites ALLOWED_ORIGIN lists (config.siteHosts), named in the
+  // server's name and instructions. Only /mcp needs them: no tool
+  // description does, so the cockpit's manifest is built without.
+  siteHosts?: readonly string[];
 }
 
 // Rejects an inverted period before the handler runs, for every tool
@@ -174,15 +178,22 @@ export function getToolManifest(
   return manifests.get(key) ?? [];
 }
 
+// What a client shows when it lists its servers, so three connected
+// installations are not three entries called "genug".
+function serverName(siteHosts: readonly string[]): string {
+  return siteHosts.length > 0 ? `genug (${siteHosts.join(", ")})` : "genug";
+}
+
 export function createMcpServer(
   db: Database.Database,
   options: McpServerOptions,
 ): McpServer {
   const readOnly = options.readOnly === true;
   const { timezone } = options;
+  const siteHosts = options.siteHosts ?? [];
   const server = new McpServer(
-    { name: "genug", version: VERSION },
-    { instructions: SERVER_INSTRUCTIONS },
+    { name: serverName(siteHosts), version: VERSION },
+    { instructions: serverInstructions(siteHosts) },
   );
 
   // Wraps registerTool once, before any module runs, so every tool they

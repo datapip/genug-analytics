@@ -31,7 +31,9 @@ The shape of things may still change before 1.0; see
   to a segment, so "where did the buyers of product X come from" is one
   question.
 - **Radically small.** One Node process, one SQLite file. Your own
-  events are one JSON file each, live the moment you save.
+  events are one JSON file each, live the moment you save. Several of
+  your own sites can share one installation, asked about together or one at
+  a time, with visitors never linked across them.
 - **Privacy by architecture.** No cookie by default: the visitor ID is
   a daily-changing hash, and the address it comes from is never stored
   in the database. An optional country lookup reads the shortened

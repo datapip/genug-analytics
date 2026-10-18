@@ -638,6 +638,103 @@ test("countries answer for a period that is only partly looked up", async () => 
   await client.close();
 });
 
+// A typo'd host, or the host of a site another installation collects
+// for, would otherwise read as a site nobody visited.
+test("a host segment names the hosts in the period when its own has no session", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(db, pageView({ sessionId: "s1", url: "https://example.com/" }));
+    insertEvent(
+      db,
+      pageView({ sessionId: "s2", url: "https://shop.example.com/" }),
+    );
+    insertEvent(
+      db,
+      pageView({ sessionId: "s3", url: "https://shop.example.com/cart" }),
+    );
+  });
+  const typo = await call(client, "get_traffic_summary", {
+    segment: [{ host: "shop.exmaple.com" }],
+    ...PERIOD,
+  });
+  assert.match(
+    String(typo.error),
+    /"shop\.exmaple\.com".*busiest first: shop\.example\.com, example\.com\./,
+  );
+  assert.ok(String(typo.error).includes(VISITOR_TEXT_CAVEAT));
+
+  const url = await call(client, "get_traffic_summary", {
+    segment: [{ host: "https://example.com/" }],
+    ...PERIOD,
+  });
+  assert.match(String(url.error), /not a URL/);
+
+  const pages = await call(client, "get_top_pages", {
+    segment: [{ host: "WWW.Shop.Example.com" }],
+    ...PERIOD,
+  });
+  assert.deepEqual(pages, {
+    items: [
+      { host: "shop.example.com", path: "/", views: 1 },
+      { host: "shop.example.com", path: "/cart", views: 1 },
+    ],
+    groups: 2,
+    total: 2,
+  });
+  await client.close();
+});
+
+// A browser sends an umlaut domain as punycode, and the stored url keeps
+// it that way; the owner types it with the umlaut.
+test("a host segment matches an umlaut domain as typed", async () => {
+  const { client } = await connect((db) => {
+    insertEvent(
+      db,
+      pageView({ sessionId: "s1", url: "https://bücher.example/" }),
+    );
+    insertEvent(db, pageView({ sessionId: "s2", url: "https://example.com/" }));
+  });
+  const pages = await call(client, "get_top_pages", {
+    segment: [{ host: "bücher.example" }],
+    ...PERIOD,
+  });
+  assert.deepEqual(pages, {
+    items: [{ host: "xn--bcher-kva.example", path: "/", views: 1 }],
+    groups: 1,
+    total: 1,
+  });
+  await client.close();
+});
+
+// Anyone can post an event with any url, so a stranger can fill the
+// period with hosts; the error must not grow with them.
+test("a host segment's error lists only the busiest hosts", async () => {
+  const { client } = await connect((db) => {
+    for (let i = 0; i < 12; i++) {
+      insertEvent(
+        db,
+        pageView({ sessionId: `s${i}`, url: `https://h${i}.example/` }),
+      );
+    }
+  });
+  const result = await call(client, "get_traffic_summary", {
+    segment: [{ host: "example.com" }],
+    ...PERIOD,
+  });
+  assert.match(String(result.error), / and 2 more\./);
+  await client.close();
+});
+
+// An empty period's zeros are true of every site, so it is not refused.
+test("a host segment over a period with no sessions answers with zeros", async () => {
+  const { client } = await connect();
+  const summary = await call(client, "get_traffic_summary", {
+    segment: [{ host: "example.com" }],
+    ...PERIOD,
+  });
+  assert.equal(summary.error, undefined);
+  await client.close();
+});
+
 test("a segment on a query parameter ingestion strips is refused, naming the kept ones", async () => {
   const { client } = await connect();
   const result = await call(client, "get_traffic_summary", {
@@ -675,7 +772,7 @@ test("a segment narrows a ranked tool", async () => {
   });
 
   assert.deepEqual(pages, {
-    items: [{ path: "/m", views: 1 }],
+    items: [{ host: "example.com", path: "/m", views: 1 }],
     groups: 1,
     total: 1,
   });
@@ -957,7 +1054,7 @@ test("get_top_pages honours its limit and groups by path", async () => {
   });
 
   assert.deepEqual(pages, {
-    items: [{ path: "/pricing", views: 4 }],
+    items: [{ host: "example.com", path: "/pricing", views: 4 }],
     groups: 1,
     total: 4,
   });
@@ -1039,6 +1136,39 @@ test("server instructions point the agent at deployment context", async () => {
   assert.match(instructions ?? "", /deployment-context/);
   assert.match(instructions ?? "", /get_deployment_context/);
   await client.close();
+});
+
+// An agent connected to several installations tells them apart by
+// these two, and on one with several sites an unsegmented number is all
+// of them together.
+test("the server's name and instructions name the sites it collects for", async () => {
+  async function initialize(siteHosts: string[]) {
+    const db = new Database(":memory:");
+    migrate(db);
+    const server = createMcpServer(db, { timezone: "UTC", siteHosts });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "tools-test", version: "1" });
+    await client.connect(clientTransport);
+    const seen = {
+      name: client.getServerVersion()?.name,
+      instructions: client.getInstructions() ?? "",
+    };
+    await client.close();
+    return seen;
+  }
+
+  const one = await initialize(["brotrechner.de"]);
+  assert.equal(one.name, "genug (brotrechner.de)");
+  assert.match(one.instructions, /collects for brotrechner\.de\./);
+  assert.doesNotMatch(one.instructions, /host segment/);
+
+  const two = await initialize(["brotrechner.de", "datapip.de"]);
+  assert.equal(two.name, "genug (brotrechner.de, datapip.de)");
+  assert.match(two.instructions, /brotrechner\.de, datapip\.de/);
+  assert.match(two.instructions, /host segment/);
+  assert.match(two.instructions, /deployment-context/);
 });
 
 // The tool fallback for clients that don't surface MCP resources to

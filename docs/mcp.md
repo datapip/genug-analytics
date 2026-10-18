@@ -29,8 +29,9 @@ what the number means and where it misleads. The 35 tools cover:
 
 Every tool that takes a period also takes a **segment**, which narrows
 the answer to some sessions: those with an event or prop value, a
-referrer, an entry page or campaign, a device, browser, language or
-country. So
+referrer, an entry page or campaign, a device, browser, language,
+country, or the site they were on when one installation collects for
+several (`host`). So
 "where did the buyers of product X come from" is one question. There
 is no raw-SQL tool and no row export, on purpose.
 

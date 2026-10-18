@@ -1,14 +1,23 @@
 import { createHmac } from "node:crypto";
 
-// Consentless visitor_id: a hash of IP + User-Agent, keyed by the daily
-// salt (lib/dailySalt.ts). Also used to compute the "frozen" value on the consentless →
+// Consentless visitor_id: a hash of site + IP + User-Agent, keyed by the
+// daily salt (lib/dailySalt.ts). Also used to compute the "frozen" value on the consentless →
 // consentful transition (see Data model docs) — same inputs, same hash.
+//
+// The site (siteHost in lib/url.ts) is in the hash so that one person
+// reading two sites this installation collects for is two visitors, as
+// in every other privacy-first tool: without it the hash links them
+// across sites, which is the cross-site tracking it exists to avoid.
+// Joined with newlines, which none of the three can contain.
 export function consentlessVisitorId(
+  site: string,
   ip: string,
   userAgent: string,
   salt: string,
 ): string {
-  return createHmac("sha256", salt).update(`${ip}:${userAgent}`).digest("hex");
+  return createHmac("sha256", salt)
+    .update(`${site}\n${ip}\n${userAgent}`)
+    .digest("hex");
 }
 
 // Exactly the shape consentlessVisitorId produces above: a SHA-256 HMAC
@@ -55,11 +64,12 @@ export function resolveVisitorIdentity(input: {
   consent: boolean | undefined;
   // The raw cookie value exactly as the request sent it, unvalidated.
   visitorCookie: string | undefined;
+  site: string;
   ip: string;
   userAgent: string | undefined;
   salt: string;
 }): VisitorIdentity {
-  const { consent, visitorCookie, ip, userAgent, salt } = input;
+  const { consent, visitorCookie, site, ip, userAgent, salt } = input;
 
   // A cookie that doesn't look like one this server issued is ignored
   // rather than trusted — see isIssuedVisitorId.
@@ -77,7 +87,7 @@ export function resolveVisitorIdentity(input: {
     // clear is keyed on the raw value, not the validated one: a
     // malformed cookie is still an identifier sitting on the device.
     return {
-      visitorId: consentlessVisitorId(ip, userAgent ?? "", salt),
+      visitorId: consentlessVisitorId(site, ip, userAgent ?? "", salt),
       consentful: false,
       cookie: visitorCookie ? "clear" : "none",
     };
@@ -93,7 +103,7 @@ export function resolveVisitorIdentity(input: {
   // visitor's cookie just because this one request doesn't (yet)
   // confirm it. See "Visitor identification" in docs/decisions.md.
   const visitorId =
-    existingCookie ?? consentlessVisitorId(ip, userAgent ?? "", salt);
+    existingCookie ?? consentlessVisitorId(site, ip, userAgent ?? "", salt);
   // A visitor with no cookie who also hasn't answered gets the
   // ordinary ephemeral hash and nothing is set below. One who just
   // said yes gets a fresh persistent cookie frozen from today's hash

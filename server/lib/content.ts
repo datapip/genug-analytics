@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Period } from "./period.js";
-import { parseUrl } from "./url.js";
+import { bareHost, parseUrl } from "./url.js";
 import {
   rank,
   rankSessionsBy,
@@ -8,12 +8,7 @@ import {
   roundTo,
   type Ranked,
 } from "./aggregate.js";
-import {
-  NO_SEGMENT,
-  bareHost,
-  queryParam,
-  type SegmentClause,
-} from "./segment.js";
+import { NO_SEGMENT, queryParam, type SegmentClause } from "./segment.js";
 import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
 
 // "Which pages, and where visitors came from" — every query here is
@@ -23,17 +18,38 @@ import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
 // Every query takes an optional segment (lib/segment.ts): "where did
 // buyers of X come from" is getTopReferrers narrowed to those sessions.
 
-export interface TopPage {
+// A page is a path on a site: one installation may collect for several
+// sites (lib/url.ts, siteHost), and "/" on two of them is two pages.
+// Every row carries its host, even on an installation with one site, so
+// a row's shape never depends on how the deployment is configured.
+interface PageKey {
+  host: string;
   path: string;
+}
+
+// One string per page, for grouping in a Map. The host is siteHost's
+// (www folded), and a parsed host holds no newline, so the first one
+// splits the key back whatever an unparseable url left in the path.
+function pageKey(url: string): string {
+  const { host, path } = parseUrl(url);
+  return `${bareHost(host)}\n${path}`;
+}
+
+function fromPageKey(key: string): PageKey {
+  const split = key.indexOf("\n");
+  return { host: key.slice(0, split), path: key.slice(split + 1) };
+}
+
+export interface TopPage extends PageKey {
   views: number;
 }
 
-// Grouped by path, not the raw url — two URLs differing only by query
-// string or hash (e.g. ?utm_source=... or a same-page anchor link) are
+// Grouped by host and path, not the raw url — two URLs differing only by
+// query string or hash (e.g. ?utm_source=... or a same-page anchor link) are
 // the same page and shouldn't be counted, or shown, separately.
 // Grouping happens in JS rather than SQL because SQLite has no URL
 // parser — the SQL step still does the (cheap, indexed) per-url count,
-// this just re-aggregates that small distinct-url set by path, which is
+// this just re-aggregates that small distinct-url set by page, which is
 // fine at this project's moderate-traffic scale (see "Target user" in
 // docs/decisions.md).
 export function getTopPages(
@@ -60,14 +76,17 @@ export function getTopPages(
     views: number;
   }[];
 
-  const viewsByPath = new Map<string, number>();
+  const viewsByPage = new Map<string, number>();
   for (const row of rows) {
-    const { path } = parseUrl(row.url);
-    viewsByPath.set(path, (viewsByPath.get(path) ?? 0) + row.views);
+    const key = pageKey(row.url);
+    viewsByPage.set(key, (viewsByPage.get(key) ?? 0) + row.views);
   }
 
   return rank(
-    [...viewsByPath.entries()].map(([path, views]) => ({ path, views })),
+    [...viewsByPage.entries()].map(([key, views]) => ({
+      ...fromPageKey(key),
+      views,
+    })),
     (row) => row.views,
     limit,
   );
@@ -110,12 +129,9 @@ export interface TopReferrer {
   sessions: number;
 }
 
-// A site reachable at both the apex and the www subdomain is one site,
-// so a link from one to the other is internal navigation rather than a
-// traffic source. Only `www` is folded: anything more (treating
-// blog.example.com and shop.example.com as one site) needs a public
-// suffix list to tell a subdomain from a separate registrable domain,
-// and that is a dependency this project won't take for a ranking.
+// A link from the apex to www (or back) is internal navigation rather
+// than a traffic source — see bareHost in lib/url.ts for why only `www`
+// folds.
 function isSelfReferral(referrerHost: string, ownHost: string): boolean {
   return bareHost(referrerHost) === bareHost(ownHost);
 }
@@ -202,8 +218,7 @@ export function getTopEntryParams(
   );
 }
 
-export interface EntryPage {
-  path: string;
+export interface EntryPage extends PageKey {
   sessions: number;
 }
 
@@ -217,15 +232,14 @@ export function getEntryPages(
   return mapRanked(
     rankSessionsBy(
       entryPageViews(db, period, pageViewEvent, segment),
-      (row) => parseUrl(row.url).path,
+      (row) => pageKey(row.url),
       limit,
     ),
-    ({ key, sessions }) => ({ path: key, sessions }),
+    ({ key, sessions }) => ({ ...fromPageKey(key), sessions }),
   );
 }
 
-export interface ExitPage {
-  path: string;
+export interface ExitPage extends PageKey {
   sessions: number;
 }
 
@@ -257,13 +271,12 @@ export function getExitPages(
   }[];
 
   return mapRanked(
-    rankSessionsBy(rows, (row) => parseUrl(row.url).path, limit),
-    ({ key, sessions }) => ({ path: key, sessions }),
+    rankSessionsBy(rows, (row) => pageKey(row.url), limit),
+    ({ key, sessions }) => ({ ...fromPageKey(key), sessions }),
   );
 }
 
-export interface BouncePage {
-  path: string;
+export interface BouncePage extends PageKey {
   sessions: number; // sessions that entered on this page
   bounced: number; // of those, how many viewed no other page
   bounceRate: number; // bounced / sessions, 0-1
@@ -298,13 +311,13 @@ export function getBouncePages(
     viewEvents: number;
   }[];
 
-  const byPath = new Map<string, { sessions: number; bounced: number }>();
+  const byPage = new Map<string, { sessions: number; bounced: number }>();
   for (const row of rows) {
-    const { path } = parseUrl(row.url);
-    const entry = byPath.get(path) ?? { sessions: 0, bounced: 0 };
+    const key = pageKey(row.url);
+    const entry = byPage.get(key) ?? { sessions: 0, bounced: 0 };
     entry.sessions += 1;
     if (row.viewEvents === 1) entry.bounced += 1;
-    byPath.set(path, entry);
+    byPage.set(key, entry);
   }
 
   // Ranked by bounced sessions, not by rate: sorted on the rate, a page
@@ -314,9 +327,9 @@ export function getBouncePages(
   // visitors" is the question; the rate stays on the row for reading —
   // and breaks ties, since rank() sorts stably: of two pages losing the
   // same number, the one losing a larger share comes first.
-  const pages = [...byPath.entries()]
-    .map(([path, { sessions, bounced }]) => ({
-      path,
+  const pages = [...byPage.entries()]
+    .map(([key, { sessions, bounced }]) => ({
+      ...fromPageKey(key),
       sessions,
       bounced,
       bounceRate: roundTo(bounced / sessions, 4),

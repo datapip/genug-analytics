@@ -28,6 +28,13 @@ app.use(
       "https://site.example",
       "https://www.site.example",
     ]),
+    // Three more sites, so the multi-site tests have somewhere to go.
+    siteHosts: new Set([
+      "site.example",
+      "other.example",
+      "blog.site.example",
+      "shop.site.example",
+    ]),
     dailySalt: createDailySalt(join(tmpDir, "daily-salt.json"), "UTC"),
     diskGuard: createDiskGuard(tmpDir),
   }),
@@ -41,6 +48,7 @@ app.use(
   createEventsRouter({
     db,
     allowedOrigins: new Set(["https://site.example"]),
+    siteHosts: new Set(["site.example"]),
     dailySalt: createDailySalt(join(tmpDir, "daily-salt.json"), "UTC"),
     diskGuard: createDiskGuard(tmpDir),
     countries: {
@@ -236,6 +244,75 @@ test("gives two addresses in one /24 the same consentless visitor_id", async () 
   const [first, sameBlock, otherBlock] = newRows();
   assert.equal(sameBlock!.visitor_id, first!.visitor_id);
   assert.notEqual(otherBlock!.visitor_id, first!.visitor_id);
+});
+
+// One installation may collect for several sites. The same person on
+// two of them must be two visitors, or the hash tracks them across
+// sites; apex and www are one site, so they stay one visitor there.
+test("keeps one consentless visitor and session per site, with www folded into the apex", async () => {
+  const page = (url: string) => ({
+    event: "page_view",
+    url,
+    props: { page_title: "Home", document_language: "en" },
+  });
+  const ua = "test-sites";
+  await post(page("https://site.example/"), { "user-agent": ua });
+  await post(page("https://www.site.example/a"), { "user-agent": ua });
+  await post(page("https://other.example/"), { "user-agent": ua });
+
+  const [apex, www, other] = newRows();
+  assert.equal(www!.visitor_id, apex!.visitor_id);
+  assert.equal(www!.session_id, apex!.session_id);
+  assert.notEqual(other!.visitor_id, apex!.visitor_id);
+  assert.notEqual(other!.session_id, apex!.session_id);
+});
+
+// The url is the sender's to write. A host the deployment never listed
+// would become a "site" the host segment offers the agent.
+test("refuses a url on a site ALLOWED_ORIGIN does not list", async () => {
+  const before = rejectedCount();
+  const res = await post(
+    {
+      event: "page_view",
+      url: "https://lookalike.example/",
+      props: { page_title: "Home", document_language: "en" },
+    },
+    { "user-agent": "test-unlisted-site" },
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal(newRows().length, 0);
+  assert.equal(rejectedCount(), before + 1);
+  assert.deepEqual(lastRejection(), {
+    reason: "invalid_envelope",
+    event: "page_view",
+    detail: "url is not on a site ALLOWED_ORIGIN lists",
+  });
+});
+
+// A consent cookie is the collector's, not the site's, so it can follow
+// a visitor between two sites on one collector. The visitor stays one
+// (they consented to the cookie), but the session ends at the site.
+test("starts a new session when a consented visitor moves to another site", async () => {
+  const cookie = `genug_vid=${"b".repeat(64)}`;
+  const page = (url: string) => ({
+    event: "page_view",
+    consent: true,
+    url,
+    props: { page_title: "Home", document_language: "en" },
+  });
+  await post(page("https://blog.site.example/"), {
+    "user-agent": "test-sites-cookie",
+    cookie,
+  });
+  await post(page("https://shop.site.example/"), {
+    "user-agent": "test-sites-cookie",
+    cookie,
+  });
+
+  const [blog, shop] = newRows();
+  assert.equal(shop!.visitor_id, blog!.visitor_id);
+  assert.notEqual(shop!.session_id, blog!.session_id);
 });
 
 // The consentless → consentful transition freezes the hash this visitor

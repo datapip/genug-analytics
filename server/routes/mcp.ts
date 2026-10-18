@@ -11,6 +11,8 @@ export interface McpRouterDeps {
   // Leaves the writing tools and get_recent_events unregistered.
   readOnly: boolean;
   timezone: string;
+  // Named in the server's name and instructions (mcp/tools.ts).
+  siteHosts: ReadonlySet<string>;
 }
 
 function methodNotAllowed(req: Request, res: Response): void {
@@ -58,7 +60,7 @@ function refusesBatch(req: Request, res: Response): boolean {
 }
 
 async function handleMcpRequest(
-  { db, readOnly, timezone }: McpRouterDeps,
+  { db, readOnly, timezone, siteHosts }: McpRouterDeps,
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -67,7 +69,11 @@ async function handleMcpRequest(
   // Stateless mode (see mcp/tools.ts): a fresh server + transport per
   // request, no session tracking — this server only does simple one-shot
   // query tools, no long-running/streaming operations.
-  const server = createMcpServer(db, { readOnly, timezone });
+  const server = createMcpServer(db, {
+    readOnly,
+    timezone,
+    siteHosts: [...siteHosts],
+  });
   try {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
