@@ -40,7 +40,7 @@ export default tseslint.config(
       },
     },
   },
-  // The two measurement scripts in scripts/ are plain Node ES modules,
+  // The scripts in scripts/ are plain Node ES modules,
   // not part of a workspace, so they need Node's globals named the same
   // way the cockpit's browser ones are above.
   {

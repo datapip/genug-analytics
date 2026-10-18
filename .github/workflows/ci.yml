@@ -44,6 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The release job below turns this version's CHANGELOG.md section
+      # into the Release notes. Checked here, before anything is
+      # published, so a tag with no entry never becomes an image either.
+      - run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > /dev/null
+
       - uses: docker/setup-buildx-action@v4
 
       # GITHUB_TOKEN needed the repo added explicitly under the
@@ -66,3 +71,21 @@ jobs:
           # both names the image and is what the running server reports.
           build-args: GENUG_VERSION=${{ github.ref_name }}
           tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+
+  # A tag alone appears on GitHub only under Tags, and someone watching
+  # the repo for releases is told about a Release, not a tag. After
+  # publish-image, so a Release never announces an image that isn't
+  # there yet. gh is preinstalled on the runner, so this needs no action.
+  release:
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
+
+      - run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -108,8 +108,17 @@ only, and the tag would stay on your machine.
 `.github/workflows/ci.yml`) — once `build-and-test` passes on that tag,
 `publish-image` builds the `Dockerfile` and pushes it to
 `ghcr.io/datapip/genug-analytics:<tag>`, stamped with
-`GENUG_VERSION=<tag>`. A plain push to `main` never publishes anything;
-only a tag does.
+`GENUG_VERSION=<tag>`. Then `release` creates the GitHub Release, with
+that version's `CHANGELOG.md` section as its notes
+(`scripts/release-notes.mjs`), which is what people watching the repo
+for releases are notified about. A plain push to `main` never publishes
+anything; only a tag does.
+
+**The changelog section must exist before you tag.** Its heading is
+`## <version> — <date>`, without the `v`. `publish-image` checks for it
+first, so a tag without one fails before any image is built. If that
+happens, write the entry, commit it and cut the next patch version,
+since a pushed tag is not moved (see Notes).
 
 ## Notes
 
@@ -118,4 +127,6 @@ only a tag does.
 - **Don't move a tag that's already public.** Someone may already have
   that version, and already have pulled the image published under it.
   Cut a new one instead.
-- GitHub turns each pushed tag into a Releases entry automatically.
+- **A tag is not a Release.** GitHub lists a pushed tag under Tags
+  only; the `release` job is what makes it a Release. Tags from before
+  that job existed have no Release, and that is fine.
