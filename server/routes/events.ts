@@ -9,6 +9,7 @@ import { z, type ZodError } from "zod";
 import {
   envelopeSchema,
   eventRegistry,
+  type Envelope,
   roleEventNames,
   MAX_EVENT_NAME_LENGTH,
   MAX_URL_LENGTH,
@@ -16,7 +17,10 @@ import {
 import { dirname, join } from "node:path";
 import { db, dbPath } from "../db/index.js";
 import { insertEvent, findLastEventForVisitor } from "../db/events.js";
-import { insertRejectedEvent } from "../db/rejectedEvents.js";
+import {
+  insertRejectedEvent,
+  type RejectionReason,
+} from "../db/rejectedEvents.js";
 import { resolveVisitorIdentity } from "../lib/identity.js";
 import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
@@ -79,12 +83,6 @@ startRotation(dailySalt);
 // Stops storing a little before the volume is full (see lib/diskSpace.ts).
 const diskGuard = createDiskGuard(dirname(dbPath));
 
-// Plain boolean, not a type predicate: event names come from JSON files
-// read at startup, so `EventType` is `string` and narrowing to it would
-// say nothing. The runtime check is the real one either way, and it has
-// to be — hasOwnProperty rather than `in`, because `in` also matches
-// inherited Object.prototype keys ("constructor", "toString"), which
-// would look up a registry entry that isn't an event at all.
 // How each role is written in an event file, so a deployment reading the
 // rejection knows exactly which key to add. Kept here rather than
 // exported from the registry: it exists only to word this one message.
@@ -101,6 +99,12 @@ const ROLE_URL_PROPS: Record<string, string> = {
   fileDownload: "file_url",
 };
 
+// Plain boolean, not a type predicate: event names come from JSON files
+// read at startup, so `EventType` is `string` and narrowing to it would
+// say nothing. The runtime check is the real one either way, and it has
+// to be — hasOwnProperty rather than `in`, because `in` also matches
+// inherited Object.prototype keys ("constructor", "toString"), which
+// would look up a registry entry that isn't an event at all.
 function isKnownEventType(event: string): boolean {
   return Object.prototype.hasOwnProperty.call(eventRegistry, event);
 }
@@ -190,11 +194,31 @@ const parseBody = json({ limit: "16kb" });
 // able to reach the early return below.
 const optOutSchema = z.strictObject({ optOut: z.literal(true) });
 
+// What a refused event leaves behind: a rejected_events row, so the
+// cockpit and get_top_rejected_events can say why, and the 400 the
+// sender sees.
+interface Rejection {
+  reason: RejectionReason;
+  event?: string;
+  detail?: string;
+  error: string;
+}
+
+type Checked<T> = { ok: true; value: T } | { ok: false; rejection: Rejection };
+
+// An event that passed every check, ready to be stored.
+interface ValidEvent {
+  envelope: Envelope;
+  name: string;
+  url: string;
+  referrer: string | undefined;
+  props: Record<string, unknown>;
+}
+
 eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   // Stamped once, up front, and reused everywhere below (a rejected
-  // request's ts, a real event's ts, the daily salt) — same reasoning
-  // as the rest of this file's identity logic: one reading of the
-  // clock per request, not a slightly-different one at each call site.
+  // request's ts, a real event's ts, the daily salt): one reading of the
+  // clock per request, not a slightly different one at each call site.
   const now = new Date();
 
   // Dropped silently — same 204 a real event gets — rather than erroring,
@@ -232,31 +256,66 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
     return;
   }
 
-  const envelopeResult = envelopeSchema.safeParse(req.body);
-  if (!envelopeResult.success) {
-    // req.body's shape is unknown at this point (that's exactly what
-    // just failed) — event is opportunistic, best-effort only.
+  const checked = checkEvent(req.body);
+  if (!checked.ok) {
+    const { reason, event, detail, error } = checked.rejection;
+    insertRejectedEvent(db, reason, now.toISOString(), event, detail);
+    res.status(400).json({ error });
+    return;
+  }
+
+  storeEvent(req, res, checked.value, now);
+
+  // A deduped duplicate still gets the same 204 a real event does — the
+  // client can't tell the difference, same as the bot-drop above, so a
+  // refreshed confirmation page never sees an error to retry or surface.
+  res.status(204).end();
+});
+
+// Every check a body goes through before it may become a row, in order.
+// Each step refuses with the reason the cockpit then counts it under.
+function checkEvent(body: unknown): Checked<ValidEvent> {
+  const parsed = parseEnvelope(body);
+  if (!parsed.ok) return parsed;
+  const { envelope, url, referrer } = parsed.value;
+
+  const name = resolveEventName(envelope);
+  if (!name.ok) return name;
+
+  const props = validateProps(name.value, normaliseProps(name.value, envelope));
+  if (!props.ok) return props;
+
+  return {
+    ok: true,
+    value: { envelope, name: name.value, url, referrer, props: props.value },
+  };
+}
+
+function parseEnvelope(
+  body: unknown,
+): Checked<{ envelope: Envelope; url: string; referrer: string | undefined }> {
+  const result = envelopeSchema.safeParse(body);
+  if (!result.success) {
+    // The body's shape is unknown at this point (that's exactly what
+    // just failed), so the event name is best-effort only.
     const maybeEvent =
-      typeof req.body === "object" &&
-      req.body !== null &&
-      typeof (req.body as Record<string, unknown>).event === "string"
+      typeof body === "object" &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).event === "string"
         ? // Truncated to the same cap envelopeSchema enforces: the
           // schema rejected this body, so the name never passed that
           // check, and the envelope's comment is explicit that the cap
           // exists precisely because the rejection is what reaches disk.
-          (req.body as { event: string }).event.slice(0, MAX_EVENT_NAME_LENGTH)
+          (body as { event: string }).event.slice(0, MAX_EVENT_NAME_LENGTH)
         : undefined;
-    insertRejectedEvent(
-      db,
-      "invalid_envelope",
-      now.toISOString(),
-      maybeEvent,
-      firstIssueDetail(envelopeResult.error),
-    );
-    res.status(400).json({ error: "invalid envelope" });
-    return;
+    return reject({
+      reason: "invalid_envelope",
+      event: maybeEvent,
+      detail: firstIssueDetail(result.error),
+      error: "invalid envelope",
+    });
   }
-  const envelope = envelopeResult.data;
+  const envelope = result.data;
 
   // Stripped here as well as in the client: /events is public, so a
   // caller that isn't the client script reaches this line with whatever
@@ -273,64 +332,64 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
       ? undefined
       : stripUnknownParams(envelope.referrer);
   if (url.length > MAX_URL_LENGTH || (referrer?.length ?? 0) > MAX_URL_LENGTH) {
-    insertRejectedEvent(
-      db,
-      "invalid_envelope",
-      now.toISOString(),
-      envelope.event,
-      `url or referrer is over ${MAX_URL_LENGTH} characters once re-encoded`,
-    );
-    res.status(400).json({ error: "invalid envelope" });
-    return;
+    return reject({
+      reason: "invalid_envelope",
+      event: envelope.event,
+      detail: `url or referrer is over ${MAX_URL_LENGTH} characters once re-encoded`,
+      error: "invalid envelope",
+    });
   }
+  return { ok: true, value: { envelope, url, referrer } };
+}
 
-  // The client script sends a role rather than a name for the three
-  // events it fires itself, because it does not know what this
-  // deployment calls them — so the name is decided here, from the
-  // registry, on every request. A cached copy of the script therefore
-  // cannot send a name that no longer exists, which is what renaming
-  // one of those events used to cost.
-  //
-  // A literal `event` is folded to lowercase before it's looked up:
-  // every registered name is enforced lowercase (isValidEventName), so
-  // this only ever helps — a track() call with stray-case matches the
-  // event it plainly meant instead of being rejected as unknown over
-  // nothing but casing. A role-resolved name is already lowercase from
-  // the registry, so lowercasing it again is a no-op.
-  const eventName =
+// The client script sends a role rather than a name for the three
+// events it fires itself, because it does not know what this deployment
+// calls them — so the name is decided here, from the registry, on every
+// request. A cached copy of the script therefore cannot send a name
+// that no longer exists.
+//
+// A literal `event` is folded to lowercase before it's looked up: every
+// registered name is enforced lowercase (isValidEventName), so this only
+// ever helps — a track() call with stray-case matches the event it
+// plainly meant instead of being rejected as unknown over nothing but
+// casing. A role-resolved name is already lowercase from the registry.
+function resolveEventName(envelope: Envelope): Checked<string> {
+  const name =
     envelope.event?.toLowerCase() ??
     (envelope.auto === undefined ? undefined : roleEventNames[envelope.auto]);
-
-  if (eventName === undefined || !isKnownEventType(eventName)) {
-    // An unresolved role is stored under the role it asked for, with the
-    // tag to add as the detail. Same reason/counter as a mistyped event
-    // name: one place to look when something isn't being recorded.
-    insertRejectedEvent(
-      db,
-      "unknown_event_type",
-      now.toISOString(),
-      eventName ?? envelope.auto,
-      eventName === undefined
-        ? `no registered event carries "_${AUTO_ROLE_TAG_KEYS[envelope.auto!]}": true`
-        : undefined,
-    );
-    res.status(400).json({
-      error:
-        eventName === undefined
-          ? `no event is registered for automatic ${envelope.auto} tracking`
-          : `unknown event type: ${eventName}`,
-    });
-    return;
+  if (name !== undefined && isKnownEventType(name)) {
+    return { ok: true, value: name };
   }
+  // An unresolved role is stored under the role it asked for, with the
+  // tag to add as the detail. Same reason/counter as a mistyped event
+  // name: one place to look when something isn't being recorded.
+  if (name === undefined) {
+    return reject({
+      reason: "unknown_event_type",
+      event: envelope.auto,
+      detail: `no registered event carries "_${AUTO_ROLE_TAG_KEYS[envelope.auto!]}": true`,
+      error: `no event is registered for automatic ${envelope.auto} tracking`,
+    });
+  }
+  return reject({
+    reason: "unknown_event_type",
+    event: name,
+    error: `unknown event type: ${name}`,
+  });
+}
 
+function normaliseProps(
+  eventName: string,
+  envelope: Envelope,
+): Record<string, unknown> {
   // Folded the same way the event name is, and for the same reason: every
   // declared prop name is enforced lowercase, so a stray-case key from the
   // client (a typo'd data-genug-props, or a site's own inconsistent casing)
   // matches the prop it plainly meant instead of tripping the schema's
   // strict "unrecognized key" rejection over nothing but casing.
-  const lowercasedProps: Record<string, unknown> = {};
+  const props: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(envelope.props)) {
-    lowercasedProps[key.toLowerCase()] = value;
+    props[key.toLowerCase()] = value;
   }
 
   // The link a visitor clicked carries the same ?email= and tokens a page
@@ -341,37 +400,53 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   // these two events: there the client script fixes the prop name, while
   // a deployment's own props are its own to name.
   for (const [role, prop] of Object.entries(ROLE_URL_PROPS)) {
-    const linkUrl = lowercasedProps[prop];
+    const linkUrl = props[prop];
     if (
       roleEventNames[role as keyof typeof roleEventNames] === eventName &&
       typeof linkUrl === "string"
     ) {
-      lowercasedProps[prop] = stripUnknownParams(linkUrl);
+      props[prop] = stripUnknownParams(linkUrl);
     }
   }
+  return props;
+}
 
-  const propsResult =
-    eventRegistry[eventName].schema.safeParse(lowercasedProps);
-  if (!propsResult.success) {
-    insertRejectedEvent(
-      db,
-      "invalid_props",
-      now.toISOString(),
-      eventName,
-      firstIssueDetail(propsResult.error),
-    );
-    res.status(400).json({ error: "invalid props for event type" });
-    return;
+function validateProps(
+  eventName: string,
+  props: Record<string, unknown>,
+): Checked<Record<string, unknown>> {
+  const result = eventRegistry[eventName].schema.safeParse(props);
+  if (!result.success) {
+    return reject({
+      reason: "invalid_props",
+      event: eventName,
+      detail: firstIssueDetail(result.error),
+      error: "invalid props for event type",
+    });
   }
+  return { ok: true, value: result.data };
+}
 
+function reject(rejection: Rejection): { ok: false; rejection: Rejection } {
+  return { ok: false, rejection };
+}
+
+// Who sent it, which session it belongs to, and the row itself. Also
+// sets or clears the visitor cookie, which is why it takes the response.
+function storeEvent(
+  req: Request,
+  res: Response,
+  event: ValidEvent,
+  now: Date,
+): void {
   // Narrowed to a block before it is hashed (see lib/ip.ts). The rate
-  // limiter above narrows differently, and less: it keeps an IPv4
-  // address whole, because it has to tell one abuser from the office
-  // around them.
+  // limiter narrows differently, and less: it keeps an IPv4 address
+  // whole, because it has to tell one abuser from the office around
+  // them.
   const ip = truncateIp(req.ip ?? "");
   const userAgent = req.headers["user-agent"];
   // The header itself goes no further than this request: it feeds the
-  // bot check above and the consentless hash below, and only what it
+  // bot check and the consentless hash below, and only what it
   // classifies to is stored (see db/migrations.ts).
   const device =
     userAgent === undefined ? undefined : classifyUserAgent(userAgent);
@@ -382,7 +457,7 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   // because the cookie's name and lifetime are deployment surface that
   // the identity rules themselves have no business knowing.
   const { visitorId, consentful, cookie } = resolveVisitorIdentity({
-    consent: envelope.consent,
+    consent: event.envelope.consent,
     visitorCookie: parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE],
     ip,
     userAgent,
@@ -402,22 +477,17 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   const sessionId = resolveSessionId(lastEvent, now);
 
   insertEvent(db, {
-    event: eventName,
+    event: event.name,
     visitorId,
     sessionId,
     ts: now.toISOString(),
-    url,
-    referrer,
+    url: event.url,
+    referrer: event.referrer,
     deviceType: device?.deviceType,
     browser: device?.browser,
     visitorLanguage,
-    props: propsResult.data,
-    idempotencyKey: envelope.idempotencyKey,
+    props: event.props,
+    idempotencyKey: event.envelope.idempotencyKey,
     consentMode: consentful ? "consentful" : "consentless",
   });
-
-  // A deduped duplicate still gets the same 204 a real event does — the
-  // client can't tell the difference, same as the bot-drop above, so a
-  // refreshed confirmation page never sees an error to retry or surface.
-  res.status(204).end();
-});
+}

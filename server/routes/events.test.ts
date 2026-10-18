@@ -16,6 +16,7 @@ process.env.ALLOWED_ORIGIN = "https://site.example, https://www.site.example";
 process.env.TIMEZONE = "UTC";
 
 const { eventsRouter } = await import("./events.js");
+const { MAX_EVENT_NAME_LENGTH } = await import("@genug/schema-registry");
 const { db } = await import("../db/index.js");
 
 const app = express();
@@ -47,6 +48,16 @@ interface EventRow {
   visitor_language: string | null;
   consent_mode: string;
   props: string;
+}
+
+// The newest rejected_events row: what the cockpit and
+// get_top_rejected_events show for the request a test just sent.
+function lastRejection() {
+  return db
+    .prepare(
+      "SELECT reason, event, detail FROM rejected_events ORDER BY id DESC LIMIT 1",
+    )
+    .get() as { reason: string; event: string | null; detail: string | null };
 }
 
 // A distinct User-Agent per test keeps each one on its own derived
@@ -323,13 +334,23 @@ test("rejects an unregistered event type", async () => {
   const res = await post(
     // props is required by the envelope even for an event that declares
     // none, so it has to be present here or this is rejected one step
-    // earlier as invalid_envelope instead.
-    { event: "produt_added_to_cart", url: "https://site.example/", props: {} },
+    // earlier as invalid_envelope instead. Mixed case, so the stored
+    // name and the error are both seen to use the lowercased form.
+    { event: "Produt_Added_To_Cart", url: "https://site.example/", props: {} },
     { "user-agent": ua },
   );
 
   assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: "unknown event type: produt_added_to_cart",
+  });
   assert.equal(newRows().length, 0);
+  // A literal name has no validation error to summarise, so no detail.
+  assert.deepEqual(lastRejection(), {
+    reason: "unknown_event_type",
+    event: "produt_added_to_cart",
+    detail: null,
+  });
 
   const rejected = db
     .prepare(
@@ -423,14 +444,40 @@ test("rejects a url that stripping pushes over the length cap", async () => {
   );
 
   assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "invalid envelope" });
   assert.equal(newRows().length, 0);
-  const rejected = db
-    .prepare(
-      "SELECT reason, detail FROM rejected_events ORDER BY id DESC LIMIT 1",
-    )
-    .get() as { reason: string; detail: string };
-  assert.equal(rejected.reason, "invalid_envelope");
-  assert.match(rejected.detail, /re-encoded/);
+  assert.deepEqual(lastRejection(), {
+    reason: "invalid_envelope",
+    event: "page_view",
+    detail: "url or referrer is over 2048 characters once re-encoded",
+  });
+});
+
+// The name is kept even though the envelope failed, so the rejection
+// says which integration is broken. It never passed the envelope's cap,
+// which exists because this row is what reaches disk, so it is cut here.
+test("an invalid envelope stores the sent name, cut to the cap, or none", async () => {
+  const ua = "test-invalid-envelope";
+  const tooLong = await post(
+    { event: "x".repeat(MAX_EVENT_NAME_LENGTH + 50), url: "nope", props: {} },
+    { "user-agent": ua },
+  );
+  assert.equal(tooLong.status, 400);
+  assert.deepEqual(await tooLong.json(), { error: "invalid envelope" });
+  const cut = lastRejection();
+  assert.equal(cut.reason, "invalid_envelope");
+  assert.equal(cut.event, "x".repeat(MAX_EVENT_NAME_LENGTH));
+  assert.ok(cut.detail, "the first failing issue is the detail");
+
+  const notAString = await post(
+    { event: 42, url: "https://site.example/", props: {} },
+    { "user-agent": ua },
+  );
+  assert.equal(notAString.status, 400);
+  const unnamed = lastRejection();
+  assert.equal(unnamed.reason, "invalid_envelope");
+  assert.equal(unnamed.event, null);
+  assert.deepEqual(newRows(), []);
 });
 
 test("returns CORS headers only for configured origins", async () => {
@@ -775,7 +822,10 @@ test("a role's props are validated like any other event's", async () => {
   );
 });
 
-test("rejects an unknown role, and a body carrying both a role and a name", async () => {
+// All three fail the envelope itself. A role that is valid but has no
+// event tagged for it is a different rejection, tested in
+// integration/wiring.test.ts, since every built-in role resolves here.
+test("rejects a role that isn't one, and a body with both or neither of role and name", async () => {
   const ua = "test-role-bad";
   for (const body of [
     { auto: "internalClick", url: "https://site.example/", props: {} },
@@ -789,6 +839,7 @@ test("rejects an unknown role, and a body carrying both a role and a name", asyn
   ]) {
     const res = await post(body, { "user-agent": ua });
     assert.equal(res.status, 400, JSON.stringify(body));
+    assert.equal(lastRejection().reason, "invalid_envelope");
   }
   assert.deepEqual(newRows(), []);
 });

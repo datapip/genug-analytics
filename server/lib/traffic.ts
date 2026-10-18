@@ -19,12 +19,11 @@ import {
 
 export interface TrafficSummary {
   sessions: number;
-  // Distinct visitor_ids. The first number anyone asks for, and the one
-  // this shape lacked for longest: it hid inside the consent and
-  // new-vs-returning splits. Over a multi-day period a consentless
-  // visitor counts once per day they came (daily-rotating id, see
-  // "Visitor identification" in docs/decisions.md); the description
-  // says so rather than leaving the number out.
+  // Distinct visitor_ids. The first number anyone asks for. Over a
+  // multi-day period a consentless visitor counts once per day they
+  // came (daily-rotating id, see "Visitor identification" in
+  // docs/decisions.md); the description says so rather than leaving
+  // the number out.
   visitors: number;
   // Every event that ISN'T the page-view event — deliberately not the
   // full total, so this and viewEvents are additive (sum to everything
@@ -43,26 +42,17 @@ export function getTrafficSummary(
   pageViewEvent: string,
   segment: SegmentClause = NO_SEGMENT,
 ): TrafficSummary {
+  // One pass over the period: the page-view count is a conditional
+  // count beside the totals, not a second scan of the same rows.
   const row = db
     .prepare(
       `SELECT
          COUNT(DISTINCT session_id) AS sessions,
          COUNT(DISTINCT visitor_id) AS visitors,
-         COUNT(*) AS total
+         COUNT(*) AS total,
+         COUNT(CASE WHEN event = @pageViewEvent THEN 1 END) AS viewEvents
        FROM events
        WHERE ts BETWEEN @from AND @to${segment.sql}`,
-    )
-    .get({ from: period.from, to: period.to, ...segment.params }) as {
-    sessions: number;
-    visitors: number;
-    total: number;
-  };
-
-  const viewEventsRow = db
-    .prepare(
-      `SELECT COUNT(*) AS viewEvents
-       FROM events
-       WHERE event = @pageViewEvent AND ts BETWEEN @from AND @to${segment.sql}`,
     )
     .get({
       pageViewEvent,
@@ -70,14 +60,17 @@ export function getTrafficSummary(
       to: period.to,
       ...segment.params,
     }) as {
+    sessions: number;
+    visitors: number;
+    total: number;
     viewEvents: number;
   };
 
   return {
     sessions: row.sessions,
     visitors: row.visitors,
-    interactionEvents: row.total - viewEventsRow.viewEvents,
-    viewEvents: viewEventsRow.viewEvents,
+    interactionEvents: row.total - row.viewEvents,
+    viewEvents: row.viewEvents,
   };
 }
 

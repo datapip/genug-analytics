@@ -1176,6 +1176,78 @@ test("keeps collecting when a reload fails", async (t) => {
   );
 });
 
+// The client sends a role, never a name, for the events it fires
+// itself. With no event tagged for that role the request is refused
+// under the role, and the detail names the key to add to an event file:
+// the one place a deployment learns why its link clicks stopped.
+test("an automatic click with no tagged event is rejected under its role, naming the tag", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const eventsDir = join(dir, "events");
+  const dbFile = join(dir, "test.db");
+  const port = 4237;
+
+  const server = spawnServer({
+    ...baseEnv(dbFile, port),
+    EVENTS_PATH: eventsDir,
+  });
+  stopAndCleanUp(t, dir, server);
+  await server.waitForLog((line) => line.msg === "genug server listening");
+
+  const base = `http://localhost:${port}`;
+  const auth = await signInToCockpit(port);
+
+  const untagged = JSON.parse(
+    readFileSync(join(eventsDir, "outbound_link_click.json"), "utf8"),
+  ) as Record<string, unknown>;
+  delete untagged._automaticOutboundClick;
+  writeFileSync(
+    join(eventsDir, "outbound_link_click.json"),
+    JSON.stringify(untagged),
+  );
+  const reloaded = await fetch(`${base}/cockpit/reload`, {
+    method: "POST",
+    headers: { cookie: auth, "X-Genug-Cockpit": "1" },
+  });
+  assert.equal(reloaded.status, 200);
+
+  const res = await fetch(`${base}/events`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: `http://localhost:${port}`,
+    },
+    body: JSON.stringify({
+      auto: "outboundClick",
+      url: "https://example.com/",
+      props: {
+        target_url: "https://partner.example/",
+        target_host: "partner.example",
+        link_text: "Partner",
+      },
+    }),
+  });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: "no event is registered for automatic outboundClick tracking",
+  });
+
+  const db = new Database(dbFile, { readonly: true });
+  try {
+    assert.deepEqual(
+      db.prepare("SELECT reason, event, detail FROM rejected_events").all(),
+      [
+        {
+          reason: "unknown_event_type",
+          event: "outboundClick",
+          detail: 'no registered event carries "_automaticOutboundClick": true',
+        },
+      ],
+    );
+  } finally {
+    db.close();
+  }
+});
+
 // The route that moves stored rows had no test at any level. The risk
 // is specific: a rename that reports movedRows while the collector
 // still resolves the role to the old name, which reads as a successful
