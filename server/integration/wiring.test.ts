@@ -19,15 +19,12 @@ import { migrate } from "../db/migrations.js";
 import { insertEvent } from "../db/events.js";
 import { MAX_PROSE_FIELD_BYTES } from "../lib/context.js";
 
-// These tests spawn the real compiled server (dist/index.js) as a
-// subprocess. createApp (app.ts) could be built in-process, but what
-// these check is the whole start: settings read from the environment,
-// the startup log, background jobs scheduled, the port listened on and
-// the signal handled — the parts index.ts does around createApp, and
-// the parts an operator actually sees. The cost: these are slower than
-// this project's other (in-process) tests, and — unlike the
-// setInterval-scheduled recurring runs — can only observe what happens
-// at startup/shutdown, not a job firing again hours or a day later.
+// These tests start the real compiled server (dist/index.js) as a
+// separate process, to check what index.ts does around createApp:
+// reading settings, the startup log, scheduling jobs, listening on the
+// port and handling the stop signal. They are slower than the other
+// tests, and they only see startup and shutdown, not a daily job running
+// again later.
 const indexJsPath = fileURLToPath(new URL("../index.js", import.meta.url));
 
 interface LogLine {
@@ -128,14 +125,11 @@ function spawnServer(env: Record<string, string>): RunningServer {
   return { process: child, rawLines, waitForLog, stop };
 }
 
-// Stop the server before removing its data directory, in that order.
-// The child holds the SQLite file open, and Windows refuses to remove a
-// directory that still has open handles inside it; on POSIX the same
-// ordering is invisible, since unlinking an open file is legal there.
-// These used to be two separate `t.after` hooks, which run in
-// registration order — so the directory went first, the EPERM it threw
-// skipped every remaining hook, and the server was left running while
-// the test run hung waiting on the orphan.
+// Stops the server, then removes its data folder, in that order, in one
+// hook. The server keeps the SQLite file open, and Windows can't remove a
+// folder with open files. With two separate hooks, a failed removal
+// would skip the stop, and the test run would hang on the still-running
+// server.
 function stopAndCleanUp(t: TestContext, dir: string, server: RunningServer) {
   t.after(async () => {
     await server.stop();
@@ -143,9 +137,8 @@ function stopAndCleanUp(t: TestContext, dir: string, server: RunningServer) {
   });
 }
 
-// The cockpit is behind a session cookie, so a test that talks to it
-// signs in first, exactly as the page does. Returns the cookie in the
-// form a browser sends it back.
+// Signs in to the cockpit, as the page does, and returns the session
+// cookie in the form a browser sends it.
 async function signInToCockpit(port: number): Promise<string> {
   const response = await fetch(`http://localhost:${port}/cockpit/session`, {
     method: "POST",
@@ -163,16 +156,13 @@ function baseEnv(dbPath: string, port: number): Record<string, string> {
     DB_PATH: dbPath,
     MCP_API_KEY: "test-key-0123456789abcdef0123456789",
     COCKPIT_PASSWORD: "test-cockpit-password",
-    // example.com because the events these tests send are on it, and
-    // /events stores a url only on a site listed here.
+    // example.com, because the test events are on it and /events only
+    // stores urls on listed sites.
     ALLOWED_ORIGIN: `http://localhost:${port},https://example.com`,
     TIMEZONE: "UTC",
     LOCAL_BACKUPS: "false",
-    // Beside DB_PATH, and for a blunter reason than tidiness: the
-    // server seeds this directory at startup, so a spawned server
-    // without it set reaches for the real /data/context on the machine
-    // running the suite. That is an EACCES here and a directory
-    // genuinely created there on anything running as root.
+    // Next to DB_PATH. Without it, the server would create files in the
+    // real /data/context of the machine running the tests.
     CONTEXT_PATH: join(dirname(dbPath), "context"),
   };
 }
@@ -197,10 +187,9 @@ test("fails fast on an invalid PORT and never starts listening", async (t) => {
   );
 });
 
-// The cockpit used to be readable by anyone when COCKPIT_PASSWORD was
-// unset. Refusing to boot is what makes that impossible to end up with
-// by accident, so it's worth pinning against the real entrypoint rather
-// than trusting the middleware unit tests alone.
+// Without COCKPIT_PASSWORD the server must refuse to start, so the
+// cockpit can never be open by accident. Checked on the real server, not
+// only in the unit tests.
 test("fails fast when COCKPIT_PASSWORD is missing and never starts listening", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
@@ -225,10 +214,9 @@ test("fails fast when COCKPIT_PASSWORD is missing and never starts listening", a
   );
 });
 
-// TIMEZONE has no default: unset, every day and hour would quietly be
-// UTC's, the plausible-while-wrong bucketing the setting exists to end.
-// A fixed offset is refused for the same reason — it is wrong for half
-// the year wherever clocks change — so both must stop the real entrypoint.
+// TIMEZONE has no default: without it, days and hours would quietly be
+// UTC's. A fixed offset is refused too, since it is wrong for half the
+// year wherever clocks change. Both must stop the real server.
 for (const [label, value, port] of [
   ["missing", undefined, 4232],
   ["a fixed offset", "+01:00", 4233],
@@ -279,13 +267,10 @@ test("starts, logs a structured ready message, and responds to /healthz", async 
   );
 });
 
-// cockpitAuth and requireApiKey are thoroughly unit-tested on their own,
-// but nothing asserted they are actually mounted in front of the things
-// they guard. Reordering two lines in app.ts — an ordinary edit when
-// adding a route — would leave every one of those unit tests green while
-// /cockpit/data served raw event URLs and props, and /mcp exposed every
-// query tool plus delete_visitor_data, at a predictable public hostname.
-// The only place that can catch it is the real assembled app.
+// The unit tests check the sign-in and API key checks on their own. This
+// checks that app.ts really puts them in front of the routes they
+// protect: swapping two lines there would leave the unit tests passing
+// while /cockpit/data and /mcp were open to anyone.
 test("keeps the guarded routes behind their auth, not just beside it", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4204;
@@ -296,14 +281,13 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
 
   const base = `http://localhost:${port}`;
 
-  // The JSON route and the static page are mounted separately, so each
-  // needs its own check — guarding only one of them is a plausible slip.
+  // The JSON route and the page are set up separately, so check both.
   assert.equal((await fetch(`${base}/cockpit/data`)).status, 401);
   assert.equal((await fetch(`${base}/cockpit/index.html`)).status, 401);
-  // The page is rendered by its own handler, not express.static, so both
-  // of its addresses need the check.
+  // The page has its own handler, not express.static, so check both of
+  // its addresses.
   assert.equal((await fetch(`${base}/cockpit/`)).status, 401);
-  // Not a read: this one changes which events the server accepts.
+  // A write: it changes which events the server accepts.
   assert.equal(
     (
       await fetch(`${base}/cockpit/reload`, {
@@ -314,8 +298,8 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
     401,
   );
 
-  // And a session actually opens both, or a cockpit that refused
-  // everything would satisfy the three checks above while being broken.
+  // And a session does open both; a cockpit refusing everything would
+  // also pass the checks above.
   const cookie = await signInToCockpit(port);
   assert.equal(
     (await fetch(`${base}/cockpit/data`, { headers: { cookie } })).status,
@@ -326,8 +310,8 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
     200,
   );
 
-  // Versioned addresses and cache headers, so a CDN in front can neither
-  // pair a new page with an old script nor keep a gated response.
+  // Versioned file URLs and cache headers, so a CDN can't combine a new
+  // page with an old script or keep a copy of a protected response.
   const page = await fetch(`${base}/cockpit/`, { headers: { cookie } });
   assert.equal(page.headers.get("cache-control"), "private, no-cache");
   assert.match(await page.text(), /src="cockpit\.js\?v=[0-9a-f]{10}"/);
@@ -338,13 +322,13 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   assert.equal(script.headers.get("cache-control"), "private, no-cache");
   const data = await fetch(`${base}/cockpit/data`, { headers: { cookie } });
   assert.equal(data.headers.get("cache-control"), "private, no-store");
-  // The top pages card names each row's site once there are several.
+  // With several sites, the top pages card shows each row's site.
   assert.deepEqual(((await data.json()) as { siteHosts: string[] }).siteHosts, [
     "localhost",
     "example.com",
   ]);
-  // The login page stays public, and so does every versioned file it
-  // loads: the gate matches the path without the query string.
+  // The sign-in page and the versioned files it loads stay public: the
+  // check compares the path without the query string.
   const login = await fetch(`${base}/cockpit/login.html`);
   assert.equal(login.status, 200);
   const loginFiles = [
@@ -354,7 +338,7 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   for (const file of loginFiles) {
     assert.equal((await fetch(`${base}/cockpit/${file}`)).status, 200, file);
   }
-  // Without the slash, still redirected, so relative addresses resolve.
+  // Without the trailing slash it is redirected, so relative URLs work.
   const bare = await fetch(`${base}/cockpit`, {
     headers: { cookie },
     redirect: "manual",
@@ -369,8 +353,8 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   };
   assert.equal((await fetch(`${base}/mcp`, mcpBody)).status, 401);
 
-  // And the key actually opens it — otherwise a route that rejects
-  // everything would pass the checks above while being broken.
+  // And the key does open it; a route rejecting everything would also
+  // pass the checks above.
   const authorized = await fetch(`${base}/mcp`, {
     ...mcpBody,
     headers: {
@@ -381,9 +365,9 @@ test("keeps the guarded routes behind their auth, not just beside it", async (t)
   });
   assert.notEqual(authorized.status, 401);
 
-  // The sites reach the agent through the real route, not only through
-  // createMcpServer in a unit test: a router that stopped passing them
-  // would still compile, since the option is optional for the cockpit.
+  // The sites reach the agent through the real route. If the route
+  // stopped passing them it would still compile, since the option is
+  // optional.
   const initialized = await fetch(`${base}/mcp`, {
     ...mcpBody,
     headers: {
@@ -449,10 +433,7 @@ test("prunes events older than RETENTION_DAYS once at startup, not just on the 2
   assert.equal(row.count, 0);
 });
 
-// RETENTION_DAYS=-1 is the explicit way to ask for what unset used to
-// mean by default — a deployment that actually wants to keep
-// everything now has to say so, since omitting the setting no longer
-// says it for them.
+// RETENTION_DAYS=-1 keeps events forever.
 test("RETENTION_DAYS=-1 keeps events forever, explicitly, without the unset warning", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const dbPath = join(dir, "test.db");
@@ -478,8 +459,8 @@ test("RETENTION_DAYS=-1 keeps events forever, explicitly, without the unset warn
   stopAndCleanUp(t, dir, server);
   await server.waitForLog((line) => line.msg === "genug server listening");
 
-  // No pruning ran, and no log claims RETENTION_DAYS is unset — it was
-  // set, deliberately, to the value that means "don't".
+  // Nothing was deleted, and the log doesn't say RETENTION_DAYS is
+  // unset.
   const checkDb = new Database(dbPath, { readonly: true });
   const row = checkDb.prepare("SELECT COUNT(*) AS count FROM events").get() as {
     count: number;
@@ -492,12 +473,9 @@ test("RETENTION_DAYS=-1 keeps events forever, explicitly, without the unset warn
   );
 });
 
-// The startup log for an unset RETENTION_DAYS is covered separately, by
-// message text alone — that proves the server *says* 396 days, not that
-// it actually prunes to that boundary. A deployment upgrading from a
-// version where unset meant forever hits exactly this path on its next
-// restart, so it is the one behavior change in this release with real
-// data-loss consequence if the wiring slipped.
+// Checks that an unset RETENTION_DAYS really deletes events older than
+// 396 days, not only that the log says so. Getting this wrong deletes
+// data, so it is checked on the real server.
 test("a deployment that never set RETENTION_DAYS prunes at the 396-day default, for real", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const dbPath = join(dir, "test.db");
@@ -527,7 +505,7 @@ test("a deployment that never set RETENTION_DAYS prunes at the 396-day default, 
   });
   seedDb.close();
 
-  // No RETENTION_DAYS at all — baseEnv doesn't set it — is the point.
+  // baseEnv doesn't set RETENTION_DAYS, which is the point.
   const server = spawnServer(baseEnv(dbPath, port));
   stopAndCleanUp(t, dir, server);
   await server.waitForLog((line) => line.msg === "genug server listening");
@@ -544,13 +522,9 @@ test("a deployment that never set RETENTION_DAYS prunes at the 396-day default, 
 });
 
 test("shuts down gracefully on SIGTERM: logs before exiting with code 0", async (t) => {
-  // Windows has no POSIX signals: child.kill("SIGTERM") maps to
-  // TerminateProcess, which kills the child outright rather than
-  // delivering anything the process could handle. So the graceful path
-  // this test exists to check can't run at all there — the child exits
-  // with code null, never having seen a signal. Skipped rather than
-  // weakened, since the behaviour it covers is real everywhere the
-  // server is actually deployed (Linux containers).
+  // Windows has no POSIX signals: child.kill("SIGTERM") ends the process
+  // at once, so there is no graceful shutdown to check. Skipped there;
+  // the server runs on Linux, where this is tested.
   if (process.platform === "win32") {
     t.skip("Windows: SIGTERM can't be delivered to a child process");
     return;
@@ -575,8 +549,8 @@ test("shuts down gracefully on SIGTERM: logs before exiting with code 0", async 
   );
 });
 
-// Bot hits are counted in memory and written once an hour, so a
-// redeploy that skipped the write would lose up to an hour of them.
+// Bot hits are counted in memory and saved once an hour, so they must
+// also be saved on shutdown, or a redeploy loses up to an hour of them.
 test("writes the bot count on SIGTERM rather than losing it", async (t) => {
   if (process.platform === "win32") {
     t.skip("Windows: SIGTERM can't be delivered to a child process");
@@ -615,10 +589,8 @@ test("writes the bot count on SIGTERM rather than losing it", async (t) => {
   assert.equal(row.total, 1);
 });
 
-// Unset now defaults to a real number of days rather than forever, but
-// silently applying even a sensible default is still the wrong way to
-// do it — a deployer upgrading from a version where unset meant forever
-// should not have to infer the change from nothing happening.
+// An unset RETENTION_DAYS means the default, and the server says so at
+// startup, since it decides how much data is deleted.
 test("says so at startup when RETENTION_DAYS is unset", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
@@ -630,8 +602,7 @@ test("says so at startup when RETENTION_DAYS is unset", async (t) => {
   assert.match(line.msg, /RETENTION_DAYS=-1/);
 });
 
-// The flip side: a deployment that has configured retention shouldn't be
-// nagged about it on every restart.
+// A deployment that has set RETENTION_DAYS doesn't get that message.
 test("stays quiet about retention when RETENTION_DAYS is set", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
@@ -648,9 +619,9 @@ test("stays quiet about retention when RETENTION_DAYS is set", async (t) => {
   );
 });
 
-// The salt is random and lives in a file beside the database. If that
-// file stopped being read at startup, every deploy would split each
-// visitor on the site into two, and nothing else would fail.
+// The daily salt is kept in a file next to the database. If it weren't
+// read at startup, every deploy would count each visitor twice, and
+// nothing else would fail.
 test("a restart on the same day keeps each visitor's id", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const dbPath = join(dir, "test.db");
@@ -687,14 +658,14 @@ test("a restart on the same day keeps each visitor's id", async (t) => {
     .all() as { visitor_id: string }[];
   checkDb.close();
   assert.equal(ids.length, 1);
-  // 0600 is covered in lib/dailySalt.test.ts; here only that it sits
-  // beside the database, where the deployment docs say it is.
+  // The 0600 mode is tested in lib/dailySalt.test.ts; here only that the
+  // file is next to the database, as the docs say.
   assert.ok(existsSync(join(dir, "daily-salt.json")));
 });
 
-// The session key is derived from the password and a salt kept beside
-// the database. A salt made fresh on every start would pass every unit
-// test and sign the owner out on every deploy.
+// The session key comes from the password and a salt kept next to the
+// database. A new salt on every start would pass the unit tests but sign
+// the owner out on every deploy.
 test("a cockpit sign-in survives a restart", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4236;
@@ -715,17 +686,13 @@ test("a cockpit sign-in survives a restart", async (t) => {
   assert.ok(existsSync(join(dir, "cockpit-session-salt")));
 });
 
-// The container runs as an unprivileged user, so the most likely
-// deployment failure is a data directory it can't write to — a
-// bind-mounted host directory keeps the host's ownership. better-sqlite3
-// alone says only "unable to open database file", which doesn't point
-// anywhere useful.
+// The container runs as a normal user, so the most common deployment
+// error is a data folder it can't write to. better-sqlite3 alone only
+// says "unable to open database file"; the server must explain more.
 test("explains an unwritable data directory instead of just failing", async (t) => {
-  // Windows has no equivalent of a mode-0500 directory — chmod is a
-  // no-op there, so the server would open the database happily and
-  // there'd be nothing to observe. Same for root, which ignores the
-  // mode entirely. CI runs as a normal user on Linux (ubuntu-latest,
-  // no container), so this is only skipped on a developer's machine.
+  // Skipped on Windows, where chmod does nothing, and for root, which
+  // ignores the mode. CI runs as a normal user on Linux, so it runs
+  // there.
   if (process.platform === "win32") {
     t.skip("Windows: directory permissions don't work this way");
     return;
@@ -741,8 +708,8 @@ test("explains an unwritable data directory instead of just failing", async (t) 
   chmodSync(readOnly, 0o500);
 
   const server = spawnServer(baseEnv(join(readOnly, "test.db"), 4212));
-  // Its own hook rather than stopAndCleanUp: the mode has to be
-  // restored before the directory can be removed at all.
+  // Its own hook instead of stopAndCleanUp: the mode must be restored
+  // before the folder can be removed.
   t.after(async () => {
     await server.stop();
     chmodSync(readOnly, 0o700);
@@ -764,12 +731,9 @@ test("explains an unwritable data directory instead of just failing", async (t) 
   );
 });
 
-// The whole point of the reload, end to end and against the real
-// entrypoint: a file that did not exist when the server booted starts
-// being accepted without restarting anything. The pieces are unit-tested
-// separately, but only the assembled app can show that the live binding
-// actually reaches the request handler that validates an incoming event
-// — which is the assumption the whole design rests on.
+// Reload on the real server: an event file added after startup is
+// accepted without a restart. Only the whole app can show that the
+// reloaded registry really reaches the /events handler.
 test("picks up a new event file on reload, with no restart", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsDir = join(dir, "events");
@@ -799,8 +763,7 @@ test("picks up a new event file on reload, with no restart", async (t) => {
       }),
     });
 
-  // Startup seeded the volume with the built-ins, so this name is
-  // genuinely unknown rather than merely unloaded.
+  // The volume only has the built-in events, so this name is unknown.
   assert.equal((await sendNewsletterSignup()).status, 400);
 
   writeFileSync(
@@ -813,7 +776,7 @@ test("picks up a new event file on reload, with no restart", async (t) => {
     }),
   );
 
-  // Still unknown until something tells the server to look again.
+  // Still unknown until the server is told to reload.
   assert.equal((await sendNewsletterSignup()).status, 400);
 
   const reloaded = await fetch(`${base}/cockpit/reload`, {
@@ -830,10 +793,9 @@ test("picks up a new event file on reload, with no restart", async (t) => {
   assert.equal((await sendNewsletterSignup()).status, 204);
 });
 
-// A reload is a state change behind a cookie-free, browser-cached
-// credential, so the header is what tells a request from this page apart
-// from a form on someone else's. Worth pinning: it is one line in the
-// route and nothing else would fail if it were deleted.
+// Reload changes the server's state, so it requires the CSRF header,
+// which tells the cockpit page apart from a form on another site. Only
+// this test would notice if that line were removed.
 test("refuses a reload that did not come from the cockpit page", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4207;
@@ -856,10 +818,10 @@ test("refuses a reload that did not come from the cockpit page", async (t) => {
   assert.equal(response.status, 400);
 });
 
-// A session cookie is not the password, so a stolen one must not be a
-// way to test guesses at it. Five wrong confirmations in a row sign
-// every session out. Each one also counts toward the sign-in lockout
-// for its address, so ten lock that address out of signing in too.
+// Someone with a stolen session cookie must not be able to guess the
+// password in a confirmation box. Five wrong confirmations in a row sign
+// every session out. Each also counts toward the sign-in lockout for its
+// address, so ten block signing in from that address.
 test("wrong danger-zone passwords sign sessions out and lock sign-in", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4227;
@@ -885,11 +847,11 @@ test("wrong danger-zone passwords sign sessions out and lock sign-in", async (t)
     });
   const paths = ["/cockpit/reset", "/cockpit/events/reset"];
 
-  // Two rounds of five: each round ends in a sign-out.
+  // Two rounds of five; each ends with a sign-out.
   for (let round = 0; round < 2; round++) {
     const cookie = await signInToCockpit(port);
     for (let i = 0; i < 4; i++) {
-      // Stays 403: a 401 would send the owner to the sign-in page.
+      // 403, because a 401 would send the owner to the sign-in page.
       const res = await confirm(cookie, paths[i % 2]!, "wrong");
       assert.equal(res.status, 403);
     }
@@ -901,8 +863,8 @@ test("wrong danger-zone passwords sign sessions out and lock sign-in", async (t)
     assert.equal(after.status, 401, "the session should be signed out");
   }
 
-  // Ten failures from this address: sign-in is locked, even with the
-  // right password.
+  // After ten failures from this address, sign-in is blocked, even with
+  // the right password.
   const signIn = await fetch(`${base}/cockpit/session`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-genug-cockpit": "1" },
@@ -912,12 +874,9 @@ test("wrong danger-zone passwords sign sessions out and lock sign-in", async (t)
   assert.ok(signIn.headers.get("retry-after"));
 });
 
-// The create route's counterpart to the reload test above, and the same
-// assumption under test: the event a form just defined is accepted by
-// the collector immediately, with nothing else called in between. The
-// route reloads the registry itself — without that, a creation would
-// look like it worked and the next event under that name would still be
-// rejected.
+// Like the reload test above, for creating an event: the new event is
+// accepted right away. The create route must reload the registry itself;
+// otherwise the next event with that name would still be rejected.
 test("accepts an event created from the cockpit, with no reload call", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4208;
@@ -991,9 +950,8 @@ test("accepts an event created from the cockpit, with no reload call", async (t)
   assert.equal((await sendSignup()).status, 204);
 });
 
-// Same reasoning as the reload guard: creating an event writes a file
-// and changes what the collector accepts, so it may only be asked for
-// by the cockpit page itself.
+// Like reload: creating an event changes what is accepted, so it
+// requires the CSRF header.
 test("refuses a creation that did not come from the cockpit page", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4209;
@@ -1018,14 +976,15 @@ test("refuses a creation that did not come from the cockpit page", async (t) => 
   assert.equal(existsSync(join(dir, "events", "x.json")), false);
 });
 
-// A deployment whose EVENTS_PATH could not be seeded serves the image's
-// events. A write there would be lost on the next deploy, so every
-// event write answers 409 rather than saving into the image.
+// When EVENTS_PATH couldn't be prepared, the image's events are used. A
+// change there would be lost on the next deploy, so every event write
+// answers 409.
 test("refuses event writes while events are read from the image", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4228;
 
-  // The seeder never creates a missing parent, so this path is not used.
+  // The parent folder doesn't exist and is never created, so this path
+  // isn't used.
   const server = spawnServer({
     ...baseEnv(join(dir, "test.db"), port),
     EVENTS_PATH: join(dir, "missing", "events"),
@@ -1091,10 +1050,8 @@ test("refuses event writes while events are read from the image", async (t) => {
   assert.equal(existsSync(join(dir, "missing")), false);
 });
 
-// The stand-in only exists for a deployment that has edited its own
-// event files, which is exactly what a published image produces — and
-// it is the branch that keeps a typo in one file from taking the whole
-// server down. Nothing covered it.
+// The built-in page-view stand-in: it keeps a broken page-view file from
+// stopping the whole server.
 test("registers a stand-in page-view event when nothing carries the tag", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsDir = join(dir, "events");
@@ -1110,9 +1067,9 @@ test("registers a stand-in page-view event when nothing carries the tag", async 
   const base = `http://localhost:${port}`;
   const auth = await signInToCockpit(port);
 
-  // Renamed away *and* stripped of its tag: the built-in name is free,
-  // so the stand-in can take it. (A rename that keeps the tag is the
-  // ordinary case, tested below — this is the mistake.)
+  // Renamed and without its tag, so the built-in name is free and the
+  // stand-in can take it. (A rename that keeps the tag is the normal case,
+  // tested below; this is the mistake.)
   const renamed = JSON.parse(
     readFileSync(join(eventsDir, "page_view.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -1131,8 +1088,8 @@ test("registers a stand-in page-view event when nothing carries the tag", async 
     errorCount: 1,
   });
 
-  // The client sends the role, never a name, so this is what a real
-  // page view looks like arriving during the mistake.
+  // The client sends the role, not a name, so this is what a real page
+  // view looks like.
   const collected = await fetch(`${base}/events`, {
     method: "POST",
     headers: {
@@ -1160,9 +1117,8 @@ test("registers a stand-in page-view event when nothing carries the tag", async 
   );
 });
 
-// The claim in routes/cockpit/events.ts is that a failed rebuild is discarded
-// whole and the running registry keeps collecting. Nothing checked the
-// second half, which is the half that matters to a live site.
+// A failed reload must leave the running registry in place, still
+// collecting events (see routes/cockpit/events.ts).
 test("keeps collecting when a reload fails", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsDir = join(dir, "events");
@@ -1178,9 +1134,9 @@ test("keeps collecting when a reload fails", async (t) => {
   const base = `http://localhost:${port}`;
   const auth = await signInToCockpit(port);
 
-  // The tag dropped but the name kept: nothing carries pageView, and
-  // the stand-in cannot take a name that is already registered, so the
-  // build throws rather than returning a registry with no page view.
+  // The tag removed but the name kept: no event has pageView, and the
+  // stand-in can't take a name that is already used, so building the
+  // registry throws.
   const untagged = JSON.parse(
     readFileSync(join(eventsDir, "page_view.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -1213,10 +1169,9 @@ test("keeps collecting when a reload fails", async (t) => {
   );
 });
 
-// The client sends a role, never a name, for the events it fires
-// itself. With no event tagged for that role the request is refused
-// under the role, and the detail names the key to add to an event file:
-// the one place a deployment learns why its link clicks stopped.
+// The client sends a role, not a name, for the events it sends by
+// itself. If no event has that role, the request is rejected under the
+// role's name, and the detail says which key to add to an event file.
 test("an automatic click with no tagged event is rejected under its role, naming the tag", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsDir = join(dir, "events");
@@ -1285,10 +1240,9 @@ test("an automatic click with no tagged event is rejected under its role, naming
   }
 });
 
-// The route that moves stored rows had no test at any level. The risk
-// is specific: a rename that reports movedRows while the collector
-// still resolves the role to the old name, which reads as a successful
-// rename and silently drops every page view after it.
+// Renaming with "move stored rows". The risk: the rename reports moved
+// rows, but the server still maps the role to the old name, so every
+// later page view is rejected.
 test("renames an event from the cockpit and keeps collecting under the new name", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4212;
@@ -1342,8 +1296,8 @@ test("renames an event from the cockpit and keeps collecting under the new name"
     errorCount: 0,
   });
 
-  // The tag moved with the file, so the role still resolves — to the
-  // new name now. This is the assertion the whole test exists for.
+  // The tag moved with the file, so the role now maps to the new name.
+  // This is the main check of the test.
   assert.equal((await sendPageView()).status, 204);
 
   const data = (await (
@@ -1363,12 +1317,9 @@ test("renames an event from the cockpit and keeps collecting under the new name"
   assert.equal(data.storedEventCounts.seitenaufruf, 2);
   assert.equal(data.storedEventCounts.page_view, undefined);
 
-  // The rename is also written into the history log, which is where the
-  // agent looks before blaming a change in the numbers on the website.
-  // Asserted here rather than only in lib/autoHistory.test.ts because
-  // the route passes no directory: it uses the CONTEXT_PATH constant,
-  // and nothing below the process boundary can tell that apart from a
-  // hardcoded path that happens not to exist on this machine.
+  // The rename is also added to the history log. Checked here, not only
+  // in lib/autoHistory.test.ts, because the route uses the CONTEXT_PATH
+  // setting, which only a real server process shows is used.
   const history = JSON.parse(
     readFileSync(join(dir, "context", "history.json"), "utf8"),
   ) as { from: string; note: string }[];
@@ -1379,8 +1330,7 @@ test("renames an event from the cockpit and keeps collecting under the new name"
     /^Recorded automatically: the event "page_view" was renamed to "seitenaufruf"\. 1 stored event moved to the new name\. Reason given: The site is German now$/,
   );
 
-  // And it reaches the agent as part of the document it is told to read
-  // — the file being right is only half of it.
+  // And it reaches the agent in the deployment-context document.
   const resource = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: {
@@ -1406,9 +1356,9 @@ test("renames an event from the cockpit and keeps collecting under the new name"
   ).result.contents[0]!.text;
   assert.match(document, /Recorded automatically: the event "page_view"/);
 
-  // The numbers the agent reads. Every page-view metric resolves the
-  // tagged event at query time; one that kept "page_view" would count
-  // neither view here and report a quiet day rather than an error.
+  // The numbers the agent reads. Page-view queries look up the tagged
+  // event when they run; one using "page_view" would count no views here
+  // and report a quiet day.
   const today = new Date().toISOString().slice(0, 10);
   const callTool = async (name: string) => {
     const response = await fetch(`${base}/mcp`, {
@@ -1442,10 +1392,8 @@ test("renames an event from the cockpit and keeps collecting under the new name"
   assert.deepEqual(pages.items, [{ host: "example.com", path: "/", views: 2 }]);
 });
 
-// Deleting the event tagged _pageView is safe exactly when the
-// built-in's own name is free to take it back — this is that case, and
-// it should behave like an ordinary successful delete: 200, and page
-// views keep being recorded (now under the stand-in's shape).
+// Deleting the page-view event works when the built-in's name is free:
+// 200, and page views are still recorded (by the built-in stand-in).
 test("deletes the page-view event from the cockpit and falls back to the stand-in", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4205;
@@ -1474,8 +1422,8 @@ test("deletes the page-view event from the cockpit and falls back to the stand-i
       }),
     });
 
-  // One real row before the delete, so the history entry below has
-  // something it could wrongly claim was stranded.
+  // One stored row before the delete, which the history entry must not
+  // call orphaned.
   assert.equal((await sendPageView()).status, 204);
 
   const deleted = await fetch(`${base}/cockpit/events/page_view`, {
@@ -1485,8 +1433,7 @@ test("deletes the page-view event from the cockpit and falls back to the stand-i
       "content-type": "application/json",
       "X-Genug-Cockpit": "1",
     },
-    // A DELETE with a body: the only one here, and the reason is the
-    // only thing it ever carries.
+    // A DELETE with a body, which only ever holds the reason.
     body: JSON.stringify({ reason: "Back to the built-in shape" }),
   });
   assert.equal(deleted.status, 200);
@@ -1498,10 +1445,9 @@ test("deletes the page-view event from the cockpit and falls back to the stand-i
     errorCount: 1,
   });
 
-  // The stand-in took the name back, so those rows still match a
-  // registered event and nothing was stranded. Saying otherwise would
-  // hand the agent a cause for a drop that never happened — in the file
-  // it reads to explain drops.
+  // The stand-in took the name back, so the rows still match an event
+  // and none are orphaned. Saying otherwise would give the agent a cause
+  // for a drop that never happened.
   const afterDelete = JSON.parse(
     readFileSync(join(dir, "context", "history.json"), "utf8"),
   ) as { note: string }[];
@@ -1521,11 +1467,9 @@ test("deletes the page-view event from the cockpit and falls back to the stand-i
   );
 });
 
-// The page_view tests above both land in the stand-in special case,
-// where the built-in takes the name back and nothing is stranded. This
-// is the ordinary case strandedAfterReload() exists for: a deployment's
-// own event, left behind on purpose (renameStoredEvents: false), with
-// nothing waiting to reabsorb its name.
+// The tests above are the stand-in case, where no rows are orphaned.
+// This is the normal case: a deployment's own event is renamed without
+// moving its rows (renameStoredEvents: false), so they are orphaned.
 test("a rename that leaves rows behind reports them as stranded, not moved", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsPath = join(dir, "events");
@@ -1592,8 +1536,8 @@ test("a rename that leaves rows behind reports them as stranded, not moved", asy
     ok: true,
     name: "purchase_completed",
     movedRows: 0,
-    // The 3 built-ins plus this deployment's own event: renaming
-    // replaces the file, it does not remove one.
+    // The 3 built-ins plus the deployment's own event: renaming
+    // replaces the file rather than removing one.
     eventCount: 4,
     errorCount: 0,
   });
@@ -1607,16 +1551,14 @@ test("a rename that leaves rows behind reports them as stranded, not moved", asy
     storedEventCounts: Record<string, number>;
   };
 
-  // The old name has no registered event to match it any more, so its
-  // row shows up as orphaned rather than silently vanishing from the
-  // total — the failure this whole invariant exists to avoid.
+  // No event has the old name any more, so its row is reported as
+  // orphaned instead of silently missing from the numbers.
   assert.equal(data.orphanedEvents.length, 1);
   assert.equal(data.orphanedEvents[0]!.event, "order_completed");
   assert.equal(data.orphanedEvents[0]!.events, 1);
-  // storedEventCounts is a raw group-by over every row ever stored,
-  // registered or not — that is what lets it flag the stranding above
-  // in the first place. The row is still under the old name; nothing
-  // was ever stored under the new one.
+  // storedEventCounts counts every stored row by name, registered or
+  // not. The row is still under the old name; nothing is stored under the
+  // new one.
   assert.equal(data.storedEventCounts.order_completed, 1);
   assert.equal(data.storedEventCounts.purchase_completed, undefined);
 
@@ -1630,12 +1572,11 @@ test("a rename that leaves rows behind reports them as stranded, not moved", asy
   );
 });
 
-// The crash risk an earlier version of this route had: unlinking the
-// file before finding out whether the registry can still build without
-// it. Set up the one state where it cannot (the built-in's own name
-// already taken by an untagged file, same as "keeps collecting when a
-// reload fails" above) and delete the *other* event, the one actually
-// carrying the tag.
+// Deleting an event must not break the registry. This sets up the one
+// case where the registry can't be built without the file (the built-in
+// name is taken by an untagged file, as in "keeps collecting when a
+// reload fails" above) and deletes the event that has the tag. The file
+// must be restored.
 test("refuses to delete a page-view event that would leave the registry unable to load, and restores it", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const eventsDir = join(dir, "events");
@@ -1651,10 +1592,9 @@ test("refuses to delete a page-view event that would leave the registry unable t
   const base = `http://localhost:${port}`;
   const auth = await signInToCockpit(port);
 
-  // Renamed but kept the tag (unlike the stand-in test above), and an
-  // untagged file put back at the built-in's own name — so deleting
-  // "seitenaufruf" would leave nothing tagged and nowhere for the
-  // stand-in to go.
+  // Renamed with the tag kept, and an untagged file with the built-in's
+  // name added. Deleting "seitenaufruf" would leave no page-view event,
+  // and the stand-in can't take the name.
   const tagged = JSON.parse(
     readFileSync(join(eventsDir, "page_view.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -1687,10 +1627,9 @@ test("refuses to delete a page-view event that would leave the registry unable t
     "the deleted file must be back, byte for byte",
   );
 
-  // And nothing was written down claiming the delete happened. The
-  // history call sits after this branch's early return on purpose, and
-  // moving it "next to the deletion, where it belongs" would leave a
-  // permanent line about an event that is still registered.
+  // And the history log doesn't claim the delete happened. The route
+  // writes the entry only after this case has returned; writing it right
+  // after deleting would log a delete that was undone.
   assert.deepEqual(
     JSON.parse(readFileSync(join(dir, "context", "history.json"), "utf8")),
     [],
@@ -1716,10 +1655,9 @@ test("refuses to delete a page-view event that would leave the registry unable t
   );
 });
 
-// ~16 queries plus the registry, the orphan scan and the tool manifest,
-// composed in one handler: a throw anywhere in it blanks the whole
-// page. An empty database is what a fresh deployment sees first, so
-// that is the shape worth pinning.
+// /cockpit/data runs ~16 queries and more in one handler, and an error
+// anywhere blanks the whole page. A new deployment starts with an empty
+// database, so check that case.
 test("answers /cockpit/data on a database with nothing in it", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4213;
@@ -1766,12 +1704,12 @@ test("answers /cockpit/data on a database with nothing in it", async (t) => {
   ]) {
     assert.ok(key in data, `/cockpit/data is missing ${key}`);
   }
-  // Null, not absent: the page reads a missing value as "no events
-  // stored", which on a healthy site would be false.
+  // null, not missing: the page reads a missing value as "no events
+  // stored".
   assert.equal(data.lastEventAt, null);
 
-  // A script still on the old parameter gets told, not 7-day numbers.
-  // 400, not 401: cockpitFetch treats 401 as "session ran out".
+  // A `days` parameter gets an error, not 7-day numbers. 400, not 401,
+  // because cockpitFetch treats 401 as "session ran out".
   const old = await fetch(`http://localhost:${port}/cockpit/data?days=30`, {
     headers: { cookie: auth },
   });
@@ -1779,10 +1717,9 @@ test("answers /cockpit/data on a database with nothing in it", async (t) => {
   assert.match(((await old.json()) as { error: string }).error, /range/);
 });
 
-// End to end: a real save reaches the file CONTEXT_PATH points at, and
-// a real add lands in history.json in the shape appendHistoryEntry
-// produces — the same three files lib/context.ts composes into the MCP
-// resource the agent reads.
+// Saving the ground rules and business context writes to CONTEXT_PATH,
+// and adding a history entry writes to history.json: the three files
+// lib/context.ts combines into the agent's document.
 test("saves ground rules, business context and adds a history note from the cockpit", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const contextDir = join(dir, "context");
@@ -1846,8 +1783,7 @@ test("saves ground rules, business context and adds a history note from the cock
     { from: "2026-05-03", note: "A redesign shipped." },
   ]);
 
-  // /cockpit/data reflects both, read fresh rather than from a cache
-  // the writes above would have to know to invalidate.
+  // /cockpit/data shows both, read from disk, not from a cache.
   const page = (await (
     await fetch(`${base}/cockpit/data?range=7d`, { headers: { cookie: auth } })
   ).json()) as {
@@ -1864,13 +1800,9 @@ test("saves ground rules, business context and adds a history note from the cock
   );
 });
 
-// Ordinary prose survives round-tripping through JSON at roughly 1 byte
-// per character, but a `"` costs 2 once escaped (`\"`) — so content
-// right at MAX_PROSE_FIELD_BYTES made entirely of quotes doubles in
-// size on the wire. This pins that the request body's size limit has
-// enough headroom over the content cap for that to still arrive as an
-// ordinary save rather than being rejected by the body parser before
-// writeGroundRules's own friendly error ever runs.
+// A `"` takes 2 bytes in JSON (`\"`), so text at MAX_PROSE_FIELD_BYTES
+// made only of quotes is twice as big in the request. The request size
+// limit must leave room for that, so the save still works.
 test("saves ground rules made entirely of characters that double in size once JSON-escaped", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const contextDir = join(dir, "context");
@@ -1902,9 +1834,9 @@ test("saves ground rules made entirely of characters that double in size once JS
   assert.equal(readFileSync(join(contextDir, "ground-rules.md"), "utf8"), text);
 });
 
-// The cockpit's danger-zone button, end to end: a real event lands, the
-// route is asked to wipe it while confirming the password wrong, then
-// right, and only the second call actually empties the database.
+// Reset database: an event is stored, then a reset with the wrong
+// password and one with the right password. Only the second empties the
+// database.
 test("wipes stored events from the cockpit only when the password is confirmed", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4214;
@@ -1941,10 +1873,9 @@ test("wipes stored events from the cockpit only when the password is confirmed",
     },
     body: JSON.stringify({ password: "not-the-password" }),
   });
-  // 403, not 401. The session is fine — it is the retyped confirmation
-  // that is wrong — and cockpit.js reads a 401 as "the session ran out"
-  // and leaves for the login page, so answering one here would throw
-  // the owner out of the cockpit over a typo in a form field.
+  // 403, not 401: the session is fine, only the retyped password is
+  // wrong. cockpit.js treats a 401 as "the session ran out" and would
+  // show the sign-in page.
   assert.equal(wrongPassword.status, 403);
 
   const beforeReset = (await (
@@ -1979,11 +1910,9 @@ test("wipes stored events from the cockpit only when the password is confirmed",
   assert.deepEqual(afterReset.storedEventCounts, {});
 });
 
-// Same CSRF story as /cockpit/reload — the one route on this page that
-// deletes data must not be reachable from a plain cross-site form POST.
-// SameSite=Lax already withholds the session cookie from one; this is
-// the second lock, and the one that still holds if the cookie's flags
-// are ever loosened.
+// Like /cockpit/reload, the reset requires the CSRF header. SameSite=Lax
+// already protects it; the header still protects it if the cookie
+// settings ever change.
 test("refuses a reset that did not come from the cockpit page", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4215;
@@ -2007,9 +1936,8 @@ test("refuses a reset that did not come from the cockpit page", async (t) => {
   assert.equal(response.status, 400);
 });
 
-// The other danger-zone button: it puts the events directory back to
-// what the image ships, which is the one action that can strand stored
-// rows under a name the registry no longer has.
+// Reset events: puts the built-in event files back, which can leave
+// stored rows under a name no event has.
 test("resets the events directory to the built-ins and reports what it stranded", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4216;
@@ -2035,7 +1963,7 @@ test("resets the events directory to the built-ins and reports what it stranded"
       body: JSON.stringify(body),
     });
 
-  // A deployment's own event, registered and then collected under.
+  // A deployment's own event, with one stored row.
   writeFileSync(
     join(eventsPath, "order_completed.json"),
     JSON.stringify({
@@ -2065,7 +1993,7 @@ test("resets the events directory to the built-ins and reports what it stranded"
     password: "not-the-password",
   });
   assert.equal(wrongPassword.status, 403);
-  // Nothing touched by a refused attempt.
+  // A refused attempt changes nothing.
   assert.ok(readdirSync(eventsPath).includes("order_completed.json"));
 
   const reset = await post("/cockpit/events/reset", {
@@ -2077,16 +2005,16 @@ test("resets the events directory to the built-ins and reports what it stranded"
     removed: 4,
     eventCount: 3,
     errorCount: 0,
-    // The row collected under the removed name is still in the
-    // database, and now belongs to no registered event.
+    // The row of the removed event is still stored, and now matches no
+    // event.
     stranded: [{ event: "order_completed", count: 1 }],
   });
 
   assert.ok(!readdirSync(eventsPath).includes("order_completed.json"));
 
-  // Written down too, with both numbers — and they come from different
-  // places (files replaced, rows stranded), so a swap between them is
-  // the mistake this asserts against rather than just "a line exists".
+  // Also added to the history log, with both numbers. They come from
+  // different places (files replaced, rows orphaned), so check each one,
+  // not only that an entry exists.
   const history = JSON.parse(
     readFileSync(join(dir, "context", "history.json"), "utf8"),
   ) as { note: string }[];
@@ -2094,8 +2022,8 @@ test("resets the events directory to the built-ins and reports what it stranded"
   assert.match(history[0]!.note, /replacing 4 files/);
   assert.match(history[0]!.note, /order_completed \(1\)/);
 
-  // The registry is live again without a restart, and the orphaned row
-  // is reported where the cockpit shows it.
+  // The registry is reloaded without a restart, and the orphaned row is
+  // reported to the cockpit.
   const data = (await (
     await fetch(`${base}/cockpit/data?range=7d`, {
       headers: { cookie: auth },
@@ -2115,11 +2043,10 @@ test("resets the events directory to the built-ins and reports what it stranded"
   );
 });
 
-// The mode a public demo runs in. Three things have to be true at once
-// and each lives in a different file — the tool list (mcp/tools.ts), the
-// cockpit's write refusal (routes/cockpit.ts) and the startup line
-// (index.ts) — so this checks the running process rather than any one
-// of them.
+// Read-only mode, used by the public demo. It involves three files (the
+// tool list in mcp/tools.ts, the cockpit's write refusal in
+// routes/cockpit.ts and the startup log in index.ts), so it is checked
+// on the running server.
 test("READ_ONLY=true unregisters the delete tool and closes every cockpit write", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4217;
@@ -2136,8 +2063,8 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   const base = `http://localhost:${port}`;
   const auth = await signInToCockpit(port);
 
-  // The transport answers a JSON-RPC POST as a server-sent event
-  // stream, one `data:` line carrying the response.
+  // The MCP transport answers as a server-sent event stream; the
+  // response is in one `data:` line.
   const response = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: {
@@ -2157,11 +2084,11 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   const names = listed.result.tools.map((tool) => tool.name);
   assert.ok(names.includes("get_traffic_summary"));
   assert.ok(!names.includes("delete_visitor_data"));
-  // Writes nothing, but returns raw rows instead of an aggregate.
+  // Writes nothing, but returns raw rows instead of totals.
   assert.ok(!names.includes("get_recent_events"));
 
-  // Every write route, with the CSRF header and the password a real
-  // page would send, so the refusal can only be the mode.
+  // Every write route, with the CSRF header and the password, so the
+  // only reason to refuse is read-only mode.
   const writes: [string, string, unknown][] = [
     ["POST", "/cockpit/reload", undefined],
     [
@@ -2218,7 +2145,7 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
     assert.match(json.error, /read-only/);
   }
 
-  // Reads still work, and the page is told which mode it is in.
+  // Reading still works, and the page is told it is read-only.
   const page = (await (
     await fetch(`${base}/cockpit/data?range=7d`, {
       headers: { cookie: auth },
@@ -2234,8 +2161,7 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
     !page.toolManifest.some((tool) => tool.name === "delete_visitor_data"),
   );
 
-  // Collection is not a write in this sense: the demo's own traffic is
-  // the data.
+  // Events are still collected: the demo's own traffic is its data.
   const collected = await fetch(`${base}/events`, {
     method: "POST",
     headers: {
@@ -2250,9 +2176,9 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   });
   assert.equal(collected.status, 204);
 
-  // The stored row is counted, but never handed out as a row: the
-  // cockpit's recent-events list is the same raw export
-  // get_recent_events is, on a page anyone holding the demo link sees.
+  // The stored row is counted but not listed: the recent-events list is
+  // the same raw data as get_recent_events, and anyone with the demo
+  // link can see the page.
   const after = (await (
     await fetch(`${base}/cockpit/data?range=24h`, {
       headers: { cookie: auth },
@@ -2264,9 +2190,9 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   assert.equal(after.trafficSummary.visitors, 1);
   assert.deepEqual(after.recentEvents, []);
 
-  // Briefly cached in this mode, so a public demo's viewers holding
-  // refresh run its queries once per range, not once each: a second
-  // visitor inside the window is not counted yet.
+  // In this mode the data is cached briefly, so many viewers reloading
+  // don't each run the queries. So a second event within that time
+  // isn't counted yet.
   const second = await fetch(`${base}/events`, {
     method: "POST",
     headers: {
@@ -2288,8 +2214,8 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   ).json()) as { trafficSummary: { visitors: number } };
   assert.equal(cached.trafficSummary.visitors, 1);
 
-  // And the cache is the only reason: the row was stored, and an
-  // uncached read already counts it.
+  // And only because of the cache: the row was stored, and an uncached
+  // read counts it.
   const day = (offset: number) =>
     new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
   const summaryText = (
@@ -2343,10 +2269,10 @@ test("refuses to start on a READ_ONLY value that is neither true nor false", asy
   assert.ok(!server.rawLines.some((line) => line.includes("listening")));
 });
 
-// Two budgets per address, split by whether the request carries the
-// right key, so a stranger sharing a hosted agent's address cannot
-// spend the owner's. Through the real stack: the unit tests pin the
-// middleware, this pins that routes/mcp.ts mounts it that way.
+// Two rate limits per address, one for requests with the right key and
+// one for the rest, so a stranger sharing a hosted agent's address can't
+// use up the owner's. The unit tests check the middleware; this checks
+// that routes/mcp.ts uses it.
 test("rate limits /mcp per address, with the key and without it apart", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4219;
@@ -2366,7 +2292,8 @@ test("rate limits /mcp per address, with the key and without it apart", async (t
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
 
-  // A stranger spends the keyless budget; the owner is not affected.
+  // A stranger uses up the limit for requests without a key; the owner
+  // isn't affected.
   for (let i = 0; i < 10; i++) {
     assert.equal((await request("wrong-key")).status, 401, `guess ${i + 1}`);
   }
@@ -2379,7 +2306,7 @@ test("rate limits /mcp per address, with the key and without it apart", async (t
 
   const refused = await request();
   assert.equal(refused.status, 429);
-  // An agent has to be told how long to wait, or it reports an outage.
+  // The agent must be told how long to wait, or it reports an outage.
   const retryAfter = Number(refused.headers.get("retry-after"));
   assert.ok(retryAfter >= 1 && retryAfter <= 60, `Retry-After ${retryAfter}`);
   assert.deepEqual(await refused.json(), {
@@ -2393,8 +2320,8 @@ test("rate limits /mcp per address, with the key and without it apart", async (t
   assert.equal(line.limit, 60);
 });
 
-// A short key is the owner's call, so it starts, but says so: with no
-// lockout on /mcp, the key's length is what stops a guesser.
+// A short key is allowed, but the server warns: /mcp has no lockout, so
+// the key's length is what stops guessing.
 test("warns about a short MCP_API_KEY but still starts", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
@@ -2411,10 +2338,9 @@ test("warns about a short MCP_API_KEY but still starts", async (t) => {
   await server.waitForLog((line) => line.msg === "genug server listening");
 });
 
-// One allowed request must be one JSON-RPC message. The transport
-// itself accepts an array, so without the guard in routes/mcp.ts a
-// single request inside the limit carries hundreds of tool calls and
-// the per-minute ceiling above bounds almost nothing.
+// One request may carry only one JSON-RPC message. The transport would
+// accept an array, so without the check in routes/mcp.ts one request
+// could carry hundreds of tool calls and get around the rate limit.
 test("refuses a batched JSON-RPC body on /mcp", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4220;
@@ -2441,19 +2367,13 @@ test("refuses a batched JSON-RPC body on /mcp", async (t) => {
   assert.match(body.error.message, /Batched requests are not accepted/);
 });
 
-// lib/context.test.ts proves what the document says in each state, but
-// every one of its cases passes a directory in. Nothing there — and
-// nothing in mcp/tools.test.ts, which reads the resource with the
-// module default and so exercises the ENOENT fallback on a machine with
-// no /data — can tell "served the owner's file" from "served the
-// built-in because it never found the file". This can: the server seeds
-// a real directory, the file is then changed underneath it, and the
-// resource is read over HTTP.
+// The unit tests in lib/context.test.ts pass their own folder, so they
+// can't tell "served the owner's file" from "served the built-in because
+// the file wasn't found". Here the server creates the real folder, the
+// files are changed while it runs, and the resource is read over HTTP.
 //
-// It covers the no-caching decision at the same time. lib/context.ts
-// re-reads per request deliberately, and a module-level constant would
-// be the easy, silent regression — the edit below happens after the
-// process is up, so a cached read fails here and nowhere else.
+// This also checks that the files are read on every request, not cached:
+// the edit happens after startup, so a cached read would fail here.
 test("the deployment-context resource serves the seeded file, and edits are live", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4221;
@@ -2476,8 +2396,8 @@ test("the deployment-context resource serves the seeded file, and edits are live
     [],
   );
 
-  // Both written after startup on purpose, so only a per-request read
-  // can return them.
+  // Both written after startup, so only reading on every request finds
+  // them.
   writeFileSync(groundRules, "Answer only in Swiss German.");
   writeFileSync(
     join(contextDir, "history.json"),
@@ -2511,21 +2431,17 @@ test("the deployment-context resource serves the seeded file, and edits are live
 
   assert.match(document, /Answer only in Swiss German\./);
   assert.match(document, /\*\*2026-06-15\*\* — Relaunched the pricing page\./);
-  // The two ways this could pass while being wrong: serving the
-  // built-in text instead, or serving the fallback that says it found
-  // nothing. Both would satisfy an assertion on the heading alone.
+  // Check the content, not just the heading: the built-in text or the
+  // "nothing found" text would have the same heading.
   assert.equal(document.includes("Ask rather than guess"), false);
   assert.equal(document.includes("There is no file at"), false);
   assert.equal(document.includes("No events have been recorded"), false);
 });
 
-// lib/history.test.ts proves the append itself, but every case there
-// passes a path in. The tool passes none: it builds one from the
-// contextPath module constant, which is read from the environment at
-// import. Nothing below the process boundary can tell that constant
-// apart from a hardcoded /data/context, and on this machine both fail
-// the same way. So the round trip is worth running whole — write over
-// MCP, then read the document back over MCP and find the note in it.
+// lib/history.test.ts passes its own path. The MCP tool uses the
+// CONTEXT_PATH setting instead, which only a real server process can
+// show. So: write a note over MCP, then read the document over MCP and
+// find the note in it.
 test("add_history_note writes into the same file the resource serves", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4222;
@@ -2570,20 +2486,17 @@ test("add_history_note writes into the same file the resource serves", async (t)
     },
   });
   assert.notEqual(written.result.isError, true);
-  // The tool must say what it wrote rather than just succeeding — a note
-  // recorded with a date the agent did not intend is repeated as fact
-  // for as long as the file exists.
+  // The tool must return what it saved, not just "ok", so a wrong date
+  // can be noticed.
   assert.match(
     written.result.content![0]!.text,
     /Ran a discount campaign on the pricing page\./,
   );
 
-  // A second call, for two reasons one call cannot cover. It pins that
-  // the tool appends: writing `[entry]` over whatever is there passes an
-  // assertion on a one-element array identically. And it is the common
-  // shape — a single day, no end_date — which the handler passes through
-  // as `to: undefined`, so this is what proves the stored entry gains no
-  // `"to": null` and the document renders one date rather than a range.
+  // A second call checks two things. That the tool adds to the file
+  // rather than overwriting it. And the common case of a single day
+  // without end_date: the stored entry must not get `"to": null`, and the
+  // document must show one date, not a range.
   const second = await call("tools/call", {
     name: "add_history_note",
     arguments: {
@@ -2610,11 +2523,8 @@ test("add_history_note writes into the same file the resource serves", async (t)
     },
   ]);
 
-  // A refusal has to reach the agent as a refusal. Reporting a note as
-  // recorded when nothing was written is this project's worst shape of
-  // failure — the owner believes the cause is written down, and every
-  // later session reads a log that does not have it. The date is the one
-  // Date.parse would wave through.
+  // A refused note must be reported as an error, not as saved. The date
+  // is one Date.parse would accept although it doesn't exist.
   const before = readFileSync(join(contextDir, "history.json"), "utf8");
   const refused = await call("tools/call", {
     name: "add_history_note",
@@ -2637,9 +2547,8 @@ test("add_history_note writes into the same file the resource serves", async (t)
   );
 });
 
-// keptUrlParts is parsed at module load in lib/url.ts, same timing as
-// TRUST_PROXY and READ_ONLY above — this pins that against the real
-// entrypoint, the same reasoning as those tests.
+// The kept URL parts are read when lib/url.ts loads; checked on the real
+// server, like TRUST_PROXY and READ_ONLY above.
 test("fails fast on an invalid KEPT_QUERY_PARAMS and never starts listening", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
 
@@ -2685,11 +2594,9 @@ test('logs a warning when KEPT_QUERY_PARAMS or KEPT_HASH_VALUES is "*"', async (
   );
 });
 
-// The one thing this feature actually promises: whatever a deployment
-// configures is what ships to the browser, not just what the server
-// enforces on its own — a mismatch here would mean the client strips
-// a parameter the operator meant to keep, or keeps one they meant to
-// drop, invisibly.
+// The configured lists must reach the client script, not only the
+// server. Otherwise the client would remove a parameter the owner wanted
+// to keep, or send one they wanted removed.
 test("serves /client.js with this deployment's own kept-parameter list embedded", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
   const port = 4231;

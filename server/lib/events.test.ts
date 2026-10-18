@@ -327,11 +327,9 @@ test("getEntryEvents/getExitEvents return empty arrays for a period with no even
   assert.deepEqual(getExitEvents(db, PERIOD, 10).items, []);
 });
 
-// A list prop holds several values in one row. json_extract hands the
-// whole array back as one opaque string, so grouping by it would group
-// by the entire array — ["a","b"] and ["b","a"] would be two different
-// "values". These tests pin the json_each expansion that makes a list
-// queryable at all.
+// A list prop holds several values in one row. Grouping by json_extract
+// would group by the whole array, so ["a","b"] and ["b","a"] would be two
+// values. These test the json_each version, one row per value.
 function insertArticle(
   db: Database.Database,
   id: string,
@@ -363,8 +361,8 @@ test("getEventsByProperty counts each value of a list prop separately", () => {
     true,
   ).items;
 
-  // Ranked by count; the two on one apiece tie, and SQLite does not
-  // promise an order between them, so only the ranking is asserted.
+  // The two with one each tie, and SQLite doesn't promise an order for
+  // ties, so only the ranking is checked.
   assert.deepEqual(result[0], { value: "pricing", events: 2 });
   assert.deepEqual(
     result
@@ -375,17 +373,17 @@ test("getEventsByProperty counts each value of a list prop separately", () => {
       { value: "privacy", events: 1 },
     ],
   );
-  // Four counts across three events: one event contributes to every
-  // value it carries, which is why the tool description says these do
-  // not add up to the event total.
+  // Four counts from three events: an event counts for every value it
+  // has, so the counts don't add up to the number of events (the tool
+  // description says so).
   assert.equal(
     result.reduce((total, row) => total + row.events, 0),
     4,
   );
 });
 
-// COUNT(DISTINCT events.id), not COUNT(*): the question is how many
-// events carry a value, not how many times it was written down.
+// COUNT(DISTINCT events.id), not COUNT(*): how many events have a
+// value, not how often it appears.
 test("getEventsByProperty counts an event once even if it repeats a value", () => {
   const db = setupDb();
   insertArticle(db, "v1", ["pricing", "pricing", "pricing"]);
@@ -407,10 +405,8 @@ test("getEventsByProperty ignores an event whose list is empty", () => {
   );
 });
 
-// Reading a list prop without the flag is what the old code did to
-// every array: one bucket holding the serialized array, which is
-// useless rather than wrong-looking. Pinned so the flag is visibly
-// load-bearing.
+// Without the list flag, the whole array is one value, which is useless.
+// This shows that the flag matters.
 test("getEventsByProperty without the list flag groups by the whole array", () => {
   const db = setupDb();
   insertArticle(db, "v1", ["pricing", "analytics"]);
@@ -433,9 +429,8 @@ test("getPropertySum adds up every value across every list", () => {
 
   const result = getPropertySum(db, "article_read", "prices", PERIOD, true);
 
-  // count is values, not events — three numbers over two events — so
-  // sum / count is the average, which is the relationship a reader will
-  // assume holds.
+  // count is the number of values, not events (three numbers in two
+  // events), so sum / count is the average.
   assert.deepEqual(result, { sum: 2.5, average: 0.83, values: 3 });
 });
 
@@ -450,9 +445,8 @@ test("getPropertySum returns zeroes when every list is empty", () => {
   });
 });
 
-// Same edge as the page-scoped queries in content.test.ts: a session
-// belongs to the period it started in, and its first and last event are
-// read from its full length.
+// As in content.test.ts: a session belongs to the period it started in,
+// and its first and last events are taken from the whole session.
 test("getEntryEvents/getExitEvents scope sessions by their start and read them in full", () => {
   const db = setupDb();
   const period = {
@@ -560,9 +554,8 @@ test("getEventTrend counts one event per day, zero-filled, with sessions and vis
   );
 });
 
-// The segment clause is spliced between each statement's WHERE and the
-// GROUP BY, for the scalar and the list variant alike; one segmented
-// call each so a future edit to that splice has something to trip.
+// The segment condition is added between WHERE and GROUP BY for both
+// the single-value and the list version; one call each checks that.
 test("getEventsByProperty and getPropertySum apply a segment to the list variants", () => {
   const db = setupDb();
   for (const [session, device, tags, prices] of [

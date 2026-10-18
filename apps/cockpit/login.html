@@ -5,9 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Genug Analytics — Sign in</title>
-    <!-- Blocking, same as the cockpit page: it sets the theme attribute
-         before the first paint, so the page doesn't flash the wrong
-         theme. -->
+    <!-- Not deferred, as on the cockpit page: it sets the theme before
+         the page is drawn, so the wrong theme doesn't flash. -->
     <script src="theme.js"></script>
     <link rel="stylesheet" href="cockpit.css" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -35,16 +34,14 @@
         </div>
       </div>
 
-      <!-- A real form with a real password input, even though the submit
-           is intercepted and sent with fetch(): password managers look
-           for exactly this shape, and the cockpit's CSP sets
-           form-action 'none', so a native submit would be blocked. -->
+      <!-- A real form with a password input, although login.js sends it
+           with fetch(): password managers look for this. A normal form
+           submit would be blocked by the CSP (form-action 'none'). -->
       <form id="login-form" class="login-form">
-        <!-- There is no username here, but a password field on its own
-             is a shape browsers and password managers handle badly:
-             Chrome warns about it, and a manager has nothing to file the
-             saved password under. A fixed, hidden one gives it a name to
-             use and is never sent anywhere. -->
+        <!-- There is no username, but browsers and password managers
+             handle a password field alone badly (Chrome warns, and a
+             manager has no name to save it under). This fixed, hidden
+             field gives them one; it is never sent. -->
         <input
           type="text"
           name="username"
@@ -70,13 +67,11 @@
         <button id="submit" type="submit">Sign in</button>
       </form>
 
-      <!-- Always rendered, never `hidden`: a live region a screen reader
-           only meets once it is unhidden may announce nothing, and the
-           message that greets someone on load would never fire at all.
-           Empty text is how it says nothing, and it is named by the
-           password field's aria-describedby — so after a failure, where
-           focus is put back in the field, the reason is read out with
-           it. -->
+      <!-- Always present, never `hidden`: a live region that only appears
+           when unhidden may not be announced at all. It is empty when
+           there is nothing to say. The password field's aria-describedby
+           points at it, so after a failed sign-in, when focus returns to
+           the field, the reason is read out. -->
       <p class="login-message" id="message" role="status"></p>
     </main>
   </body>

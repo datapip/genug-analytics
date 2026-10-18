@@ -9,31 +9,28 @@ export interface EventRow {
   ts: string;
   url: string;
   referrer?: string;
-  // The User-Agent header's classification (lib/userAgent.ts), never the
-  // header. Both undefined only when the request carried no header at
-  // all; an unrecognised one still classifies, to "Other"/"other".
+  // The category lib/userAgent.ts derives from the User-Agent header; the
+  // header itself is never stored. Undefined only when the request had no
+  // User-Agent; an unknown one becomes "Other"/"other".
   deviceType?: string;
   browser?: string;
   visitorLanguage?: string;
-  // undefined (NULL) when no lookup ran; see migration 1.
+  // Undefined (stored as NULL) when the country lookup is off.
   country?: string;
   props: unknown;
   idempotencyKey?: string;
-  // Optional here, but never NULL in the database — this default is
-  // what keeps the column that way. routes/events.ts always passes an
-  // explicit value, computed from whether a persistent id was actually
-  // used for this row, which is a narrower question than what the
-  // envelope's own (now three-valued) `consent` field said on this
-  // particular request — see "Visitor identification" in
-  // docs/decisions.md.
+  // Optional here, but the default keeps the column from ever being NULL.
+  // routes/events.ts always passes a value: whether this row was
+  // identified by the consent cookie. That can differ from what the
+  // request's `consent` field said (see "Visitor identification" in
+  // docs/decisions.md).
   consentMode?: ConsentMode;
 }
 
-// Returns false when a row with the same (event, idempotencyKey) pair
-// was already inserted — idx_events_dedup's ON CONFLICT silently drops
-// the duplicate rather than inserting a second row. Events that never
-// set idempotencyKey (the common case) always insert and always return
-// true — see migrations.ts for why NULLs never collide with each other.
+// Returns false when a row with the same event and idempotencyKey already
+// exists: the unique index idx_events_dedup makes SQLite skip the
+// duplicate. Events without an idempotencyKey (most of them) are always
+// inserted, because SQLite never treats two NULLs as equal.
 export function insertEvent(db: Database.Database, row: EventRow): boolean {
   const result = db
     .prepare(

@@ -2,11 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { logInfo, logError } from "./logger.js";
 
-// Captures what a call writes to the given console method, restoring it
-// afterward — same "inject/observe, then restore" shape as any test that
-// needs to intercept a global rather than a parameter (unlike this
-// project's usual pattern of passing state in, e.g. rateLimit.ts's
-// isWithinRateLimit, console methods aren't something callers can inject).
+// Captures what a call writes to the given console method, then restores
+// the method.
 function captureConsole(method: "log" | "error", run: () => void): string {
   const original = console[method];
   let captured = "";

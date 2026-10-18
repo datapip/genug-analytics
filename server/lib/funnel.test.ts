@@ -206,9 +206,8 @@ test("advances only the visitors who reached the next step", () => {
   );
 });
 
-// The bug the json_each visitor set exists for: binding one parameter
-// per visitor hit SQLite's cap of 32,766 per statement, so this threw
-// "too many SQL variables" above 32,763 visitors rather than answering.
+// More visitors than SQLite's limit of 32,766 parameters per statement
+// must still work, which is why the ids are passed as one JSON array.
 test("survives more visitors than SQLite allows bound parameters", () => {
   const db = setupDb();
   const insert = db.prepare(
@@ -240,11 +239,11 @@ test("survives more visitors than SQLite allows bound parameters", () => {
   }
 });
 
-// The reason session is the default scope: a consentless visitor_id
-// rotates at the site's midnight, so the same person is v-day1 before it and
-// v-day2 after. Visitor scope splits their funnel in two and reports no
-// conversion; session scope, keyed on the id the server carries across
-// midnight, still sees one visit that completed both steps.
+// Why per-session is the default: without consent the visitor_id
+// changes at the site's midnight, so the same person is v-day1 before and
+// v-day2 after. Per visitor, the funnel is split and shows no
+// conversion; per session, the visit continues across midnight and
+// completes both steps.
 test("getStepsFunnel's session scope survives a visitor_id rotating at midnight", () => {
   const db = setupDb();
   insertEvent(db, {
@@ -277,8 +276,8 @@ test("getStepsFunnel's session scope survives a visitor_id rotating at midnight"
   );
 });
 
-// And the case visitor scope exists for: a consentful visitor who comes
-// back days later in a new session. Session scope can't see it.
+// Per visitor is for visitors with consent who come back days later in
+// a new session, which per session can't see.
 test("getStepsFunnel's visitor scope follows a visitor across sessions", () => {
   const db = setupDb();
   insertEvent(db, {
@@ -308,9 +307,8 @@ test("getStepsFunnel's visitor scope follows a visitor across sessions", () => {
   );
 });
 
-// The segment decides who enters at step one; in session scope a later
-// step done by a session outside the segment can never count, since
-// only the entering keys are looked up.
+// The segment decides who enters at step one; later steps only look at
+// those sessions.
 test("getStepsFunnel's segment narrows who enters the funnel", () => {
   const db = setupDb();
   for (const [session, device] of [

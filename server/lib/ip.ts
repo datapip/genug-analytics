@@ -1,14 +1,12 @@
-// Everything to do with narrowing a client address, in one place
-// because two different callers need two different widths and the
-// reasoning for each only makes sense beside the other.
+// Shortening client IP addresses. Two kinds of callers need different
+// widths, and the reasons are easiest to understand side by side:
 //
-// `truncateIp` narrows for the **visitor hash** (lib/identity.ts) and,
-// through `blockIndex`, for the **country lookup** (lib/country.ts).
-// `limiterKey` narrows for the **counters** that bound abuse: the
-// /events and /mcp request limits and the cockpit password lockout
-// (lib/rateLimit.ts).
+// `truncateIp` is for the **visitor hash** (lib/identity.ts) and, through
+// `blockIndex`, the **country lookup** (lib/country.ts).
+// `limiterKey` is for the **abuse counters**: the /events and /mcp rate
+// limits and the cockpit password lockout (lib/rateLimit.ts).
 
-// 0-255, no leading "+", no whitespace, no "010" octal-looking parts.
+// 0-255, without a leading "+", spaces or leading zeros like "010".
 const IPV4_OCTET = /^(0|[1-9][0-9]{0,2})$/;
 
 function truncateIpv4(ip: string): string | undefined {
@@ -33,7 +31,7 @@ function expandIpv6(ip: string): string[] | undefined {
     halves.length === 2 ? (halves[1] ? halves[1].split(":") : []) : undefined;
 
   if (right === undefined) {
-    // No "::", so every group has to be written out.
+    // Without "::", all 8 groups must be written out.
     if (left.length !== 8) return undefined;
     return left.every((group) => IPV6_GROUP.test(group)) ? left : undefined;
   }
@@ -44,59 +42,51 @@ function expandIpv6(ip: string): string[] | undefined {
   return groups.every((group) => IPV6_GROUP.test(group)) ? groups : undefined;
 }
 
-// Dual-stack Node reports IPv4 peers as IPv4-mapped IPv6
-// (::ffff:203.0.113.5), so the dotted quad decides the family, not the
-// colons. Good enough for truncateIp, which rebuilds the address around
-// the quad and so cannot mistake one for another; limiterKey replaces
-// the quad with itself and needs the stricter embeddedIpv4 below.
+// Node may report an IPv4 client as an IPv4-mapped IPv6 address
+// (::ffff:203.0.113.5), so a dotted IPv4 part means IPv4, even with
+// colons. That is enough for truncateIp. limiterKey needs the stricter
+// embeddedIpv4 below.
 function isIpv4(ip: string): boolean {
   return ip.includes(".");
 }
 
-// Narrows an address to its block: IPv4 to a /24, IPv6 to a /48.
-// Used for the visitor hash and, through blockIndex, the country
-// lookup — never for the abuse counters, which need limiterKey.
+// Shortens an address to its block: IPv4 to a /24, IPv6 to a /48. Used
+// for the visitor hash and, through blockIndex, the country lookup;
+// never for the abuse counters, which use limiterKey.
 //
-// Never move limiterKey's *canonicalisation* into this function —
-// lowercasing, leading-zero stripping, rewriting a v4-mapped address
-// as a bare quad. It is the obvious-looking tidy-up and it would
-// silently give every consentless IPv6 visitor a new id, because the
-// id is a hash of exactly this output. Stripping wrappers is a
-// different matter and is shared deliberately: it only touches input
-// that this function could not read at all.
+// Don't add limiterKey's normalising here (lowercasing, removing leading
+// zeros, turning ::ffff:1.2.3.4 into 1.2.3.4). It looks like a harmless
+// tidy-up, but the visitor id is a hash of exactly this output, so every
+// consentless IPv6 visitor would quietly get a new id. Removing
+// wrappers (stripWrappers) is shared on purpose: it only affects input
+// this function couldn't read at all.
 //
-// Why narrow it at all, when the raw address is never stored: the hash
-// is reproducible by anyone holding the day's salt, so a full address
-// makes "was this exact person here today" answerable. A truncated one
-// only answers "was someone from this block here", which is the
-// difference a supervisory authority looks for when an operator relies
-// on legitimate interest instead of consent.
+// Why shorten it, when the address is never stored? Anyone with the
+// day's salt can recompute the hash. With the full address, they could
+// check "was this exact person here today?"; with a shortened one only
+// "was someone from this block here?". That difference matters when a
+// site relies on legitimate interest instead of consent.
 //
-// The cost is real and one-directional: two visitors sharing a block
-// *and* a User-Agent string become one visitor, and one session if
-// they overlap within the session timeout. Visitors and sessions come
-// out under-counted, events-per-session over-counted.
+// The cost: two visitors with the same block and the same User-Agent
+// count as one visitor (and one session if their visits overlap). So
+// visitors and sessions are slightly under-counted.
 export function truncateIp(ip: string): string {
   if (ip === "") return ip;
 
-  // Same wrappers limiterKey strips, for a worse reason. This used to
-  // hand back anything it could not parse, unchanged — and the values
-  // it cannot parse are not garbage, they are ordinary addresses in the
-  // forms a proxy writes. "1.2.3.4:5678" was hashed whole, so the
-  // deployment's own privacy notice became untrue (the full address
-  // went into the hash) and the port made it worse than untruncated:
-  // unique per TCP connection, so one visitor counted as dozens.
-  // Stripping changes nothing for an address that already parsed.
+  // Remove the same wrappers as limiterKey. Proxies write addresses in
+  // forms like "1.2.3.4:5678". Kept as they are, the full address would
+  // go into the hash (contradicting the privacy notice), and the port,
+  // which changes with every connection, would make one visitor count as
+  // dozens. For an address that already parses, this changes nothing.
   const address = stripWrappers(ip);
   if (address === "") return UNKNOWN;
 
   if (isIpv4(address)) {
     const lastColon = address.lastIndexOf(":");
     const truncated = truncateIpv4(address.slice(lastColon + 1));
-    // Fails closed, like limiterKey. Merging every unreadable address
-    // into one id under-counts visibly; handing back the raw value
-    // leaks the whole address into the hash invisibly, and the hash is
-    // the one thing the privacy position rests on.
+    // Like limiterKey, unreadable addresses all become "unknown".
+    // Merging them under-counts visibly; returning the raw value would
+    // quietly put the full address into the hash.
     if (truncated === undefined) return UNKNOWN;
     return address.slice(0, lastColon + 1) + truncated;
   }
@@ -106,15 +96,15 @@ export function truncateIp(ip: string): string {
   return `${groups[0]}:${groups[1]}:${groups[2]}::`;
 }
 
-// Which block a truncateIp result is, as a number the country table
-// (lib/country.ts) can search: the /24's index for IPv4 (its first
-// three octets), the /48's prefix for IPv6. Taking truncateIp's output
-// rather than an address is the point — the country is looked up from
-// the same shortened address the hash uses, so the full one is never
-// consulted for it. undefined for "unknown" or anything unreadable.
+// The block of a truncateIp result as a number the country table
+// (lib/country.ts) can search: the first three numbers of an IPv4
+// address, or the /48 prefix of an IPv6 address. It takes truncateIp's
+// output on purpose, so the country is looked up from the shortened
+// address, never the full one. undefined for "unknown" or anything
+// unreadable.
 //
-// A v4-mapped address is IPv4 here; "2001:db8::1.2.3.0" stays IPv6, for
-// the reason embeddedIpv4 gives.
+// An IPv4-mapped address counts as IPv4; "2001:db8::1.2.3.0" stays IPv6
+// (see embeddedIpv4).
 export function blockIndex(
   truncated: string,
 ): { family: 4 | 6; index: number } | undefined {
@@ -131,48 +121,35 @@ export function blockIndex(
     number,
     number,
   ];
-  // 48 bits, inside a double's exact integer range.
+  // 48 bits, small enough for a JavaScript number to hold exactly.
   return { family: 6, index: (g0 * 65536 + g1) * 65536 + g2 };
 }
 
-// What every abuse counter keys on. The two families are treated
-// differently on purpose, because "one address is one client" is true
-// of one of them and not the other.
+// The key every abuse counter uses. IPv4 and IPv6 are treated
+// differently, because "one address is one client" is true for one and
+// not the other.
 //
-// **IPv4 keeps the full address.** Addresses are scarce and an
-// attacker cannot cheaply get more, while the collateral of going
-// wider is severe: a /24 can be a mobile carrier's pool or a CGNAT
-// range holding hundreds of unrelated people, and throttling all of
-// them for one abuser is the failure the /events ceiling is
-// deliberately generous to avoid.
+// **IPv4 keeps the full address.** Addresses are scarce, so an attacker
+// can't easily get more. Using a wider block would hurt others: a /24 can
+// be a mobile carrier's range shared by hundreds of unrelated people.
 //
-// **IPv6 is narrowed to a /48.** The same reasoning inverts: a single
-// residential line is *delegated* a /56 or a /48 and can freely send
-// from any address inside it, so keying on the full address means the
-// counters bound nothing at all for anyone on IPv6. That mattered most
-// where it was least visible — the cockpit password lockout and the
-// /mcp keyless limit are the only thing standing between a guesser and
-// a single shared secret at an entirely predictable hostname, and both
-// were bypassable by rotating within a block the attacker already
-// holds. A /48 is the largest common end-site delegation, so no line
-// spans more than one, which is the property the counter needs. It is
-// deliberately the over-grouping error rather than the under-grouping
-// one: plenty of providers, German residential among them, delegate a
-// /56, so one /48 can hold a couple of hundred unrelated households,
-// and they share a budget. For the cockpit lockout that is near-free —
-// the collateral is a fifteen-minute wait, and only for someone who is
-// themselves failing auth. For /events it is the real cost, and the
-// knob to reach for if a deployment ever sees refusals against an IPv6
-// key is the ceiling, not the width: narrowing less would hand the
-// bypass straight back.
-// A counter's key has to be *canonical*, not merely narrowed. One
-// address has several legal spellings — "2001:DB8::1" and "2001:db8::1",
-// "2001:0db8::1" and "2001:db8::1", "::ffff:1.2.3.4" and "1.2.3.4" —
-// and each spelling that reaches the map unchanged is another budget
-// for the same client. Node writes the canonical form for a direct
-// connection, so this is defence in depth rather than a live hole, but
-// req.ip comes from a proxy header once TRUST_PROXY is set and nothing
-// guarantees what is written there.
+// **IPv6 is shortened to a /48.** One home connection gets a whole block
+// (a /56 or /48) and can send from any address in it. Keyed on the full
+// address, the counters would limit nothing on IPv6, including the
+// cockpit password lockout and the /mcp limit for requests without a key.
+// A /48 is the largest block a connection usually gets, so no connection
+// has more than one. The downside: where providers hand out /56 blocks,
+// one /48 can hold a couple of hundred households sharing a limit. For
+// the cockpit lockout that costs at most a fifteen-minute wait, and only
+// for someone also typing wrong passwords. If /events ever refuses real
+// IPv6 traffic, raise the limit rather than narrowing the block, which
+// would open the gap again.
+//
+// The key must also be normalised. One address can be written several
+// ways ("2001:DB8::1", "2001:0db8::1", "::ffff:1.2.3.4" vs "1.2.3.4"), and
+// each spelling would get its own limit. Node writes a normal form for
+// direct connections, but with TRUST_PROXY req.ip comes from a proxy
+// header, which could contain anything.
 export function limiterKey(ip: string): string {
   const address = stripWrappers(ip);
   if (address === "") return UNKNOWN;
@@ -181,26 +158,22 @@ export function limiterKey(ip: string): string {
   if (quad !== undefined) return quad;
 
   const groups = expandIpv6(hexifyEmbeddedQuad(address));
-  // Fails closed. Keying an unreadable value on itself is how a
-  // limiter quietly stops limiting: a proxy that appends the source
-  // port to X-Forwarded-For (Azure App Service does, so does any nginx
-  // writing $remote_addr:$remote_port) would give every counter here a
-  // fresh key per TCP connection. The wrappers stripped above are the
-  // forms that actually occur; anything still unreadable is rare
-  // enough that one shared bucket is the safe way to be wrong, and it
-  // also stops an attacker growing this map with keys of their own
-  // choosing. It shows up in the "rate limit reached" log as
-  // "unknown", which is the signal that a proxy is writing something
-  // unexpected.
+  // Anything unreadable shares one key, "unknown". Using the raw value
+  // as its own key would let the limit stop working: a proxy that adds
+  // the port to X-Forwarded-For (Azure App Service does, as does nginx
+  // with $remote_addr:$remote_port) would create a new key for every
+  // connection. The usual forms are already handled above, and one
+  // shared key also stops an attacker from filling the map with keys.
+  // "unknown" in the "rate limit reached" log means a proxy is writing
+  // something unexpected.
   if (groups === undefined) return UNKNOWN;
   return groups.slice(0, 3).map(canonicalGroup).join(":") + "::";
 }
 
 const UNKNOWN = "unknown";
 
-// Peels off what sits *around* an address: a "[...]" wrapper, a
-// ":port" suffix, a "%eth0" zone. Each is a legal thing to find in a
-// proxy header and none of them belongs in the key.
+// Removes what can surround an address in a proxy header: "[...]"
+// brackets, a ":port" suffix, a "%eth0" zone.
 function stripWrappers(ip: string): string {
   let address = ip.trim();
 
@@ -209,9 +182,9 @@ function stripWrappers(ip: string): string {
     if (close === -1) return "";
     address = address.slice(1, close);
   } else {
-    // Only where it cannot be ambiguous: a dotted quad with exactly one
-    // colon after it. A bare IPv6 address has more, and "2001:db8::1"
-    // must never be read as host 2001:db8: port 1.
+    // Only when it can't be misread: an IPv4 address followed by exactly
+    // one colon. An IPv6 address has more colons, and "2001:db8::1" must
+    // never be read as host "2001:db8:" with port 1.
     const colon = address.indexOf(":");
     const single = colon !== -1 && address.indexOf(":", colon + 1) === -1;
     if (single && address.includes(".")) address = address.slice(0, colon);
@@ -221,10 +194,10 @@ function stripWrappers(ip: string): string {
   return zone === -1 ? address : address.slice(0, zone);
 }
 
-// An IPv6 address is allowed to write its low 32 bits as a dotted quad
-// even when the prefix is nothing special ("2001:db8::1.2.3.4"). The
-// expander only knows hex groups, so that spelling would otherwise be
-// unreadable and land in the shared bucket instead of its own /48.
+// An IPv6 address may write its last 32 bits in IPv4 form
+// ("2001:db8::1.2.3.4"). The expander only reads hex groups, so convert
+// that part first, or the address would land under "unknown" instead of
+// its own /48.
 function hexifyEmbeddedQuad(ip: string): string {
   const lastColon = ip.lastIndexOf(":");
   if (lastColon === -1) return ip;
@@ -243,15 +216,13 @@ function hexifyEmbeddedQuad(ip: string): string {
   return `${ip.slice(0, lastColon + 1)}${high}:${low}`;
 }
 
-// The IPv4 address this really is, or undefined.
+// The IPv4 address hidden in an IPv6 one, or undefined.
 //
-// A dotted quad at the end is only an IPv4 address when what precedes
-// it is the v4-mapped (::ffff:0:0/96) or v4-compatible (::/96) prefix.
-// "2001:db8::1.2.3.4" is an ordinary IPv6 address whose low 32 bits are
-// merely written that way, and reading it as "1.2.3.4" would drop the
-// /48 narrowing *and* drop the client into an unrelated one's bucket —
-// so ten failed logins from it would lock out whoever really holds
-// 1.2.3.4.
+// An IPv4 part at the end only means an IPv4 address after the prefixes
+// ::ffff:0:0/96 (IPv4-mapped) or ::/96 (IPv4-compatible).
+// "2001:db8::1.2.3.4" is a normal IPv6 address written that way. Reading
+// it as "1.2.3.4" would share a counter with whoever really has 1.2.3.4,
+// so ten wrong passwords from it would lock that person out.
 function embeddedIpv4(ip: string): string | undefined {
   const lastColon = ip.lastIndexOf(":");
   const quad = ip.slice(lastColon + 1);
@@ -266,7 +237,8 @@ function embeddedIpv4(ip: string): string | undefined {
   return highZero && (marker === "0" || marker === "ffff") ? quad : undefined;
 }
 
-// Lowercase, no leading zeros: "0DB8" and "db8" are the same group.
+// Lowercase without leading zeros, since "0DB8" and "db8" are the same
+// group.
 function canonicalGroup(group: string): string {
   return group.toLowerCase().replace(/^0+(?=.)/, "");
 }

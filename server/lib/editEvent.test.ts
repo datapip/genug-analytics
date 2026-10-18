@@ -100,9 +100,8 @@ test("rewrites the description, leaving everything else", () => {
   assert.deepEqual(result, { ok: true, name: "page_view", movedRows: 0 });
   const file = readBack(dir, "page_view");
   assert.equal(file._description, "A page was looked at");
-  // The parts this editor must never touch, because they decide whether
-  // an incoming event is accepted and which event fills the page-view
-  // role.
+  // These must never change: they decide whether an event is accepted
+  // and which event is the page view.
   assert.equal(file._pageView, true);
   assert.equal(file._note, "A comment that nothing reads");
   assert.equal(file.page_title, "string");
@@ -128,9 +127,9 @@ test("rewrites a prop's description and example", () => {
   assert.equal(file.page_title_example, "Preise");
 });
 
-// A text input hands back text. For a plain string prop that *is* the
-// value; for anything else it has to be read as JSON, or every number
-// example would silently become a string and fail the checker.
+// A text input gives text. For a string prop that is the value; for
+// anything else it is read as JSON, or a number example would become a
+// string and fail the check.
 test("reads a non-string example as JSON, and a string one as typed", () => {
   const dir = directory();
   editEventFile(
@@ -179,7 +178,7 @@ test("refuses an example that is not valid JSON for its type", () => {
   assert.equal(readBack(dir, "page_view").order_total_example, 49.9);
 });
 
-// The line this editor is built around: prose in, structure untouched.
+// Only the wording changes; the structure stays the same.
 test("refuses a prop the event does not have", () => {
   const dir = directory();
   const result = editEventFile(
@@ -227,8 +226,8 @@ test("moves the stored events when asked, and reports how many", () => {
   assert.equal(countStored(db, "seitenaufruf"), 3);
 });
 
-// Declining is a real choice, not an oversight — but it is the choice
-// that strands rows, which is why the cockpit ticks the box by default.
+// Not moving the rows is allowed, but leaves them orphaned, which is
+// why the cockpit ticks the box by default.
 test("leaves the stored events alone when not asked", () => {
   const dir = directory();
   const db = database();
@@ -246,9 +245,8 @@ test("leaves the stored events alone when not asked", () => {
   assert.equal(countStored(db, "seitenaufruf"), 0);
 });
 
-// Rows under the target name are some earlier event's history — a file
-// of that name would have been caught separately. Merging them cannot
-// be undone, so it is refused rather than done quietly.
+// Rows already under the new name belong to an earlier event. Merging
+// can't be undone, so it is refused.
 test("refuses to merge history into rows an earlier rename left behind", () => {
   const dir = directory();
   const db = database();
@@ -264,7 +262,7 @@ test("refuses to merge history into rows an earlier rename left behind", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.error, /5 events are already stored/);
-  // Nothing at all happened: not the rows, and not the file either.
+  // Nothing changed: neither the rows nor the file.
   assert.equal(countStored(db, "page_view"), 3);
   assert.equal(countStored(db, "seitenaufruf"), 5);
   assert.deepEqual(readdirSync(dir), ["page_view.json"]);
@@ -296,9 +294,9 @@ test("refuses a name the filesystem cannot hold as an event", () => {
   assert.deepEqual(readdirSync(dir), ["page_view.json"]);
 });
 
-// The route takes the current name straight out of the URL, and Express
-// decodes %2F before we see it, so an unchecked name here is a path out
-// of the events directory — one a rename would go on to unlink.
+// The name comes from the URL, and Express decodes %2F, so an unchecked
+// name could point outside the events folder, and a rename would delete
+// that file.
 test("refuses a current name that is a path rather than an event", () => {
   const dir = directory();
   const outsideName = `genug-outside-${process.pid}`;
@@ -328,9 +326,8 @@ test("refuses a current name that is a path rather than an event", () => {
   }
 });
 
-// Nothing reaches disk until the whole edited file has passed the
-// loader's own checker, so a rejected edit costs nothing rather than
-// leaving a file the next reload refuses.
+// Nothing is written until the edited file passes the loader's check, so
+// a rejected edit leaves nothing behind.
 test("writes nothing when the result would not load", () => {
   const dir = directory();
   const result = editEventFile(

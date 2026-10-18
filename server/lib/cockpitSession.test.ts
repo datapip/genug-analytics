@@ -8,9 +8,8 @@ import {
   verifySessionToken,
 } from "./cockpitSession.js";
 
-// scrypt is deliberately slow (that is the point — see the comment on
-// deriveSessionKey), so the keys are derived once for the whole file
-// rather than per test.
+// scrypt is slow on purpose (see deriveSessionKey), so the keys are
+// derived once for the whole file.
 const salt = Buffer.alloc(16, 1);
 const key = deriveSessionKey("hunter2", salt);
 const otherKey = deriveSessionKey("hunter3", salt);
@@ -23,9 +22,8 @@ test("a token signed with another password does not verify", () => {
   assert.equal(verifySessionToken(issueSessionToken(otherKey), key), undefined);
 });
 
-// The property that makes deriving the key from the password worth it:
-// changing COCKPIT_PASSWORD ends every session that was open, with no
-// session store to clear and no second secret to rotate.
+// Because the key comes from the password, changing COCKPIT_PASSWORD
+// ends every open session.
 test("rotating the password invalidates a session that was already open", () => {
   const openSession = issueSessionToken(key);
 
@@ -35,9 +33,8 @@ test("rotating the password invalidates a session that was already open", () => 
   );
 });
 
-// What the per-install salt is for: the same password on two
-// deployments gives two keys, so neither a token nor a precomputed
-// table carries over from one to the other.
+// With its own salt, the same password gives different keys on two
+// installations.
 test("the same password on another install signs with another key", () => {
   const elsewhere = deriveSessionKey("hunter2", Buffer.alloc(16, 2));
 
@@ -62,10 +59,8 @@ test("a token one minute from expiry still verifies", () => {
   assert.ok(verifySessionToken(token, key, now));
 });
 
-// The exact instant, not just "clearly expired" vs. "clearly valid" —
-// expiresAt <= now is what the code checks, so a token expires at its
-// own instant rather than one tick after it. Pinned on both sides of
-// that instant so a change to <= vs. < is caught either way.
+// Checks the exact moment of expiry (expiresAt <= now) from both sides,
+// so changing <= to < is caught.
 test("a token expires at its own instant, not one tick after", () => {
   const now = Date.now();
   const token = issueSessionToken(key, now - SESSION_MAX_AGE_MS);
@@ -74,8 +69,7 @@ test("a token expires at its own instant, not one tick after", () => {
   assert.ok(verifySessionToken(token, key, now - 1));
 });
 
-// The whole reason the expiry is signed. Without the signature check
-// this is a cookie whose owner decides when it expires.
+// The expiry is signed, so the holder of the cookie can't extend it.
 test("an expiry edited by hand does not verify", () => {
   const token = issueSessionToken(key);
   const [, signature] = token.split(".");
@@ -104,12 +98,8 @@ test("nonsense in the cookie does not verify", () => {
   }
 });
 
-// The expiry is signed as the exact string it arrived as, and nothing
-// canonicalises it. So each spelling of an instant stands or falls on
-// its own signature — which is the point: parsing the number out first
-// and signing that back would make "0123" and "123" interchangeable,
-// and deciding which one is authoritative is a question worth not
-// having at all.
+// The signature covers the expiry text exactly as received, so "0123"
+// and "123" are different tokens, even though they are the same number.
 test("a signature covers one spelling of the expiry, not the instant", () => {
   const expiry = Date.now() + SESSION_MAX_AGE_MS;
   const padded = `0${expiry}`;
@@ -119,8 +109,8 @@ test("a signature covers one spelling of the expiry, not the instant", () => {
   assert.equal(verifySessionToken(`${expiry}.${signature}`, key), undefined);
 });
 
-// What the logout check compares against. Derived rather than stored, so
-// the token stays two fields.
+// What the sign-out check compares with. Worked out from the expiry, so
+// the token only needs two fields.
 test("issuedAt is reported as the expiry minus the session length", () => {
   const now = Date.now();
   const session = verifySessionToken(issueSessionToken(key, now), key, now);

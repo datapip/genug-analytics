@@ -4,15 +4,15 @@ import { siteHost } from "./url.js";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
-// A brand-new visitor_id has no prior row, so "new session whenever
-// visitor_id changes" falls out of this for free — no separate check.
+// Returns the visitor's current session id, or a new one when there is
+// no earlier event, the last one is over 30 minutes old, or it was on
+// another site. A new visitor_id has no earlier event, so it always
+// starts a new session.
 //
-// A change of site ends the session too. The consentless hash already
-// keeps sites apart, but a consent cookie belongs to the collector
-// hostname: two sites sharing one — which docs/deploying.md says not to
-// do — share the cookie. A session spanning both would sit under one
-// site in the host segment and leave the other with an entry page but
-// no exit.
+// Why a change of site matters: the consent cookie belongs to the
+// collector's hostname, so two sites sharing one collector hostname
+// (docs/deploying.md says not to) share the cookie. Without this check
+// one session could span both sites.
 export function resolveSessionId(
   lastEvent: LastEvent | undefined,
   now: Date,

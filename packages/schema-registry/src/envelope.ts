@@ -1,24 +1,22 @@
 import { z } from "zod";
 
-// The fixed shape every event arrives in, regardless of event type.
-// `props` is validated here only as an open record — routes/events.ts
-// re-validates it against the specific event's schema once `event` has
-// been looked up in the registry.
-// Every string is length-capped to bound a slow disk-exhaustion path —
-// see "Data model" in docs/decisions.md for the full reasoning. Caps are
-// generous on purpose: they exist to stop abuse, not to second-guess
-// real data. `props` is bounded instead by the request body as a whole
-// (routes/events.ts), since prop shapes are the deployment's business.
+// The fixed shape every event arrives in, whatever its type. `props` is
+// only checked as an object here; routes/events.ts checks it against
+// the event's own schema once the event is known.
+// Every string has a length limit, so nobody can slowly fill the disk
+// (see "Data model" in docs/decisions.md). The limits are generous:
+// they stop abuse, not real data. `props` is limited by the size of the
+// whole request instead (routes/events.ts).
 export const MAX_URL_LENGTH = 2048; // the de facto browser/CDN URL ceiling
 export const MAX_EVENT_NAME_LENGTH = 128;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 const REFERRER_PROTOCOLS = new Set(["http:", "https:", "android-app:"]);
 
-// The three events the bundled client script fires on its own. It sends
-// the role rather than a name, because it does not know what this
-// deployment calls them — the server resolves it against the registry
-// (see routes/events.ts). Everything else, including every manual
-// track() call and every data-genug-on-click attribute, names its event.
+// The three events the client script sends by itself. It sends the
+// role instead of a name, because it doesn't know what this deployment
+// calls them; the server looks the name up (see routes/events.ts).
+// Everything else, such as track() calls and data-genug-on-click
+// attributes, sends an event name.
 export const AUTO_EVENT_ROLES = [
   "pageView",
   "outboundClick",
@@ -27,52 +25,43 @@ export const AUTO_EVENT_ROLES = [
 
 export const envelopeSchema = z
   .object({
-    // Capped even though an unregistered name is rejected moments later:
-    // the rejection itself is stored, so an unbounded name would still
-    // reach the disk.
+    // Limited even though an unknown name is rejected right after,
+    // because the rejection is stored together with the name.
     event: z.string().max(MAX_EVENT_NAME_LENGTH).optional(),
     auto: z.enum(AUTO_EVENT_ROLES).optional(),
-    // No default. Absent is a real third state, distinct from `false`: a
-    // consent manager that hasn't answered yet, or a deployment with no
-    // banner at all — see "Visitor identification" in docs/decisions.md
-    // for why the server must not treat that the same as an explicit "no".
+    // No default. Missing is a third state, not `false`: the consent
+    // banner hasn't answered yet, or the site has none. See "Visitor
+    // identification" in docs/decisions.md for why the server must not
+    // treat it as "no".
     consent: z.boolean().optional(),
-    // A real absolute URL, not just a string: the client always sends
-    // location.href, so this only rejects what was never going to
-    // aggregate anyway — parseUrl would fall back to the raw value as the
-    // "path" and quietly pollute get_top_pages. A rejection is visible in
-    // get_top_rejected_events; nonsense in a ranking is not.
-    // http(s) only. z.url() accepts javascript:, data: and file:, none
-    // of which is a page anyone visited — and all of which would be
-    // stored verbatim from a public endpoint, read back to an agent,
-    // and rendered in the cockpit, where they are one careless href
-    // away from executing. Rejecting is visible in
-    // get_top_rejected_events; storing nonsense is not.
+    // A full URL. The client always sends location.href, so this only
+    // rejects junk that would otherwise show up as a strange page in
+    // get_top_pages. A rejection is visible in get_top_rejected_events.
+    // Only http(s): z.url() also accepts javascript:, data: and file:,
+    // which are never real pages, and such a URL shown as a link in the
+    // cockpit could run code.
     url: z
       .url()
       .max(MAX_URL_LENGTH)
-      // A prefix test, not new URL().protocol: a refinement that throws
-      // turns safeParse into a thrown error, and every value this needs
-      // to reject is one new URL() throws on.
+      // A prefix check, not new URL().protocol: new URL() throws on bad
+      // input, and a throwing refinement makes safeParse throw too.
       .refine(
         (value) => /^https?:\/\//i.test(value),
         "url must be http or https",
       ),
-    // "" or a URL whose scheme is on a short list. Not http(s) only,
-    // unlike `url`: Chrome on Android sends
+    // "" or a URL with a scheme from a short list. Not only http(s), as
+    // for `url`: Chrome on Android sends
     // android-app://com.google.android.gm/ for a click in the Gmail app,
-    // and rejecting that would lose a real page view. "" is a visitor
-    // arriving directly, the common case. An allowlist rather than a
-    // "scheme://" pattern, because javascript://%0aalert(1) fits that
-    // pattern and runs as code in a link: the full referrer reaches the
-    // agent through get_recent_events, and its client may render links.
-    // Same cap as `url`: past the first page of a visit the referrer is
-    // this site's own previous URL.
+    // which is a real visit. "" is a direct visit, the common case. A
+    // list rather than any "scheme://", because javascript://%0aalert(1)
+    // matches that and runs as code in a link, and the agent's client may
+    // show the referrer as a link. Same length limit as `url`, since
+    // after the first page the referrer is this site's previous URL.
     referrer: z
       .string()
       .max(MAX_URL_LENGTH)
-      // URL.canParse first: a refinement that throws turns safeParse
-      // into a thrown error.
+      // URL.canParse first, because a throwing refinement makes
+      // safeParse throw too.
       .refine(
         (value) =>
           value === "" ||
@@ -81,16 +70,15 @@ export const envelopeSchema = z
         'referrer must be "" or an http, https or android-app URL',
       )
       .optional(),
-    // Optional, deployment-supplied dedup key (e.g. a real order id) —
-    // see idx_events_dedup in db/migrations.ts. On the envelope rather
-    // than in props, being fixed metadata that means the same thing for
-    // every event type, exactly like `consent`.
+    // Optional key against duplicates, such as an order id (see
+    // idx_events_dedup in db/migrations.ts). On the envelope rather than
+    // in props, because it means the same for every event type, like
+    // `consent`.
     idempotencyKey: z.string().max(MAX_IDEMPOTENCY_KEY_LENGTH).optional(),
     props: z.record(z.string(), z.unknown()),
   })
-  // Exactly one, never both and never neither. Both would make the
-  // stored event name depend on which one the server happened to read
-  // first; neither has nothing to store at all.
+  // Exactly one of `event` and `auto`. With both, it would be unclear
+  // which name to store; with neither, there is nothing to store.
   .refine(
     (envelope) =>
       (envelope.event === undefined) !== (envelope.auto === undefined),

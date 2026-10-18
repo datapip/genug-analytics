@@ -36,8 +36,8 @@ test("creates the directory if it does not exist yet", () => {
   assert.equal(readFileSync(join(dir, "about.md"), "utf8"), "About the site.");
 });
 
-// Refused, not truncated — same reasoning as the ground-rules writer:
-// a save from the cockpit has someone right there to shorten it.
+// Refused, not cut short, as for the ground rules: the owner can shorten
+// it.
 test("refuses a save over the byte cap and writes nothing", () => {
   const dir = emptyDir();
   const tooBig = "x".repeat(MAX_PROSE_FIELD_BYTES + 1);
@@ -48,8 +48,7 @@ test("refuses a save over the byte cap and writes nothing", () => {
   assert.throws(() => readFileSync(join(dir, "about.md"), "utf8"));
 });
 
-// The cap is measured in bytes, not JS string length — same reasoning
-// as the ground-rules writer's equivalent test.
+// The limit is in bytes, not characters, as for the ground rules.
 test("measures the cap in UTF-8 bytes, not characters", () => {
   const dir = emptyDir();
   const text = "€".repeat(MAX_PROSE_FIELD_BYTES / 2);

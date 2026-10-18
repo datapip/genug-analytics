@@ -70,9 +70,9 @@ test("checkRateLimit resets once the window has passed", () => {
   );
 });
 
-// The middleware is what the routes mount, so the check that a refusal
-// is a 429 and an allowed call reaches next() belongs at that level,
-// with the express objects stubbed down to the three members it reads.
+// The middleware as the routes use it: a refusal is a 429 and an
+// allowed request reaches next(). The Express objects are replaced by
+// fakes with the three members it reads.
 function fakeExchange(ip: string) {
   let status: number | undefined;
   let passed = false;
@@ -136,8 +136,8 @@ test("two limiters keep separate budgets", () => {
   assert.equal(other.result().passed, true);
 });
 
-// The number itself, not just the mechanism: the tests above pass a
-// limit in, so nothing else would notice /events' ceiling changing.
+// The actual limit for /events, which the tests above don't check
+// because they pass their own.
 test("rateLimitEvents allows 600 a minute per address", () => {
   for (let i = 0; i < 600; i++) {
     const x = fakeExchange("7.7.7.7");
@@ -178,9 +178,8 @@ test("createFailedAttemptLimiter forgets failures once the window passes", () =>
   assert.equal(limiter.isBlocked("1.1.1.1", 60_001), false);
 });
 
-// A failure arriving after the window has lapsed starts a fresh window
-// rather than incrementing a stale count, so an attacker can't
-// accumulate failures indefinitely across windows.
+// A failure after the window has ended starts a new window instead of
+// adding to the old count.
 test("createFailedAttemptLimiter restarts the window on a late failure", () => {
   const limiter = createFailedAttemptLimiter(2, 60_000);
   limiter.recordFailure("1.1.1.1", 0);
@@ -189,9 +188,9 @@ test("createFailedAttemptLimiter restarts the window on a late failure", () => {
   assert.equal(limiter.isBlocked("1.1.1.1", 60_002), false, "count reset to 1");
 });
 
-// The middleware logs on this flag alone, so it has to be true exactly
-// once per window. A runaway loop that kept setting it would write a log
-// line per request, which is the failure this replaced.
+// The middleware logs when this flag is set, so it must be true exactly
+// once per window, or a runaway loop would write a log line per
+// request.
 test("checkRateLimit reports the first refusal in a window only once", () => {
   const hits = new Map();
   const now = Date.now();
@@ -228,8 +227,8 @@ test("checkRateLimit reports the first refusal in a window only once", () => {
   );
 });
 
-// A bare 429 leaves an agent unable to tell how long to wait, and an
-// agent that cannot tell reports an outage.
+// Without Retry-After, an agent can't tell how long to wait and may
+// report an outage.
 test("a refused request carries Retry-After and a body saying how long", () => {
   const limiter = createRequestLimiter(1, "/test");
 
@@ -248,8 +247,8 @@ test("a refused request carries Retry-After and a body saying how long", () => {
   });
 });
 
-// Keying on the full address would give one residential line as many
-// budgets as it has addresses, which is effectively unlimited.
+// Keyed on the full IPv6 address, one home connection would get a
+// separate limit for each of its countless addresses.
 test("every address in one IPv6 block shares a request budget", () => {
   const limiter = createRequestLimiter(2, "/test");
 
@@ -269,8 +268,8 @@ test("every address in one IPv6 block shares a request budget", () => {
   assert.equal(elsewhere.result().passed, true);
 });
 
-// The same hole, where it mattered most: this limiter is the only
-// thing bounding guesses at the cockpit password and the MCP key.
+// The same for the failed-attempt limiter, which limits guesses at the
+// cockpit password and the MCP key.
 test("createFailedAttemptLimiter counts one IPv6 block as one guesser", () => {
   const limiter = createFailedAttemptLimiter(2, 60_000);
 
@@ -298,8 +297,8 @@ test("createFailedAttemptLimiter reports the time left on a block", () => {
   assert.equal(limiter.retryAfterSeconds("1.1.1.1", 30_000), 30);
   assert.equal(limiter.retryAfterSeconds("1.1.1.1", 60_001), 0, "window past");
 
-  // The block is still on at the last millisecond of the window, so a
-  // Retry-After of 0 would invite a retry that is still refused.
+  // The block is still active in the last millisecond, so Retry-After
+  // must not be 0.
   assert.equal(limiter.isBlocked("1.1.1.1", 60_000), true);
   assert.equal(limiter.retryAfterSeconds("1.1.1.1", 60_000), 1);
 });

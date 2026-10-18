@@ -42,7 +42,7 @@ import { VERSION } from "../../lib/version.js";
 import { latestVersion } from "../../lib/updateCheck.js";
 import type { CockpitRouterDeps } from "../cockpit.js";
 
-// GET /cockpit/data: everything the page shows, in one answer.
+// GET /cockpit/data: everything the page shows, in one response.
 
 const RECENT_EVENTS_LIMIT = 5;
 const TOP_PAGES_LIMIT = 5;
@@ -50,13 +50,12 @@ const TOP_REFERRERS_LIMIT = 5;
 const DEVICE_BREAKDOWN_LIMIT = 6;
 const REJECTED_EVENTS_LIMIT = 5;
 
-// A read-only deployment is the public demo, whose password is
-// published, and this route runs some twenty queries synchronously: a
-// few viewers holding refresh would stall /events behind them. In that
-// mode every viewer gets the same answer — nothing on it depends on who
-// asked, and nothing can change it from here — so one answer per range
-// is kept briefly. Not in normal mode, where an owner's own edit must
-// show on the next load.
+// Read-only mode is used for the public demo, whose password is public.
+// This route runs about twenty queries that block Node while they run,
+// so a few viewers reloading repeatedly would delay /events. In this
+// mode every viewer gets the same data and nobody can change it, so the
+// response for each period is kept for a short time. Not in normal mode,
+// where the owner's own edit must show on the next load.
 const READ_ONLY_DATA_CACHE_MS = 30 * 1000;
 
 function cockpitData(
@@ -66,41 +65,34 @@ function cockpitData(
 ) {
   return {
     period,
-    // The zone every day and hour on the page is in. The page formats
-    // its labels in it and says which it is, since the viewer's
-    // browser may well be somewhere else.
+    // The time zone of every day and hour on the page. The page uses it
+    // for its labels and shows it, since the viewer may be in another
+    // time zone.
     timezone,
-    // Which build is serving this page. A bug report that says "the
-    // cockpit showed X" is only actionable with the version attached,
-    // and once images are pulled rather than built the operator has no
-    // other way to see it short of reading container logs. Already
-    // carries its own "v" prefix from the release tag, or is "dev" from
-    // a clone (see lib/version.ts) — the page prints it verbatim.
+    // Which version is running, so a bug report can include it. It is
+    // the release tag with its "v", or "dev" (see lib/version.ts), and
+    // the page shows it as it is.
     version: VERSION,
-    // Read live, not captured at import time — lib/updateCheck.ts
-    // replaces this binding on its own schedule (same reasoning as
-    // eventRegistry). null means either no newer tag or the check
-    // hasn't resolved yet; the cockpit treats both the same way.
+    // Read on every request, because lib/updateCheck.ts replaces it once
+    // a day. null means there is no newer version or the check hasn't
+    // finished; the cockpit treats both the same.
     latestVersion,
     retentionDays: retentionDays ?? null,
-    // From the configuration, not from the rows a period returned, so a
-    // two-site installation names the site on every page row even when
-    // the top ones all happen to be one site's.
+    // From the configuration, not from the returned rows, so with two
+    // sites every page row shows its site, even if the top rows all
+    // happen to be from one site.
     siteHosts: [...siteHosts],
     trafficSummary: getTrafficSummary(db, period, pageViewEventType),
     botActivityCount: getBotActivityCount(db, period),
-    // All time, not the selected period: "is anything arriving" is the
-    // question, and 7d and 30d leave today out. The page prints it
-    // beside its own fetch time, so a stalled script shows as a gap
-    // between the two.
+    // Over all time, not the selected period: the question is "is
+    // anything arriving?", and 7d and 30d don't include today. The page
+    // shows it next to the time it loaded, so a broken script shows as
+    // a gap between the two.
     lastEventAt: getLastEventAt(db, now),
     rejectedEventCount: getRejectedEventCount(db, period),
-    // The count alone is a number nobody can act on — "1 rejected" says
-    // something is broken but not what, and finding out meant asking
-    // the agent. Grouped by (reason, event) rather than listed row by
-    // row: one broken integration produces hundreds of identical
-    // rejections, and five copies of the same line is worse than one
-    // line saying it happened five hundred times.
+    // Grouped by reason and event, so the page can say what is broken,
+    // not only that something is. Not listed one by one: one broken
+    // integration causes hundreds of identical rejections.
     topRejectedEvents: getTopRejectedEvents(db, period, REJECTED_EVENTS_LIMIT)
       .items,
     trafficByDay: getTrafficByDay(db, period, pageViewEventType, timezone),
@@ -118,60 +110,51 @@ function cockpitData(
       TOP_REFERRERS_LIMIT,
       pageViewEventType,
     ).items,
-    // Device type only, not crossed with the browser (see
-    // lib/audience.ts): crossed and then limited, Chrome alone can take
-    // three of six rows and push every other browser off the list
-    // without ever stating a plain total. Browser share is the agent's
-    // to answer through get_device_breakdown.
+    // Device type only, not combined with the browser (see
+    // lib/audience.ts): combined and cut to six rows, Chrome alone could
+    // take three of them. The agent can answer browser questions with
+    // get_device_breakdown.
     deviceBreakdown: getDeviceTypeBreakdown(db, period, DEVICE_BREAKDOWN_LIMIT)
       .items,
-    // Shown as a single share line, not a stat card: a deployment
-    // with no consent banner (consent UI is out of v1 scope) would
-    // otherwise get a card reading 100% consentless forever.
+    // Shown as one line, not a stat card: a site without a consent
+    // banner would otherwise always show a card reading "100% without
+    // consent".
     consentBreakdown: getConsentBreakdown(db, period),
-    // Withheld in read-only mode for the reason get_recent_events is
-    // (rawDataToolModules in mcp/tools.ts): these are raw rows, not an
-    // aggregate, and read-only mode is the one meant for sharing (the
-    // public demo publishes its cockpit password).
+    // Left out in read-only mode, like get_recent_events
+    // (rawDataToolModules in mcp/tools.ts): these are raw rows, and
+    // read-only mode is for sharing (the public demo's password is
+    // public).
     recentEvents: readOnly ? [] : getRecentEvents(db, RECENT_EVENTS_LIMIT).rows,
     schemaRegistry: serializeRegistry(),
-    // Which registered name carries the "_pageView" role. Read from the
-    // live binding per request (see AGENTS.md), never cached. The
-    // registry otherwise gives no hint that one of these events is the
-    // one every page-scoped number on this page depends on, and a
-    // deployment is free to have renamed it.
+    // Which event has the "_pageView" role, read on every request (it
+    // changes when events are reloaded). Every page number on this page
+    // depends on that event, and a deployment may have renamed it.
     pageViewEventType,
-    // The other two roles, same live-binding reasoning as above. Optional
-    // — a deployment that never registered outbound-click or
-    // file-download tracking has `undefined` here, and the Schema
-    // registry card simply shows no badge for either.
+    // The other two roles, also read on every request. `undefined` when
+    // no event has the role; the Schema registry card then shows no
+    // badge for it.
     roleEventNames,
-    // Whether an edit made here can be saved at all. False when seeding
-    // could not prepare a volume and the image's own directory is
-    // serving — writing into that would be thrown away on the next
-    // deploy, so the page says so instead of offering a Save button
-    // that quietly does nothing lasting.
+    // Whether edits to events can be saved for good. False when the
+    // events are read from the image's own folder (no volume could be
+    // prepared): changes there would be lost on the next deploy, so the
+    // page says so instead of offering a Save button.
     schemaEditable: !readOnly && eventsSource === eventsPath,
-    // Whether any write is possible at all. The page hides every write
-    // control when this is true, and says why, rather than leaving
-    // buttons that fail.
+    // When true, no change is possible. The page hides every editing
+    // control and says why, instead of showing buttons that fail.
     readOnly,
-    // All time, not the selected period: this is "how much history a
-    // rename would move", and a windowed number would understate it.
+    // Over all time, not the selected period: this is "how many rows a
+    // rename would move".
     storedEventCounts: getStoredEventCounts(db),
-    // Event files on the volume that were skipped at startup. A skipped
-    // file is silent otherwise: its events keep arriving and keep being
-    // rejected as an unknown type, with nothing anywhere saying the
-    // schema failed to load.
+    // Event files that were skipped when loading. Otherwise nobody would
+    // notice: their events keep arriving and are rejected as unknown,
+    // with nothing saying the file failed to load.
     schemaErrors,
-    // Not period-scoped, unlike everything above it: a rename's
-    // leftovers age out of any window while staying just as invisible.
+    // Over all time: rows left by a rename fall out of any period but
+    // stay just as invisible.
     orphanedEvents: getOrphanedEvents(db, Object.keys(eventRegistry)),
     toolManifest: getToolManifest(db, { readOnly, timezone }),
-    // Read fresh on every load, same as the MCP resource these three
-    // feed (lib/context.ts deliberately holds no live binding) — an
-    // edit made on the volume between one cockpit refresh and the next
-    // must show up here too, not just to the agent.
+    // Read from disk on every load, like the MCP resource, so a file
+    // edited on the server shows up here too.
     groundRules: groundRulesForCockpit(),
     businessContext: businessContextForCockpit(),
     proseFieldMaxBytes: MAX_PROSE_FIELD_BYTES,
@@ -179,9 +162,8 @@ function cockpitData(
   };
 }
 
-// The raw text an owner can edit and save unchanged, not the agent's
-// rendered "## Ground rules" section — see lib/context.ts's
-// readGroundRulesRaw for why those are different shapes.
+// The file's text as the owner edits it, not the "## Ground rules"
+// section the agent gets (see readGroundRulesRaw in lib/context.ts).
 function groundRulesForCockpit(): {
   text: string | null;
   usingDefault: boolean;
@@ -194,9 +176,9 @@ function groundRulesForCockpit(): {
   return { text: result.text, usingDefault: result.usingDefault, error: null };
 }
 
-// Same shape as groundRulesForCockpit, minus usingDefault — there is no
-// built-in business context to fall back to, so an absent file is just
-// empty text (see lib/context.ts's readBusinessContextRaw).
+// Like groundRulesForCockpit, without usingDefault: there is no default
+// business context, so a missing file is empty text (see
+// readBusinessContextRaw in lib/context.ts).
 function businessContextForCockpit(): {
   text: string | null;
   error: string | null;
@@ -231,7 +213,7 @@ export function registerDataRoutes(
   deps: CockpitRouterDeps,
 ): void {
   const { readOnly, timezone } = deps;
-  // Per router, so a test that builds two apps does not share answers.
+  // One cache per router, so two apps in one test don't share it.
   const readOnlyDataCache = new Map<string, { at: number; body: unknown }>();
 
   router.get("/data", (req: Request, res: Response) => {

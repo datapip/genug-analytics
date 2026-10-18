@@ -9,9 +9,9 @@ const REQUIRED = {
   COCKPIT_PASSWORD: "a-cockpit-password",
 };
 
-// The second origin of a list is refused only inside the visitor's
-// browser, with nothing in this server's log, so the split and trim are
-// worth pinning on their own.
+// A wrong origin only fails in the visitor's browser, with nothing in
+// this server's log, so splitting and trimming the list is tested
+// here.
 test("ALLOWED_ORIGIN is split on commas and trimmed", () => {
   const config = loadConfig({
     ...REQUIRED,
@@ -54,8 +54,8 @@ test("a missing required setting is refused by name", () => {
   }
 });
 
-// The startup warning hangs on whether RETENTION_DAYS was set at all,
-// which the parsed number alone cannot tell.
+// The startup message depends on whether RETENTION_DAYS was set at all,
+// which the number alone can't tell.
 test("an unset RETENTION_DAYS is the default, and -1 keeps everything", () => {
   const unset = loadConfig(REQUIRED);
   assert.equal(unset.retentionDaysIsDefault, true);
@@ -66,8 +66,8 @@ test("an unset RETENTION_DAYS is the default, and -1 keeps everything", () => {
   assert.equal(forever.retentionDays, undefined);
 });
 
-// The daily salt, the cockpit's session salt and the backups are all
-// put here, so they land on the database's volume.
+// The daily salt, the session salt and the backups go here, on the
+// database's volume.
 test("the data directory is the database's own", () => {
   assert.equal(
     loadConfig({ ...REQUIRED, DB_PATH: "/x/y/genug.db" }).dataDir,
@@ -76,8 +76,8 @@ test("the data directory is the database's own", () => {
   assert.equal(loadConfig(REQUIRED).dataDir, "/data");
 });
 
-// Turning it on changes what a deployment's privacy notice has to say,
-// so an upgrade must never turn it on, and a typo must not either.
+// Turning it on changes what the privacy notice must say, so neither an
+// update nor a typo may turn it on.
 test("COUNTRY_LOOKUP is off unless set to true, and a typo is refused", () => {
   assert.equal(loadConfig(REQUIRED).countryLookup, false);
   assert.equal(

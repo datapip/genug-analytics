@@ -1,43 +1,38 @@
 import { createHmac, scryptSync } from "node:crypto";
 import { timingSafeStringEqual } from "./auth.js";
 
-// The cockpit's session: a signed expiry, and nothing else. There is one
-// password and one owner, so there is no identity to carry and no second
-// session to tell this one apart from — a token that says when it stops
-// being valid, signed so it cannot be edited, is the whole requirement.
+// The cockpit's sign-in session: a signed expiry time and nothing else.
+// There is one password and one owner, so the token doesn't need to say
+// who is signed in, only until when. The signature stops anyone from
+// changing it.
 //
-// No session store. Storing sessions would mean either a table to
-// migrate or a Map that empties on every redeploy, and neither buys
-// anything a 12-hour expiry doesn't.
+// Sessions aren't stored on the server. That would need a database table
+// or an in-memory list lost at every restart, and the 12-hour expiry
+// already does the job.
 
 export const COCKPIT_SESSION_COOKIE = "genug_cockpit_session";
 
-// Long enough to not interrupt an afternoon of looking at the numbers,
-// short enough that a laptop left open somewhere is not a standing
-// invitation. Deliberately not "remember me" — this is an admin surface.
+// Long enough for an afternoon of work, short enough that a laptop left
+// open somewhere doesn't stay signed in for days. There is no "remember
+// me", since this is an admin page.
 export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
-// Domain separation, so the key can never collide with another use of
-// the same password. Prefixed to the install's own random salt
-// (lib/cockpitSessionSalt.ts), which is what stops one precomputed
-// table from covering every deployment.
+// A fixed label added to the salt, so this key can never equal a key
+// derived from the same password for another purpose. The salt itself is
+// random per installation (lib/cockpitSessionSalt.ts).
 const KEY_CONTEXT = "genug-cockpit-session";
 const KEY_BYTES = 32;
 
-// scrypt, not HMAC, and this is the whole reason the function exists.
+// Derives the signing key from COCKPIT_PASSWORD with scrypt.
 //
-// The key is derived from COCKPIT_PASSWORD on purpose: rotating the
-// password then invalidates every live session for free, and there is no
-// second secret to configure. But a token signed with a *fast* hash of a
-// human-chosen password is an offline cracking oracle — anyone who ever
-// sees one cookie can guess passwords against it on their own hardware,
-// billions a second, where neither the failed-attempt lockout nor this
-// server can see them. A stolen cookie would be worth the password
-// itself rather than twelve hours. scrypt is deliberately slow and
-// memory-hard, which takes that back: ~100ms and 16 MB per guess.
+// Using the password means changing it signs out every session, and there
+// is no second secret to configure. But with a fast hash, anyone who got
+// hold of one cookie could guess passwords against it on their own
+// computer, billions per second, without this server ever seeing it.
+// scrypt is deliberately slow and memory-hungry (~100ms and 16 MB per
+// guess), which makes that impractical.
 //
-// Called once at startup, so the cost is paid on a path where nobody is
-// waiting.
+// Called once at startup, so the slowness costs nobody any waiting.
 export function deriveSessionKey(password: string, salt: Buffer): Buffer {
   return scryptSync(
     password,
@@ -55,14 +50,13 @@ export function issueSessionToken(
 }
 
 export interface SessionCheck {
-  // When the token was issued, derived from its expiry. Lets the caller
-  // reject tokens older than a logout without storing any of them.
+  // When the token was issued, worked out from its expiry. Lets the
+  // caller reject tokens issued before a sign-out without storing them.
   issuedAt: number;
 }
 
-// Returns the checked token, or undefined for anything that isn't one.
-// Never throws and never says *why* — the only caller turns this into a
-// 401 either way, and a token is not user input worth explaining.
+// Returns the checked token, or undefined for anything invalid. It never
+// throws or says why: the caller answers 401 either way.
 export function verifySessionToken(
   token: string | undefined,
   key: Buffer,
@@ -75,15 +69,14 @@ export function verifySessionToken(
   const claimedExpiry = token.slice(0, separator);
   const signature = token.slice(separator + 1);
 
-  // Signed over the expiry exactly as it arrived, not over a number
-  // parsed back out of it: "0123" and "123" are the same instant to
-  // Number() and different strings to HMAC, and choosing which one is
-  // authoritative is a question worth not having.
+  // Check the signature over the expiry text exactly as received, not
+  // over a number parsed from it: "0123" and "123" are the same number
+  // but different text.
   if (!timingSafeStringEqual(signature, sign(claimedExpiry, key))) {
     return undefined;
   }
 
-  // Only now is the expiry trustworthy enough to read.
+  // The signature is valid, so the expiry can be trusted now.
   const expiresAt = Number(claimedExpiry);
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return undefined;
 

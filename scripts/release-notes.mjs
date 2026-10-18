@@ -1,6 +1,5 @@
-// Prints one version's CHANGELOG.md section as GitHub Release notes, so
-// the Release a watcher is notified about says the same thing as the
-// changelog rather than a second, hand-written summary of it.
+// Prints one version's CHANGELOG.md section as GitHub release notes, so
+// the release says the same as the changelog.
 //
 //   node scripts/release-notes.mjs 0.12.0
 //
@@ -8,9 +7,8 @@
 // GitHub renders every newline in a Release body as a line break, so the
 // wrapped lines are joined back into one line per bullet or paragraph.
 //
-// Exits non-zero when the version has no section: a tag without a
-// changelog entry is a release nobody can read about, and CI saying so
-// is how that gets noticed.
+// Exits with an error when the version has no section, so CI catches a
+// release without a changelog entry.
 import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 
@@ -33,10 +31,10 @@ if (start === -1) {
 const next = lines.findIndex((line, i) => i > start && line.startsWith("## "));
 const section = lines.slice(start + 1, next === -1 ? undefined : next);
 
-// Each source line either starts a new output line (a bullet, the first
-// line after a blank one, anything inside a code block) or continues the
-// one before it. Blank lines and indentation are kept, so nested lists
-// and code blocks come out as they were written.
+// Each line either starts a new output line (a bullet, the first line
+// after a blank one, anything in a code block) or continues the previous
+// one. Blank lines and indentation are kept, so nested lists and code
+// blocks stay as written.
 const out = [];
 let joinable = false;
 let inFence = false;

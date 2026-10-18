@@ -1,27 +1,17 @@
 import type Database from "better-sqlite3";
 
-// 13 months, the same 396 days as the consent cookie in
-// routes/events.ts. See "Data lifecycle" in docs/decisions.md for why
-// unset stopped meaning forever.
+// 13 months: the same 396 days as the consent cookie in
+// routes/events.ts. See "Data lifecycle" in docs/decisions.md.
 export const DEFAULT_RETENTION_DAYS = 396;
 
-// Fails fast on a bad value rather than silently ignoring it or running
-// with a nonsensical window — same reasoning as requireEnv's guard.
+// Reads RETENTION_DAYS. Unset means DEFAULT_RETENTION_DAYS, `-1` means
+// keep forever (returned as undefined), and any other positive number
+// means that many days. A bad value stops the server at startup.
 //
-// Three states, not two, now that unset defaults to a real number
-// rather than to unlimited: unset means DEFAULT_RETENTION_DAYS, `-1`
-// means unlimited on purpose — the explicit way to say what unset used
-// to mean by default, which a deployer who actually wants that needs to
-// be able to state now that omitting it no longer says it for them —
-// and any other positive number means that many days.
-//
-// `0` is deliberately not the sentinel, and is rejected with its own
-// message rather than falling into the generic one: "0 days" reads as
-// "keep nothing", the opposite of unlimited, and someone would only
-// find out they'd misread it once their data was already gone. `-1`
-// has no plausible reading as a day count at all, so nobody can
-// confidently guess wrong — they have to look it up, which is the
-// safer failure mode for a setting this destructive to get backwards.
+// `0` gets its own error instead of meaning "forever": "0 days" sounds
+// like "keep nothing", and someone who guessed wrong would only find out
+// once their data was gone. Nobody reads `-1` as a number of days, so
+// it has to be looked up, which is safer for a setting this destructive.
 export function parseRetentionDays(
   value: string | undefined,
 ): number | undefined {
@@ -42,18 +32,8 @@ export function parseRetentionDays(
   return days;
 }
 
-// The one piece the three prune functions below genuinely shared. Worth
-// extracting because it's the part that could silently diverge: three
-// copies of the same date arithmetic is three chances for one of them to
-// end up computing a different cutoff than the others.
-//
-// The SQL statements themselves stay written out per table rather than
-// collapsing into one `DELETE FROM ${table}` helper, matching the call
-// already made for getEntryPages/getExitPages (see "MCP tool design" in
-// docs/decisions.md): a one-line literal query per table is clearer than
-// building SQL text from an interpolated identifier, even one that can
-// only ever be an internal hardcoded value. It also keeps the call
-// sites naming what they prune rather than passing a table string.
+// The cutoff time for keeping `days` days, shared by the prune
+// functions below so they all compute it the same way.
 function retentionCutoff(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -64,10 +44,8 @@ export function pruneOldEvents(db: Database.Database, days: number): number {
     .run(retentionCutoff(days)).changes;
 }
 
-// Pruned by the same RETENTION_DAYS setting and job as events — one
-// retention knob to explain, not two, and rejected_events is diagnostic
-// data with no reason to outlive the real events it was rejected instead
-// of becoming.
+// Rejected requests follow the same RETENTION_DAYS as events, so there
+// is only one retention setting.
 export function pruneOldRejectedEvents(
   db: Database.Database,
   days: number,
@@ -77,10 +55,8 @@ export function pruneOldRejectedEvents(
     .run(retentionCutoff(days)).changes;
 }
 
-// Same reasoning as pruneOldRejectedEvents: rides along on
-// RETENTION_DAYS rather than a third retention setting. bot_activity
-// is already low-volume by construction (at most one row per hour), so
-// this mostly matters on a very long-lived deployment.
+// Bot counts follow RETENTION_DAYS too. There is at most one row per
+// hour, so this only matters on a long-running deployment.
 export function pruneOldBotActivity(
   db: Database.Database,
   days: number,
@@ -107,12 +83,11 @@ export function deleteVisitorData(
   const result = db
     .prepare(`DELETE FROM events WHERE visitor_id = ?`)
     .run(visitorId);
-  // secure_delete (db/connection.ts) zeroes the rows in the database
-  // file, but the write-ahead log still holds the pages as they were
-  // until a checkpoint copies it back. TRUNCATE also empties the log
-  // file, so the erased rows are in neither once this returns. A backup
-  // running at that moment can hold the checkpoint off; the next
-  // automatic one finishes it.
+  // secure_delete (db/connection.ts) overwrites the deleted rows in the
+  // database file, but SQLite's write-ahead log still has copies until a
+  // checkpoint. TRUNCATE also empties the log, so once this returns the
+  // rows are gone from both. If a backup is running at that moment, the
+  // checkpoint may wait; the next automatic one completes it.
   if (result.changes > 0) db.pragma("wal_checkpoint(TRUNCATE)");
   return result.changes;
 }

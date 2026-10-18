@@ -21,18 +21,18 @@ import { recordEventsReset } from "../../lib/autoHistory.js";
 import { parseEditBody, refusesCockpitOrigin, refusesWrite } from "./guards.js";
 import type { CockpitRouterDeps } from "../cockpit.js";
 
-// The danger zone: Reset events and Reset database, each confirmed by
-// typing the cockpit password again.
+// The danger zone: Reset events and Reset database. Each needs the
+// cockpit password typed again.
 
 const resetSchema = z.strictObject({ password: z.string() });
 
-// A session cookie is not the password, so a stolen cookie must not be
-// a way to test guesses at it. Two limits: each wrong guess counts
-// toward the sign-in lockout for its address (a 429, which cockpitFetch
-// leaves alone), and five in a row from anywhere sign every session out
-// (lib/cockpitAuth.ts). A wrong guess otherwise stays 403, for the
-// reason below. The sign-out answers 401, because the session really
-// is gone.
+// Someone with a stolen session cookie must not be able to use this
+// password box to guess the password. So each wrong password counts
+// toward the sign-in lockout for its address (answered 429, which
+// cockpitFetch passes through), and five wrong in a row from anywhere
+// sign every session out (lib/cockpitAuth.ts), answered 401 because the
+// session really is gone. Otherwise a wrong password gets 403 (see
+// below).
 function confirmPassword(
   cockpitPassword: string,
   req: Request,
@@ -46,8 +46,8 @@ function confirmPassword(
     if (recordConfirmationFailure()) {
       logInfo(
         "Too many wrong danger-zone passwords — every cockpit session was signed out",
-        // Narrowed like the rate limiter's log, so an IPv6 address is
-        // written as its /48 (docs/privacy.md, "The server log").
+        // Shortened like in the rate limiter's log: an IPv6 address is
+        // logged as its /48 (docs/privacy.md, "The server log").
         { ip: limiterKey(ip) },
       );
       res.status(401).json({
@@ -63,35 +63,24 @@ function confirmPassword(
   return true;
 }
 
-// Both danger-zone routes answer a wrong *confirmation* password with
-// 403, never 401. The request is already authenticated — it carried a
-// valid session to reach the handler — and it is the retyped
-// confirmation that failed, which is an authorization answer, not an
-// authentication one.
-//
-// Not a nicety: cockpit.js treats a 401 as "the session ran out" and
-// sends the page to the login screen, so answering a mistyped
-// confirmation with one would throw the owner out mid-confirmation.
-// 401 is the session's answer, and nothing else's.
+// A wrong confirmation password gets 403, never 401. The request has a
+// valid session; only the retyped password was wrong. cockpit.js treats
+// every 401 as "the session ran out" and shows the sign-in page, so a
+// 401 here would throw the owner out for a typo.
 
 export function registerDangerRoutes(
   router: Router,
   deps: CockpitRouterDeps,
 ): void {
   const { db, timezone, cockpitPassword } = deps;
-  // Puts the events directory back to the image's built-ins, discarding
-  // every event this deployment added or edited. Gated like the database
-  // reset — the password retyped — because it is the same kind of action:
-  // irreversible from the browser, and destructive of work rather than of
-  // test data.
+  // Resets the events folder to the built-in events, discarding every
+  // event this deployment added or edited. Like the database reset it
+  // needs the password, because it can't be undone from the browser.
   //
-  // Stored rows are NOT touched. That is the point of the warning it
-  // returns: removing an event type strands the rows it already
-  // collected, which keep counting toward totals while matching no
-  // registry-driven query (see lib/orphanedEvents.ts). The cockpit's
-  // orphaned-events panel will report them on the next load anyway; this
-  // says so at the moment it happens, when the person can still connect
-  // cause and effect.
+  // Stored rows are kept. Rows of removed events stay in totals but match
+  // no event any more (see lib/orphanedEvents.ts). The cockpit reports
+  // them on the next load anyway; the warning returned here says so
+  // right away, when the owner can still connect cause and effect.
   router.post("/events/reset", parseEditBody, (req: Request, res: Response) => {
     if (refusesWrite(req, res, "A reset")) return;
 
@@ -103,9 +92,8 @@ export function registerDangerRoutes(
 
     if (!confirmPassword(cockpitPassword, req, res, body.data.password)) return;
 
-    // Counted before the registry changes: afterwards these names are
-    // gone from it, and what they collected is exactly what nothing
-    // will be able to ask about any more.
+    // Count the rows before the events change, while the old names are
+    // still known.
     const storedBefore = getStoredEventCounts(db);
 
     const result = resetEvents();
@@ -142,15 +130,13 @@ export function registerDangerRoutes(
     });
   });
 
-  // Wipes every stored event, rejected event and bot-activity row — the
-  // cockpit's "danger zone" button, for clearing out test traffic before a
-  // real launch. The event schema itself is untouched.
+  // Deletes every stored event, rejected event and bot-activity row, to
+  // clear test traffic before launch. The event definitions are kept.
   //
-  // Already sitting behind the same session as every other /cockpit
-  // route, so this second password check is not the security boundary —
-  // it exists so the button can't be fired by a stray click or a script
-  // replaying an earlier action: the person has to type the password again,
-  // right before the request that acts on it.
+  // The route already needs a session like every /cockpit route. The
+  // second password check is there so a stray click or a replayed
+  // request can't trigger it: the owner must type the password right
+  // before.
   router.post("/reset", parseEditBody, (req: Request, res: Response) => {
     if (
       refusesCockpitOrigin(
@@ -171,10 +157,9 @@ export function registerDangerRoutes(
     if (!confirmPassword(cockpitPassword, req, res, body.data.password)) return;
 
     const result = resetDatabase(db);
-    // The in-memory bot-hit counter is a fourth place data lives besides
-    // the three tables resetDatabase clears — left non-zero, the next
-    // hourly flush (server/index.ts) would write it into a bot_activity
-    // table this reset just emptied.
+    // Also reset the bot counter in memory. Otherwise the next hourly
+    // save (server/index.ts) would write its count into the bot_activity
+    // table that was just emptied.
     drainBotHits(botActivityCounter);
 
     res.json({ ok: true, ...result });

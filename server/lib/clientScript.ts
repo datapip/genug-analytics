@@ -1,24 +1,21 @@
 import { keptUrlParts, type KeptUrlParts } from "./url.js";
 
-// The quoted string the client source declares its lists as (see
-// packages/client/src/index.ts). Quotes included, so the replacement is
-// a whole JS expression and not text spliced into a string literal.
+// The placeholder the client script uses for its lists (see
+// packages/client/src/index.ts). The quotes are part of it, so the
+// replacement is a complete JS value, not text inserted into a string.
 const PLACEHOLDER = '"__GENUG_KEPT_URL_PARTS__"';
 
-// Writes this deployment's query-parameter and fragment lists into the
-// compiled client script, once at startup. The result is still the same
-// bytes for every request, so the hour-long cache on /client.js holds.
+// Writes this deployment's kept query parameters and fragments into the
+// client script, once at startup. Every request gets the same bytes, so
+// /client.js can be cached for an hour.
 //
-// This is the one piece of deployment state client.js carries, and it
-// is safe to cache where an event name was not (see AGENTS.md): a
-// browser running a copy from before the lists changed strips with the
-// old ones, and the server strips again with the current ones. A stale
-// copy can lose an hour of a newly kept parameter, never store one the
-// deployment stopped keeping.
+// These lists are the only deployment setting in client.js, because a
+// cached old copy does no harm: the server filters again with the
+// current lists. At worst a newly kept parameter is lost for up to an
+// hour; a parameter the deployment stopped keeping is never stored.
 //
-// Throws rather than serving the file unchanged: the client fails closed
-// without its lists, so a renamed placeholder would quietly drop every
-// campaign parameter on every site using this deployment.
+// Throws instead of serving the script without the lists: without them
+// the client drops every campaign parameter, and nobody would notice.
 export function renderClientScript(
   source: string,
   parts: KeptUrlParts = keptUrlParts,

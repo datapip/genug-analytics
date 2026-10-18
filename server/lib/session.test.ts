@@ -11,8 +11,8 @@ test("mints a new session when there is no prior event", () => {
   assert.ok(sessionId.length > 0);
 });
 
-// "A string, non-empty" is also true of a constant, which would put
-// every visitor in one session forever.
+// Each new session needs a new id; a constant would put every visitor in
+// one session.
 test("mints a different session for each new visitor", () => {
   const now = new Date();
   assert.notEqual(
@@ -52,7 +52,7 @@ test("mints a new session after 30 minutes of inactivity", () => {
 });
 
 // A consent cookie is shared by every site on one collector, so the
-// visitor_id alone does not end a session at the site boundary.
+// visitor_id alone doesn't end the session when the site changes.
 test("mints a new session when the visitor moves to another site", () => {
   const now = new Date("2026-01-01T12:05:00Z");
   const last = {
@@ -66,7 +66,8 @@ test("mints a new session when the visitor moves to another site", () => {
   );
 });
 
-// Apex and www are one site, so moving between them is a page view.
+// example.com and www.example.com are one site, so moving between them
+// keeps the session.
 test("keeps the session between the apex and www", () => {
   const now = new Date("2026-01-01T12:05:00Z");
   const last = {

@@ -61,7 +61,8 @@ test("adds a prop, leaving the rest of the file untouched", () => {
   assert.equal(checkEvent(file).ok, true);
 });
 
-// The whole point: the checkbox on the form is never trusted.
+// The form's "optional" checkbox is ignored: the prop is always
+// optional.
 test("forces the new prop optional even when the spec says required", () => {
   const dir = directory();
   addEventProp(dir, "newsletter_signup", prop({ optional: false }));

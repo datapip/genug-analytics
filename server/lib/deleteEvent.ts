@@ -5,37 +5,23 @@ import { isValidEventName } from "@genug/schema-registry";
 import { countStored } from "./events.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// Deletes one event's file from the cockpit's Schema registry card — a
-// scoped version of the danger zone's whole-directory Reset. Rows
-// already stored under this name are left exactly where Reset leaves
-// them: still in the table, no longer matching a registered event, the
-// ordinary orphaned-events case lib/orphanedEvents.ts already reports.
+// Deletes one event's file (the cockpit's delete button). Rows already
+// stored under its name stay in the database and become orphaned rows,
+// which lib/orphanedEvents.ts reports.
 //
-// Carries no opinion about role tags — an earlier version of this
-// function refused to delete any of them, on the theory that the
-// traffic would silently miscount as something else. That turned out
-// to be wrong for two of the three: the client only ever sends the
-// ROLE for `_automaticOutboundClick`/`_automaticFileDownload`, never a
-// literal name (see AGENTS.md), so if nothing carries the tag after
-// the delete, the next automatic click or download is rejected as
-// unknown_event_type — a clean, visible rejection, not a silent
-// miscount anywhere.
+// Events with role tags may be deleted too. The client sends a role, not
+// a name, for automatic outbound clicks and file downloads (see
+// AGENTS.md). If no event has that role any more, the next automatic
+// click is rejected as unknown_event_type: visible, not a silent
+// miscount.
 //
-// `_pageView` is the one that still needs care: registry.ts's
-// buildRegistry() re-registers the built-in page_view as a stand-in
-// when nothing carries the tag, UNLESS the built-in's own name is
-// already taken by some other file, in which case buildRegistry()
-// throws outright rather than leave a registry with no page-view
-// event. Deciding which of those two this delete would trigger means
-// asking the real loader, which reads the whole directory — not
-// something this directory-scoped function can predict on its own
-// without reimplementing buildRegistry() here. So it does not try:
-// it deletes and hands the caller a `restore` closure, and
-// The DELETE handler in routes/cockpit/events.ts is what actually asks
-// reloadEvents() and calls `restore()` if the real loader refuses the
-// result — the same "write it, let the checker decide" principle
-// lib/editEvent.ts and lib/createEvent.ts use before their own
-// writes, just necessarily after this one.
+// The page-view event needs care. If no event has the `_pageView` tag,
+// buildRegistry() (registry.ts) registers the built-in page_view as a
+// stand-in, but it throws if another file already uses that name. Only
+// the full loader can tell which will happen, so this function doesn't
+// guess: it deletes and returns a `restore` function. The DELETE handler
+// in routes/cockpit/events.ts reloads the events and calls `restore()`
+// if the loader refuses the result.
 
 export type DeleteResult =
   | { ok: true; storedCount: number; restore: () => void }
@@ -68,9 +54,8 @@ export function deleteEventFile(
   return {
     ok: true,
     storedCount: countStored(db, eventName),
-    // Writes back the exact bytes that were here, not a re-serialized
-    // JSON.stringify, so a restore is indistinguishable from the
-    // delete never having happened.
+    // Write back the exact original bytes, not re-serialized JSON, so the
+    // file is as if it had never been deleted.
     restore: () => writeFileAtomic(path, original),
   };
 }

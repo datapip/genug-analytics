@@ -3,21 +3,17 @@ import type { Period } from "./period.js";
 import { roundTo } from "./aggregate.js";
 import { NO_SEGMENT, type SegmentClause } from "./segment.js";
 
-// Whether a funnel is walked per session or per visitor. Session is
-// the default because it is the only scope that is correct for every
-// visitor: a consentless visitor_id rotates at the site's midnight (see
-// "Visitor identification" in docs/decisions.md), so a visitor-scoped
-// funnel silently loses anyone who viewed at 23:50 and bought at 00:10,
-// and can never span days at all. Visitor scope is for consentful
-// deployments, where a persistent id makes "viewed a product on Monday,
-// bought on Thursday" a real question — the one this tool was first
-// written for, before it was clear that the default mode couldn't
-// answer it.
+// Whether a funnel is followed per session or per visitor. Session is
+// the default because it works for every visitor: without consent a
+// visitor_id changes at the site's midnight (see "Visitor
+// identification" in docs/decisions.md), so a per-visitor funnel would
+// lose anyone who viewed at 23:50 and bought at 00:10, and could never
+// span several days. Per visitor is for sites with consent, where the id
+// lasts and "viewed on Monday, bought on Thursday" can be answered.
 export type FunnelScope = "session" | "visitor";
 
-// The column each scope is keyed on. A lookup rather than interpolating
-// the caller's value: the scope is typed, but the SQL below still only
-// ever sees one of these two literals.
+// The column for each scope. Looked up here so the SQL only ever
+// contains one of these two fixed names, never the caller's value.
 const SCOPE_COLUMN: Record<FunnelScope, string> = {
   session: "session_id",
   visitor: "visitor_id",
@@ -25,26 +21,20 @@ const SCOPE_COLUMN: Record<FunnelScope, string> = {
 
 export interface FunnelStep {
   event: string;
-  // Sessions or visitors that reached this step, per the scope. The
-  // MCP layer names the field for the unit; here it is one shape.
+  // Sessions or visitors (depending on the scope) that reached this
+  // step. The MCP tool renames the field to say which.
   reached: number;
-  // Share of the first step's count that reached this step, 0-1.
-  // Always 1 for the first step itself.
+  // Share of the first step's count that reached this step, from 0 to
+  // 1. Always 1 for the first step.
   conversionRate: number;
 }
 
-// A step only counts if it happened *after* the qualifying timestamp
-// for the previous step — reaching steps out of order doesn't count as
-// progressing through the funnel.
-// The key set is passed to advanceFunnelStep as a single JSON array
-// rather than one bound parameter per id. SQLite caps a statement at
-// SQLITE_MAX_VARIABLE_NUMBER (32,766 by default), so an IN list built
-// from the set used to throw "too many SQL variables" at the agent past
-// roughly 33,000 keys — reachable for the target user, since consentless
-// visitor_ids rotate daily and about 1,100 visitors a day over a 30-day
-// window gets there. This removes that ceiling outright instead of
-// chunking around it, stays index-backed, and is measurably faster than
-// the chunked IN list it replaced.
+// A step only counts if it happened after the previous step; doing the
+// steps out of order doesn't count as moving through the funnel.
+// The ids still in the funnel are passed to advanceFunnelStep as one
+// JSON array, not one parameter per id. SQLite allows at most 32,766
+// parameters per statement, and 30 days of a site with about 1,100
+// visitors a day (each a new id every day without consent) is more.
 export function getStepsFunnel(
   db: Database.Database,
   steps: string[],
@@ -55,8 +45,8 @@ export function getStepsFunnel(
   if (steps.length === 0) return [];
   const column = SCOPE_COLUMN[scope];
 
-  // The segment narrows who enters the funnel; later steps are then
-  // looked up for exactly those keys, so it needs applying once.
+  // The segment decides who enters the funnel. Later steps only look
+  // at those ids, so the segment is applied once, here.
   const firstStepRows = db
     .prepare(
       `SELECT ${column} AS key, MIN(ts) AS ts
@@ -85,8 +75,8 @@ export function getStepsFunnel(
     results.push({
       event: steps[i]!,
       reached: current.size,
-      // Rounded like bounceRate: the agent reads this back as a figure,
-      // and a raw division hands it 0.33333333333333331.
+      // Rounded, so the agent gets 0.3333 rather than
+      // 0.33333333333333331.
       conversionRate: starting === 0 ? 0 : roundTo(current.size / starting, 4),
     });
   }
@@ -94,10 +84,9 @@ export function getStepsFunnel(
   return results;
 }
 
-// Given the keys still in the funnel (session or visitor id -> the ts
-// they reached the previous step at), returns only those that also
-// reached `event` afterward, mapped to the ts of their first qualifying
-// occurrence.
+// Takes the ids still in the funnel (session or visitor id -> when they
+// reached the previous step) and returns those that did `event` after
+// that, each with the time they first did it.
 function advanceFunnelStep(
   db: Database.Database,
   event: string,
@@ -108,9 +97,8 @@ function advanceFunnelStep(
   const keys = [...current.keys()];
   if (keys.length === 0) return new Map();
 
-  // json_each expands the array into rows SQLite can join against, so
-  // the whole key set costs one bound parameter no matter how large it
-  // is. Still one statement per step, still index-backed.
+  // json_each turns the array into rows SQLite can join with, so all
+  // ids together take one parameter, however many there are.
   const rows = db
     .prepare(
       `SELECT ${column} AS key, ts
@@ -133,11 +121,10 @@ function advanceFunnelStep(
 
   const next = new Map<string, string>();
   for (const [key, previousTs] of current) {
-    // Rows are ts-ascending, so the first one past previousTs is this
-    // key's earliest qualifying occurrence of this step. Strictly past:
-    // two events the server stamped in the same millisecond don't count
-    // as ordered, which server-assigned timestamps on separate requests
-    // make rare enough to note rather than tie-break on row id.
+    // Rows are sorted by time, so the first one after previousTs is the
+    // earliest time this id did this step. "After" is strict: two events
+    // in the same millisecond don't count as in order. That is rare,
+    // since the server sets each event's time as it arrives.
     const qualifyingTs = timestampsByKey
       .get(key)
       ?.find((ts) => ts > previousTs);

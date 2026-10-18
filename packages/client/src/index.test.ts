@@ -4,18 +4,16 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
-// Reads the *compiled* output, not src/index.ts — this is the exact
-// artifact server/app.ts serves at /client.js, so the test exercises
-// what actually ships, not a separate transpilation of it.
+// Reads the compiled file, not src/index.ts: the exact file
+// server/app.ts serves at /client.js.
 const clientScriptSource = readFileSync(
   fileURLToPath(new URL("./index.js", import.meta.url)),
   "utf8",
 );
 
-// What server/lib/clientScript.ts writes over the placeholder for a
-// deployment with no KEPT_QUERY_PARAMS or KEPT_HASH_VALUES set. A copy,
-// since this package can't import the server; the server's own test
-// checks the placeholder is still there to replace.
+// What server/lib/clientScript.ts puts in place of the placeholder when
+// KEPT_QUERY_PARAMS and KEPT_HASH_VALUES aren't set. Copied, since this
+// package can't import the server.
 interface KeptUrlParts {
   params: "*" | string[];
   hashes: "*" | string[];
@@ -38,32 +36,27 @@ interface BeaconCall {
   blob: Blob;
 }
 
-// runScripts: "outside-only" means jsdom builds a real window/document but
-// won't auto-run any <script> tags — so mocks (sendBeacon, fetch) can be
-// installed before the client script itself is executed via window.eval(),
-// which runs it in that window's own global scope (document, navigator,
-// etc. all resolve to this window, exactly like a real <script> would).
-// document.currentScript is null under eval (no element is being parsed),
-// which exercises the same "no <script src>" fallback path documented in
-// the client's own endpoint-detection comment.
+// runScripts: "outside-only" makes jsdom create a window and document
+// without running <script> tags, so the fakes (sendBeacon, fetch) can be
+// set up first. The client script is then run with window.eval(), in that
+// window's global scope, like a real <script>. document.currentScript is
+// null under eval, so the "no <script src>" fallback is used.
 function loadClient(
   options: {
     htmlAttrs?: string;
     config?: Record<string, unknown>;
     withoutSendBeacon?: boolean;
-    // What sendBeacon reports back. false means the browser refused to
-    // queue the payload (transfer queue full, or body over the limit),
-    // which is a real runtime case distinct from the API being absent.
+    // What sendBeacon returns. false means the browser wouldn't queue the
+    // data (queue full, or body too large), which differs from sendBeacon
+    // not existing.
     beaconResult?: boolean;
-    // Simulates the script being inlined rather than loaded via
-    // <script src>: document.currentScript is a real element, but its
-    // `src` is the empty string.
+    // Simulates an inline script instead of <script src>:
+    // document.currentScript exists, but its `src` is empty.
     inlineScript?: boolean;
-    // The pre-load stub's queue, as a hand-written stub on a real site
-    // would have left it: calls made before this script finished
-    // loading, waiting to be replayed.
+    // The stub's queue: calls made before this script loaded, waiting to
+    // be replayed.
     queued?: [string, unknown[]][];
-    // The lists the server writes in; null serves the file unrendered.
+    // The lists the server writes in; null leaves the placeholder.
     keptUrlParts?: KeptUrlParts | null;
   } = {},
 ) {
@@ -102,8 +95,8 @@ function loadClient(
   if (options.inlineScript) {
     const inline = window.document.createElement("script");
     window.document.head.append(inline);
-    // jsdom exposes currentScript as a getter that's null outside real
-    // parsing, so it has to be overridden rather than assigned.
+    // In jsdom, currentScript is a getter, so it must be redefined, not
+    // assigned.
     Object.defineProperty(window.document, "currentScript", {
       configurable: true,
       get: () => inline,
@@ -139,12 +132,10 @@ async function beaconBodies(beaconCalls: BeaconCall[]): Promise<unknown[]> {
   );
 }
 
-// This script runs in someone else's page, so every name it declares at
-// the top level is a name that site can no longer use — or one it
-// already uses, which throws before this script does anything. Two
-// checks because the two kinds leak differently: a top-level function
-// or var becomes a property of window, while a const, let or class
-// lands in the global lexical scope, which no property listing shows.
+// This script runs on someone else's page, so it must not create global
+// names the site might use. Two checks, because a top-level function or
+// var becomes a property of window, while a const, let or class is a
+// global that no property list shows.
 test("the script leaves nothing on the page's globals but genugAnalytics", () => {
   const { window } = new JSDOM("<!doctype html><html></html>", {
     runScripts: "outside-only",
@@ -180,8 +171,8 @@ test("track() sends the given event and props via sendBeacon", async () => {
   assert.equal(beaconCalls.length, 1);
   assert.match(beaconCalls[0]!.url, /\/events$/);
   const [body] = await beaconBodies(beaconCalls);
-  // No consent key at all — genugAnalyticsConfig.consent was never set,
-  // so this is "not yet answered", not "no". JSON.stringify drops it.
+  // No consent key: genugAnalyticsConfig.consent wasn't set, which means
+  // "not answered yet", not "no". JSON.stringify leaves it out.
   assert.deepEqual(body, {
     event: "custom_event",
     url: "http://site.example/page",
@@ -364,9 +355,8 @@ test("falls back to fetch when sendBeacon is unavailable", async () => {
   assert.equal(fetchCalls[0]!.init.keepalive, true);
 });
 
-// Distinct from the case above: the API exists, but the browser refused
-// to queue this particular payload. Before this was handled, those
-// events were dropped with no fallback and no error.
+// Unlike the case above, sendBeacon exists but refuses this payload.
+// The event must still be sent with fetch.
 test("falls back to fetch when sendBeacon returns false", async () => {
   const { window, beaconCalls, fetchCalls } = loadClient({
     beaconResult: false,
@@ -393,9 +383,9 @@ test("does not fall back to fetch when sendBeacon accepts the payload", () => {
   assert.equal(fetchCalls.length, 0, "no double-send");
 });
 
-// An inlined <script> has a real currentScript whose src is "", and
-// new URL("") throws — which used to escape the IIFE and leave
-// window.genugAnalytics undefined, so nothing tracked at all.
+// An inline <script> has a currentScript whose src is "", and
+// new URL("") throws. That must not stop the script before
+// window.genugAnalytics exists.
 test("still initialises when inlined, with no <script src> to read", async () => {
   const { window, beaconCalls } = loadClient({ inlineScript: true });
 
@@ -412,13 +402,13 @@ test("still initialises when inlined, with no <script src> to read", async () =>
   api.track("custom_event");
 
   assert.equal(beaconCalls.length, 1);
-  // No origin to derive, so the endpoint is relative to the current page.
+  // No server to take from the src, so the address is relative to the
+  // page.
   assert.equal(beaconCalls[0]!.url, "/events");
 });
 
-// The pre-load stub: a site's own inline code may call track() before
-// this script has finished loading, which would otherwise throw on an
-// undefined window.genugAnalytics.
+// The stub: a site's own code may call track() before this script has
+// loaded, which would otherwise throw.
 function installStub(window: JSDOM["window"]) {
   window.eval(`
     window.genugAnalytics = {
@@ -472,8 +462,8 @@ test("replays track() calls queued by the stub before the script loaded", async 
   assert.deepEqual(body!.props, { when: "before_load" });
 });
 
-// The ordering guarantee that actually matters: consent granted before
-// the script loaded must apply to everything replayed after it.
+// The order that matters: consent given before the script loaded must
+// apply to everything replayed after it.
 test("a queued setConsent applies to calls queued after it", async () => {
   const dom = new JSDOM(
     "<!doctype html><html><head></head><body></body></html>",
@@ -554,16 +544,9 @@ test("still works with no stub present at all", () => {
   assert.equal(beaconCalls.length, 1);
 });
 
-// A tag manager alongside a hardcoded tag, or a CMS theme alongside a
-// plugin, is how an analytics script routinely ends up on a page twice.
-// Nothing on a stored row distinguishes the duplicate, so the inflation
-// is both permanent and invisible — exactly the failure mode this
-// project cares most about. The stub path is covered by the tests above:
-// if the guard mistook a stub for an already-installed API, every one of
-// them would stop firing.
-// Stripped in the browser, so a token in the address bar never reaches
-// the network at all. The server strips the same set again for callers
-// that aren't this script.
+// Removed in the browser, so a token in the address bar is never sent.
+// The server removes the same parts again for requests not from this
+// script.
 test("track() strips non-campaign query parameters from the url", async () => {
   const { window, beaconCalls } = loadClient();
   window.history.replaceState(
@@ -606,8 +589,8 @@ test("the lists the server writes in decide what the client keeps", async () => 
   );
 });
 
-// Served without the server's rendering step, the script must not fall
-// back to keeping everything.
+// Without the server filling in the lists, the script must not keep
+// everything.
 test("an unrendered script drops every parameter and fragment", async () => {
   assert.equal(
     await trackedUrl(null, "/p?utm_source=a&token=b#pricing"),
@@ -615,6 +598,10 @@ test("an unrendered script drops every parameter and fragment", async () => {
   );
 });
 
+// A tag manager plus a hard-coded tag, or a theme plus a plugin, often
+// puts the script on a page twice. The stored data can't show the
+// duplicate, so every count would quietly double. (The stub tests above
+// check that the guard doesn't mistake the stub for an installed copy.)
 test("a second copy of the script on the same page changes nothing", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoPageTracking: true },
@@ -689,7 +676,7 @@ test("an outbound link fires outbound_link_click with its host", async () => {
   assert.equal(body!.auto, "outboundClick");
   assert.equal(body!.props.target_url, "https://partner.example/pricing");
   assert.equal(body!.props.target_host, "partner.example");
-  // whitespace collapsed, not passed through as authored
+  // whitespace reduced to single spaces
   assert.equal(body!.props.link_text, "See our partner");
 });
 
@@ -717,9 +704,8 @@ test("a link to a known file extension fires file_download", async () => {
   assert.equal(body!.props.link_text, "Download");
 });
 
-// A signed download link or a partner link carrying ?email= is the same
-// leak as a page URL carrying one, so both link props go through the
-// page URL's allowlist.
+// A signed download link or a link with ?email= leaks as much as a page
+// URL, so both link props are cleaned like the page URL.
 test("link and download URLs keep only campaign parameters and no fragment", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -759,8 +745,7 @@ test("a download attribute fires file_download even with no extension", async ()
   assert.equal(body!.props.file_extension, "");
 });
 
-// The documented precedence: downloading the file is what the visitor
-// did; whose server it sat on is incidental.
+// A link to a file on another site counts as a download.
 test("an outbound file link is a download, not an outbound click", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -799,8 +784,8 @@ test("clicking an icon inside an outbound link still tracks it", () => {
   assert.equal(beaconCalls.length, 1);
 });
 
-// Middle-click ("open in new tab") never fires a plain click event, so
-// without auxclick a common way of following outbound links is invisible.
+// The middle mouse button ("open in new tab") fires no normal click
+// event, only auxclick.
 test("middle-click on an outbound link is tracked", () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -824,7 +809,7 @@ test("right-click on an outbound link is NOT tracked", () => {
 });
 
 // Both the data-attribute listener and the link listener match a tagged
-// outbound link. Before this, one click produced two rows.
+// outbound link; one click must give one event, not two.
 test("a tagged link fires only its tagged event, not also the automatic one", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -858,8 +843,8 @@ test("tagging a link with the same event name doesn't double-count it", () => {
   assert.equal(beaconCalls.length, 1);
 });
 
-// The deliberate boundary: a tagged *ancestor* describes something other
-// than the link click, so both are still recorded.
+// A tagged parent element describes something other than the link
+// click, so both events are sent.
 test("an outbound link inside a tagged container fires both events", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -888,8 +873,8 @@ test("an untagged link still fires the automatic event", () => {
   assert.equal(beaconCalls.length, 1);
 });
 
-// An empty attribute fires nothing from the tagged listener, so it must
-// not suppress the automatic one either — otherwise the click vanishes.
+// An empty attribute sends nothing, so it must not stop the automatic
+// event either, or the click would be lost.
 test("an empty data-genug-on-click does not suppress the automatic event", () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoLinkTracking: true },
@@ -903,11 +888,10 @@ test("an empty data-genug-on-click does not suppress the automatic event", () =>
 
 // --- what the client sends for the events it fires itself ----------
 
-// The point of the role: this script does not know what a deployment
-// calls these three, and no longer needs to. It used to be told, by a
-// preamble the server prepended to the file — which made the file
-// deployment-specific, capped how long it could be cached, and meant a
-// cached copy went on firing a name that a rename had made invalid.
+// The script doesn't know what a deployment calls these three events, so
+// it sends a role and the server picks the name. That keeps the file the
+// same for every deployment, so it can be cached, and a cached copy never
+// sends a renamed event's old name.
 test("the three auto-fired events send a role and never a name", async () => {
   const { window, beaconCalls } = loadClient({
     config: { enableAutoPageTracking: true, enableAutoLinkTracking: true },
@@ -929,8 +913,8 @@ test("the three auto-fired events send a role and never a name", async () => {
   }
 });
 
-// The other direction: anything the deployment names itself still
-// travels as a name, because only these three roles exist.
+// Events the site names itself are still sent by name; only these three
+// roles exist.
 test("a tracked or tagged event sends its name and no role", async () => {
   const { window, beaconCalls } = loadClient();
 
@@ -947,8 +931,8 @@ test("a tracked or tagged event sends its name and no role", async () => {
   assert.equal(body!.auto, undefined);
 });
 
-// The flags being off must stay silent — a warning would fire on every
-// page of every deployment that simply doesn't use these features.
+// No warning when the options are off, or every site not using them
+// would get one on every page.
 test("no warnings when the auto-tracking flags are off", () => {
   const { warnings } = loadClient();
   assert.deepEqual(warnings, []);
@@ -956,20 +940,16 @@ test("no warnings when the auto-tracking flags are off", () => {
 
 // --- SPA route tracking (enableAutoRouteTracking) ---
 
-// Two waits, because a test expecting an event and a test expecting
-// silence need opposite things from the clock.
+// Two ways of waiting, because a test expecting an event and a test
+// expecting none need different things.
 //
-// Both delays here are real: the client defers its route event by a
-// tick on purpose (see installRouteTracking), and jsdom dispatches
-// popstate asynchronously on top of that. Measured, jsdom's traversal
-// lands anywhere between 8ms and 31ms — so the single fixed 20ms wait
-// these tests used to share was a coin flip. It failed ~8 runs in 10
-// locally for the back/forward case, and passed on CI only by landing
-// on the fast side of the same race.
+// The client sends route events one tick later on purpose (see
+// installRouteTracking), and jsdom fires popstate later still, after 8 to
+// 31ms. A fixed short wait would make these tests flaky.
 const TRAVERSAL_CEILING_MS = 250;
 
-// Expecting an event: poll until it arrives, so the test is as fast as
-// the run allows and only fails if the event genuinely never comes.
+// Expecting an event: check repeatedly until it arrives, so the test is
+// fast and only fails if the event really never comes.
 async function waitForBeacons(
   beaconCalls: readonly unknown[],
   expected: number,
@@ -983,15 +963,14 @@ async function waitForBeacons(
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  // One more turn, so an unwanted extra beacon has a chance to show up
-  // and fail the count assertion rather than arriving after it.
+  // Wait one more turn, so an unwanted extra event shows up before the
+  // count is checked.
   await new Promise((resolve) => setTimeout(resolve, 5));
 }
 
-// Expecting silence: there is nothing to poll for, so this has to be a
-// fixed wait, and it has to clear the ceiling above. At 20ms these
-// tests could assert before jsdom had even run the traversal — passing
-// without exercising the thing they exist to check.
+// Expecting no event: there is nothing to wait for, so this is a fixed
+// wait, longer than the slowest case above. A shorter wait could pass
+// before jsdom had even handled the navigation.
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, TRAVERSAL_CEILING_MS));
 }
@@ -1051,8 +1030,8 @@ test("back and forward navigation fires a page event", async () => {
   );
 });
 
-// replaceState means "rewrite the current entry" — canonicalising a URL,
-// stripping a token, storing filter state — not a visit.
+// replaceState changes the current entry (tidying a URL, removing a
+// token, saving filters); it isn't a new page.
 test("replaceState fires nothing", async () => {
   const { window, beaconCalls } = loadClient({ config: ROUTE_CONFIG });
 
@@ -1071,9 +1050,8 @@ test("pushing the route already showing fires nothing", async () => {
   assert.equal(beaconCalls.length, 1, "only the initial load");
 });
 
-// An anchor jump is not a navigation — counting it would fire a page
-// event for every "back to top" link, on the way there and on the way
-// back through history.
+// A jump to an anchor isn't a new page; counting it would send a page
+// event for every "back to top" link, both ways through history.
 test("a hash-only change fires nothing, in either direction", async () => {
   const { window, beaconCalls } = loadClient({ config: ROUTE_CONFIG });
 
@@ -1085,9 +1063,8 @@ test("a hash-only change fires nothing, in either direction", async () => {
   assert.equal(beaconCalls.length, 1, "only the initial load");
 });
 
-// A route guard redirecting /old to /new pushes twice in one tick. The
-// visitor never saw /old, so recording it would be a page view that
-// didn't happen.
+// A redirect from /old to /new calls pushState twice at once. The
+// visitor never saw /old, so only /new is recorded.
 test("two pushes in one tick fire one event, at the final URL", async () => {
   const { window, beaconCalls } = loadClient({ config: ROUTE_CONFIG });
 
@@ -1100,9 +1077,8 @@ test("two pushes in one tick fire one event, at the final URL", async () => {
   assert.equal(bodies[1]!.url, "http://site.example/new");
 });
 
-// The main reason the event is deferred: frameworks update the title in
-// an effect that runs after the route change, so firing inline would
-// record the previous page's title against the new URL.
+// Why the event waits a tick: frameworks set the title after the route
+// change, so sending right away would record the previous page's title.
 test("the title is read after the framework has updated it", async () => {
   const { window, beaconCalls } = loadClient({ config: ROUTE_CONFIG });
   window.document.title = "Home";
@@ -1115,8 +1091,8 @@ test("the title is read after the framework has updated it", async () => {
   assert.equal(bodies[1]!.props.page_title, "Pricing");
 });
 
-// The attribute is the load opt-in on its own, so it's also enough for
-// route tracking — and its props are re-read, not replayed from load.
+// The attribute alone turns on the page-load event, so it is enough for
+// route tracking too, and its props are read again on each route.
 test("route changes re-fire data-genug-on-load, with fresh props", async () => {
   const { window, beaconCalls } = loadClient({
     htmlAttrs:
@@ -1139,8 +1115,8 @@ test("route changes re-fire data-genug-on-load, with fresh props", async () => {
   assert.deepEqual(bodies[1]!.props, { section: "pricing" });
 });
 
-// It repeats a page load; with no page load configured there's nothing
-// for it to repeat.
+// Route tracking repeats the page-load event; without one there is
+// nothing to repeat.
 test("route tracking warns and tracks nothing with no load opt-in", async () => {
   const { window, beaconCalls, warnings } = loadClient({
     config: { enableAutoRouteTracking: true },
@@ -1184,9 +1160,9 @@ test("optOut() stops every later send, and sends one request to clear the cookie
 
   api.optOut();
 
-  // The one request opting out is allowed to make: no event, no url, no
-  // referrer. The server stores nothing for it and only clears the
-  // visitor-id cookie, which page JavaScript cannot delete itself.
+  // The only request an opt-out sends: no event, url or referrer. The
+  // server stores nothing and only deletes the visitor cookie, which the
+  // page's JavaScript can't delete.
   assert.equal(beaconCalls.length, 1);
   assert.deepEqual(await beaconBodies(beaconCalls), [{ optOut: true }]);
 
@@ -1194,10 +1170,9 @@ test("optOut() stops every later send, and sends one request to clear the cookie
   assert.equal(beaconCalls.length, 1, "nothing may be sent after opting out");
 });
 
-// Re-running the script in the same document is what a reload does to
-// this file: everything in its closure starts over, and the only thing
-// carried across is the cookie — which is the whole reason a cookie is
-// what holds the decision.
+// Running the script again in the same document is like a page reload:
+// everything starts over except the cookie, which is why the opt-out is
+// stored in a cookie.
 test("opting out survives a reload, and opting back in resumes sending", () => {
   const { window, beaconCalls } = loadClient();
   optOutApi(window).optOut();
@@ -1215,9 +1190,8 @@ test("opting out survives a reload, and opting back in resumes sending", () => {
   assert.equal(beaconCalls.length, afterOptOut + 1);
 });
 
-// The automatic trackers don't go through track(), so a gate that only
-// covered the public method would still send exactly the events a
-// visitor objecting is most likely to mean.
+// The automatic events don't go through track(), so the opt-out must
+// stop them too.
 test("opting out silences the automatic page view too", () => {
   const { window, beaconCalls } = loadClient();
   optOutApi(window).optOut();

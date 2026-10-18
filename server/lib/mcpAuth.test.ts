@@ -88,7 +88,7 @@ test("rejects a non-Bearer Authorization scheme", () => {
   assert.equal(res.statusCode, 401);
 });
 
-// Small budgets so a test can spend one in a few calls.
+// Small limits, so a test reaches them in a few calls.
 function smallLimiters(keyed: number, keyless: number) {
   return {
     keyed: createRequestLimiter(keyed, "/mcp"),
@@ -113,10 +113,9 @@ function call(
   return { status: res.statusCode, nextCalled, res };
 }
 
-// The bug this fixes: claude.ai and other hosted agents share their
-// addresses with the vendor's other customers. Before, ten wrong keys
-// from any of them locked the owner's own connector out for fifteen
-// minutes, and sixty keyless calls spent its request budget.
+// Hosted agents like claude.ai share their addresses with the vendor's
+// other customers. Strangers on the same address must not use up or
+// block the owner's access.
 test("strangers on the owner's address cannot spend the owner's budget", () => {
   const middleware = createMcpAuthMiddleware("secret-key", smallLimiters(2, 3));
 
@@ -133,9 +132,9 @@ test("strangers on the owner's address cannot spend the owner's budget", () => {
   assert.equal(owner.status, undefined);
 });
 
-// The keyless budget is what bounds guessing, so a guess past it is
-// refused before the key is compared. The response says so, and for
-// how long, rather than a bare 401 that would invite another try.
+// The limit for requests without the right key limits guessing, so past
+// it a request is refused before the key is checked. The response says
+// how long to wait, not just 401.
 test("guesses past the keyless budget are refused with a wait", () => {
   const middleware = createMcpAuthMiddleware(
     "secret-key",
@@ -152,8 +151,8 @@ test("guesses past the keyless budget are refused with a wait", () => {
   assert.ok(retryAfter >= 1 && retryAfter <= 60);
 });
 
-// The other half of the split: the key-holder's flood is still
-// bounded, and spending it does not spend the keyless budget.
+// Requests with the key have their own limit, which doesn't use up the
+// other one.
 test("the owner's own budget is bounded separately", () => {
   const middleware = createMcpAuthMiddleware("secret-key", smallLimiters(2, 5));
 

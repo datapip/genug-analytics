@@ -15,8 +15,8 @@ function tempPath(): string {
   return join(mkdtempSync(join(tmpdir(), "genug-session-salt-")), "salt");
 }
 
-// A salt that changed on every start would sign the owner out on every
-// deploy, so the second start must read back what the first wrote.
+// A new salt on every start would sign the owner out on every deploy, so
+// the second start must read what the first wrote.
 test("the salt made on the first start is the one read on the next", () => {
   const path = tempPath();
 
@@ -41,8 +41,8 @@ test("a file that is not a salt is replaced rather than used", () => {
   assert.equal(readFileSync(path, "utf8").trim(), salt.toString("hex"));
 });
 
-// The cockpit must still start: a salt it cannot keep only means the
-// next restart signs everyone out.
+// The cockpit must still start; a salt that can't be saved only means
+// the next restart signs everyone out.
 test("a salt that cannot be stored is still returned", () => {
   const path = tempPath();
   mkdirSync(`${path}.tmp`);

@@ -1,8 +1,7 @@
 import type Database from "better-sqlite3";
 
-// `ts` is an explicit parameter, not computed in here — same reasoning
-// as insertEvent/insertRejectedEvent: the caller stamps "now" once,
-// which also makes this testable against a fixed period.
+// The caller passes `ts` instead of this function reading the clock, as
+// insertEvent does, so a test can store rows at a fixed time.
 export function insertBotActivity(
   db: Database.Database,
   ts: string,

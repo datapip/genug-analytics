@@ -1,26 +1,20 @@
-// Which sessions a period "owns", for the queries that look at a
-// session's shape — where it entered, where it left, whether it
-// bounced, how long it lasted — rather than at how much happened.
+// Which sessions belong to a period, for queries about a whole session:
+// where it entered, where it left, whether it bounced, how long it
+// lasted.
 //
-// Those queries used to take every event with a timestamp inside the
-// period and group by session, so a session already under way at
-// `from` had its first in-window event reported as its entry, and a
-// session with three page views before `from` and one after was
-// reported as a bounce. The error grows as the period shrinks: on a
-// one-hour window most sessions straddle an edge.
+// A session belongs to the period its first event is in, and all of its
+// events are then read, including any after `to`, since that is where a
+// session starting late in the period really ended. Taking only the
+// events inside the period would be wrong at the edges: a session that
+// began before `from` would get a wrong entry page, and one with three
+// page views before `from` and one after would look like a bounce.
 //
-// A session belongs to the period its first event falls in, and is
-// then read in full — including anything after `to`, which is where a
-// session that started late in the period genuinely exited. Volume
-// queries (the traffic summary, the per-day trend) deliberately keep
-// counting sessions *active* in the period instead, because "how many
-// sessions touched Tuesday" is what those answer; their descriptions
-// say so.
+// Volume queries (the traffic summary, the per-day trend) instead count
+// sessions active in the period, because they answer "how many sessions
+// were there on Tuesday"; their descriptions say so.
 //
-// Candidates come from the ts index, and MIN(ts) per candidate is an
-// index lookup on (session_id, ts), so this never scans sessions that
-// had no event in the window. Bound to @from and @to like every other
-// period query.
+// Uses the ts index and the (session_id, ts) index, so sessions without
+// events in the period are never scanned.
 const SESSIONS_STARTED_IN_PERIOD = `
   SELECT session_id
   FROM events
@@ -30,33 +24,27 @@ const SESSIONS_STARTED_IN_PERIOD = `
   GROUP BY session_id
   HAVING MIN(ts) >= @from`;
 
-// The whole condition, not just the list of sessions — because the
-// `ts >= @from` in front of it is not optional and must not be
-// separable from the membership test.
+// The full SQL condition, including `ts >= @from`, so the two parts
+// can't be used separately.
 //
-// **Why the floor is there.** Without it, the outer query is bounded by
-// nothing but its own `event = ...`, so SQLite walks every matching row
-// ever recorded and lets the period in only through which sessions
-// qualify. The work is then proportional to all history rather than to
-// the window: measured on 5,000,000 events, top referrers over 7 days
-// took 2,101 ms without it and 608 ms with it, returning the same
-// 39,978 sessions. See "A real load test" in docs/decisions.md.
+// **Why `ts >= @from` is there.** Without it SQLite reads every matching
+// row ever stored and only then filters by session, so the work grows
+// with all history instead of with the period. On 5,000,000 events, top
+// referrers over 7 days took 2,101 ms without it and 608 ms with it, with
+// the same result. See "A real load test" in docs/decisions.md.
 //
-// **Why it cannot change an answer.** The subquery admits a session
-// only when `MIN(ts) >= @from` over *all* of that session's events, so
-// no row of a qualifying session is older than @from and the floor can
-// never exclude one. That holds whatever the timestamps look like:
-// `MIN(ts)` is the lexically smallest value of the same column under
-// the same collation the floor compares against, so it does not depend
-// on every row being well-formed ISO-8601.
+// **Why it can't change a result.** A session only qualifies when the
+// earliest of all its events is at or after @from, so none of its rows
+// is earlier than @from.
 //
-// **Why there is no ceiling, and must not be.** A session that started
-// inside the period is read in full, including events after @to —
-// that is where a session starting late in the window genuinely exited
-// (see the straddling-session tests in content.test.ts). `ts <= @to`
-// would look symmetrical, be wrong, and quietly move numbers.
-// Parenthesised as a whole: it is a bare AND-chain otherwise, and one
-// pasted after an OR — or inside a NOT — would re-associate into
-// something that still runs and quietly answers a different question.
+// **Why there is no `ts <= @to`, and must not be.** A session that
+// started in the period is read in full, including events after @to,
+// because that is where a session starting late really ended (see the
+// tests in content.test.ts). Adding `ts <= @to` would look tidy but
+// quietly change the numbers.
+//
+// The whole condition is in parentheses: pasted after an OR or inside a
+// NOT, a bare chain of ANDs would group differently and quietly answer a
+// different question.
 export const IN_SESSION_STARTED_IN_PERIOD = `(ts >= @from
     AND session_id IN (${SESSIONS_STARTED_IN_PERIOD}))`;

@@ -1,40 +1,32 @@
-// A prop's shape, written as a dot-separated rule string in the event's
-// JSON file: `"page_title": "string.long"`. The first segment names the
-// type and is required; the rest are modifiers, in any order.
+// A prop's shape, written as a rule string with dots in the event's JSON
+// file: `"page_title": "string.long"`. The first part is the type
+// (required); the rest are modifiers, in any order.
 //
-// JSON Schema is the real standard for this and was rejected on
-// purpose: the point of moving schemas to JSON is that someone can
-// hand-edit one file on a server without a build step, and nesting a
-// {"type":"string","maxLength":512} object under every prop costs more
-// to read than it buys. This format is strictly simpler, so generating
-// JSON Schema from it later stays easy if interop ever matters.
-// See docs/decisions.md.
+// JSON Schema would be the standard, but it was not used on purpose:
+// these files are meant to be edited by hand on a server, and a
+// {"type":"string","maxLength":512} object under every prop is harder
+// to read. This format is simpler, so JSON Schema could still be
+// generated from it later. See docs/decisions.md.
 
 export type PropTypeName = "string" | "number" | "boolean";
 
 const TYPE_NAMES: readonly string[] = ["string", "number", "boolean"];
 
-// The hard ceiling any string prop may accept. Deliberately the same
-// number envelope.ts allows for a url, because a prop holding a URL is
-// the legitimate long case.
+// The longest any string prop may be. The same as envelope.ts allows for
+// a url, because a prop holding a URL is the usual long case.
 //
-// This exists because POST /events is public and unauthenticated, and
-// several MCP tools hand stored prop values to the AI agent verbatim.
-// An uncapped string prop let a stranger write as much text as the 16KB
-// body limit allowed straight into the model's context. Capping does
-// not make prompt injection impossible; it removes the room to write at
-// length.
+// POST /events is public, and several MCP tools show stored prop values
+// to the agent as they are. Without a limit, a stranger could put up to
+// 16KB of text into the agent's context. A limit doesn't make prompt
+// injection impossible, but it leaves little room for it.
 export const MAX_PROP_STRING_LENGTH = 2048;
 
-// What an ordinary text prop gets without asking. Generous for a title
-// or a label, far short of somewhere to hide a paragraph of
-// instructions.
+// The default limit for a text prop: enough for a title or a label, too
+// short to hide a paragraph of instructions.
 export const DEFAULT_PROP_STRING_LENGTH = 512;
 
-// `short` and `long` are the one invented pair here — deliberately
-// naming a number nobody should have to reason about. `required` and
-// `optional` are borrowed from JSON Schema and Protobuf, for free
-// familiarity.
+// `long` picks the longer limit, so nobody has to choose a number.
+// `required` and `optional` are named as in JSON Schema and Protobuf.
 const LENGTH_WORDS: Record<string, number> = {
   short: DEFAULT_PROP_STRING_LENGTH,
   long: MAX_PROP_STRING_LENGTH,
@@ -45,15 +37,14 @@ const OPTIONALITY_WORDS: Record<string, boolean> = {
   optional: false,
 };
 
-// How many values one list prop may hold. The 16KB body limit already
-// bounds the pathological case; this is about keeping a breakdown
-// readable, and about the fact that a prop holding hundreds of values
-// is almost always several events wearing a trench coat.
+// How many values one list prop may hold. The request size limit
+// already prevents extremes; this keeps breakdowns readable. A prop with
+// hundreds of values is almost always several events that should be
+// sent separately.
 export const MAX_PROP_LIST_LENGTH = 50;
 
-// Allowed on all three types rather than only the ones that seem
-// useful: a uniform rule is less to explain than a carve-out, and
-// `boolean.list` being pointless is not the same as it being harmful.
+// `list` works with all three types: one rule is simpler to explain
+// than exceptions, and `boolean.list` is useless but harmless.
 const SHAPE_WORDS: Record<string, boolean> = { list: true };
 
 const VALID_WORDS = [
@@ -62,10 +53,9 @@ const VALID_WORDS = [
   ...Object.keys(SHAPE_WORDS),
 ].join(", ");
 
-// A union rather than an optional `maxLength`, so "a string rule always
-// has a cap" is a fact the compiler knows rather than something every
-// consumer re-checks. `number.long` is rejected rather than ignored, so
-// a cap is never quietly dropped either.
+// A union type rather than an optional `maxLength`, so the compiler
+// knows a string rule always has a limit. `number.long` is rejected
+// rather than ignored.
 export type PropRule =
   | { type: "string"; required: boolean; list: boolean; maxLength: number }
   | { type: "number" | "boolean"; required: boolean; list: boolean };
@@ -73,9 +63,8 @@ export type PropRule =
 export type ParsedRule =
   { ok: true; rule: PropRule } | { ok: false; error: string };
 
-// Pure: knows nothing about which prop or file the rule came from. The
-// caller prefixes that context, so one message shape serves both a
-// startup crash and a skipped-file report.
+// Doesn't know which prop or file the rule is from; the caller adds that
+// to the error message.
 export function parseRule(value: unknown): ParsedRule {
   if (typeof value !== "string") {
     return {
@@ -89,8 +78,8 @@ export function parseRule(value: unknown): ParsedRule {
   const [typeName, ...words] = value.split(".");
 
   if (typeName === undefined || !TYPE_NAMES.includes(typeName)) {
-    // The rule is quoted back only when it says more than the type
-    // itself — `unknown type "strng" in "strng"` reads like a bug.
+    // Only quote the whole rule when it is more than the type: `unknown
+    // type "strng" in "strng"` would look like a bug.
     const inRule = value === typeName ? "" : ` in ${JSON.stringify(value)}`;
     return {
       ok: false,
@@ -105,8 +94,8 @@ export function parseRule(value: unknown): ParsedRule {
   let shapeWord: string | undefined;
 
   for (const word of words) {
-    // Object.hasOwn, not `in`: otherwise "string.constructor" would
-    // find a match on the prototype and parse as a valid rule.
+    // Object.hasOwn, not `in`: with `in`, "string.constructor" would
+    // match a built-in object key and count as valid.
     if (Object.hasOwn(OPTIONALITY_WORDS, word)) {
       if (optionalityWord !== undefined) {
         return { ok: false, error: clash(value, optionalityWord, word) };
@@ -153,9 +142,8 @@ export function parseRule(value: unknown): ParsedRule {
         type: "string",
         required,
         list,
-        // Per value, not for the list as a whole — the cap exists to
-        // bound how much text one value can carry into the agent's
-        // context, and MAX_PROP_LIST_LENGTH bounds how many there are.
+        // The length limit applies to each value; MAX_PROP_LIST_LENGTH
+        // limits how many there are.
         maxLength: LENGTH_WORDS[lengthWord ?? "short"]!,
       },
     };

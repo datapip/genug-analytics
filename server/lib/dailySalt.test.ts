@@ -27,8 +27,8 @@ test("one salt for the whole day", (t) => {
   assert.equal(salts.saltFor(MONDAY), salts.saltFor(MONDAY_LATE));
 });
 
-// The point of the module: the old salt is not kept anywhere, so a
-// past day's hashes cannot be rebuilt.
+// The old salt isn't kept anywhere, so a past day's hashes can't be
+// recomputed.
 test("a new day gets a new salt, and the file no longer holds the old one", (t) => {
   const path = saltPath(t);
   const salts = createDailySalt(path, "UTC", MONDAY);
@@ -41,7 +41,8 @@ test("a new day gets a new salt, and the file no longer holds the old one", (t) 
   assert.ok(!stored.includes(monday));
 });
 
-// A deploy during the day must not split every visitor on the site.
+// A deploy during the day must keep the salt, or every visitor would
+// count twice.
 test("a restart on the same day keeps the salt", (t) => {
   const path = saltPath(t);
   const before = createDailySalt(path, "UTC", MONDAY).saltFor(MONDAY);
@@ -57,8 +58,8 @@ test("a restart on a later day does not reuse the stored salt", (t) => {
   assert.ok(!readFileSync(path, "utf8").includes(monday));
 });
 
-// A server stopped over midnight left yesterday's salt on disk. It goes
-// at start, not at the first event.
+// A server stopped over midnight left yesterday's salt on disk. It is
+// replaced at startup, not at the first event.
 test("starting on a later day replaces the stored salt before any event", (t) => {
   const path = saltPath(t);
   const monday = createDailySalt(path, "UTC", MONDAY).saltFor(MONDAY);
@@ -66,8 +67,8 @@ test("starting on a later day replaces the stored salt before any event", (t) =>
   assert.ok(!readFileSync(path, "utf8").includes(monday));
 });
 
-// The timer is what makes "replaced at midnight" true on a quiet site.
-// Delete it and every other test here still passes.
+// The timer replaces the salt at midnight even on a quiet site. Without
+// it, the other tests here would still pass.
 test("the salt rotates at midnight with no traffic", (t) => {
   t.mock.timers.enable({ apis: ["setInterval", "Date"], now: MONDAY_LATE });
   const path = saltPath(t);
@@ -82,8 +83,8 @@ test("the salt rotates at midnight with no traffic", (t) => {
   assert.match(stored, /"day":"UTC 2026-09-22"/);
 });
 
-// A full disk must not keep yesterday's salt on the volume: losing the
-// file only splits visitors on the next restart.
+// When the new salt can't be written (a full disk), the old one is still
+// deleted. Losing the file only counts visitors twice after a restart.
 test("a failed write deletes the old salt instead of leaving it", (t) => {
   const path = saltPath(t);
   const monday = createDailySalt(path, "UTC", MONDAY).saltFor(MONDAY);
@@ -97,13 +98,12 @@ test("a failed write deletes the old salt instead of leaving it", (t) => {
   try {
     stored = readFileSync(path, "utf8");
   } catch {
-    // Gone is the expected outcome.
+    // The file should be gone.
   }
   assert.ok(!stored.includes(monday));
 });
 
-// Random, not derived: two servers, or one server's two days, never
-// share a salt that some secret could reproduce.
+// Random, not computed from anything, so no secret can recreate it.
 test("two stores never produce the same salt", (t) => {
   const a = createDailySalt(saltPath(t), "UTC", MONDAY).saltFor(MONDAY);
   const b = createDailySalt(saltPath(t), "UTC", MONDAY).saltFor(MONDAY);
@@ -148,9 +148,8 @@ test("the file is readable by its owner only", (t) => {
   assert.equal(statSync(path).mode & 0o777, 0o600);
 });
 
-// The salt's day is the one every report is bucketed by. On UTC days a
-// Berlin visitor active across 01:00 local time was two visitors inside
-// one reported day; on the site's own day they stay one.
+// The salt changes at midnight in the site's time zone, like the days in
+// reports, so a visitor is one visitor per reported day.
 test("the day turns at the site's midnight, not UTC's", (t) => {
   const path = saltPath(t);
   const beforeUtcMidnight = new Date("2026-09-21T21:30:00Z"); // 23:30 Berlin
@@ -168,11 +167,10 @@ test("the day turns at the site's midnight, not UTC's", (t) => {
   );
 });
 
-// A label with only a date let a salt outlive its day: New York is
-// behind UTC, so a file written at 00:00 UTC carries a date that still
-// matches New York's next morning, and would have lived until New
-// York's midnight. An old date-only file, or one from another zone, is
-// replaced at start.
+// With only a date in the label, a salt could outlive its day: a file
+// written at 00:00 UTC has a date that still matches New York's next
+// morning. A file without a time zone, or from another zone, is replaced
+// at startup.
 test("a salt stored under another zone, or under no zone, is replaced at start", (t) => {
   const path = saltPath(t);
   const at = new Date("2026-09-22T12:00:00Z"); // the 22nd in New York too

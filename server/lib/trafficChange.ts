@@ -10,23 +10,23 @@ import {
   offsetMinutes,
 } from "./timezone.js";
 
-// "Did traffic really change, or is this noise?" The comparison itself
-// is a subtraction the agent can do; what it cannot do is tell 4 → 6
-// from 40 → 60. See "get_traffic_change" in docs/decisions.md for why
-// this exists after compare_periods was removed.
+// "Did traffic really change, or is this noise?" The agent can subtract
+// two numbers itself, but it can't tell whether 4 → 6 means anything,
+// while 40 → 60 might. See "get_traffic_change" in docs/decisions.md.
 
-// How many earlier copies of the period make up the baseline, and how
-// many must be usable for a verdict. Fewer than three gives a standard
-// deviation that means nothing.
+// How many earlier periods of the same length make up the baseline, and
+// how many must be usable for a verdict. With fewer than three, the
+// standard deviation means nothing.
 export const BASELINE_PERIODS = 4;
 const MIN_BASELINE_PERIODS = 3;
-// Below this on both sides there is no verdict. 4 → 6 is +50% and
-// means nothing; a minimum count is what keeps that out of a report.
+// Below this count on both sides there is no verdict: 4 → 6 is +50% but
+// means nothing.
 const MIN_COUNT = 10;
-// How far from the usual a count must be, in noise widths, to count.
+// How far from normal a count must be, in multiples of the noise, to
+// count as a change.
 const NOISE_WIDTHS = 2;
-// Capped so four baselines (31 days → 5 weeks apart) stay well inside
-// the default retention of 396 days.
+// The longest period accepted, so four baseline periods (31 days each,
+// 5 weeks apart) stay well inside the default retention of 396 days.
 export const MAX_CHANGE_DAYS = 31;
 
 const MINUTE_MS = 60 * 1000;
@@ -40,23 +40,23 @@ export type ChangeVerdict =
 
 export interface MetricChange {
   current: number;
-  // How many of the baseline periods this metric was judged against:
-  // those that start before its oldest stored row are left out.
+  // How many baseline periods this metric was compared with. Periods
+  // that start before its oldest stored row are left out.
   baselinePeriodsUsed: number;
   baselineMean: number | null;
   usualLow: number | null;
   usualHigh: number | null;
   change: number | null;
-  // Null when the baseline mean is zero: a rise from nothing has no
-  // percentage, and Infinity would serialize as null anyway.
+  // Null when the baseline average is zero: a rise from nothing has no
+  // percentage (and Infinity would become null in JSON anyway).
   changePct: number | null;
   verdict: ChangeVerdict;
 }
 
 export interface BaselinePeriod extends Period {
   weeksBack: number;
-  // Every stored row in the period, ignoring the segment. Zero means
-  // nothing was being collected, and the period is left out.
+  // All stored rows in the period, ignoring the segment. Zero means
+  // nothing was being collected, so the period is left out.
   rowsStored: number;
   sessions: number;
   viewEvents: number;
@@ -71,12 +71,11 @@ export interface TrafficChange {
   events?: MetricChange & { event: string };
 }
 
-// Moves an instant by whole local days, keeping its wall-clock time: a
-// Tuesday 10:00 becomes the Tuesday 10:00 a week earlier even when a
-// clock change lies between them. Subtracting 7 × 24 hours would land
-// an hour off. The time of day is measured from the nominal midnight,
-// not from localDayStart: in zones that change clocks at midnight a day
-// can start at 01:00, and measuring from there shifts by an hour.
+// Moves a time by whole local days, keeping the clock time: Tuesday
+// 10:00 becomes Tuesday 10:00 a week earlier, even across a clock change
+// (subtracting 7 × 24 hours would be an hour off). The time of day is
+// measured from 00:00, not from localDayStart: where clocks change at
+// midnight a day can start at 01:00, which would shift it by an hour.
 export function shiftDays(
   instant: number,
   days: number,
@@ -84,22 +83,23 @@ export function shiftDays(
 ): number {
   const date = localDate(instant, timezone);
   const target = addDays(date, days);
-  // A day's first instant maps to the target day's first instant, which
-  // need not be the same wall-clock time when either starts at 01:00.
+  // The start of a day maps to the start of the target day, which may be
+  // a different clock time if either day starts at 01:00.
   if (instant === localDayStart(date, timezone)) {
     return localDayStart(target, timezone);
   }
   const wall = instant + offsetMinutes(instant, timezone) * MINUTE_MS;
   const intoDay = wall - Date.parse(`${date}T00:00:00.000Z`);
   const targetWall = Date.parse(`${target}T00:00:00.000Z`) + intoDay;
-  // Wall clock back to an instant: the offset to subtract is the one in
-  // force at the answer, so take it at a first guess and again there.
+  // Convert the clock time back to a UTC time. The offset needed is the
+  // one at the result, so guess once, then take the offset there.
   const guess = targetWall - offsetMinutes(targetWall, timezone) * MINUTE_MS;
   return targetWall - offsetMinutes(guess, timezone) * MINUTE_MS;
 }
 
-// An inclusive end is shifted as the exclusive end it stands for, so a
-// bare date's 23:59:59.999 stays the last moment of the shifted day.
+// Shifts an inclusive end (like 23:59:59.999) by shifting the next
+// moment and subtracting 1 ms again, so it stays the last moment of the
+// shifted day.
 function shiftPeriod(period: Period, days: number, timezone: string): Period {
   const from = shiftDays(Date.parse(period.from), days, timezone);
   const to = shiftDays(Date.parse(period.to) + 1, days, timezone) - 1;
@@ -150,12 +150,11 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-// The verdict for one metric. Noise is the larger of two estimates:
-// sqrt(mean) is what counts arriving at random would show, and the
-// baseline's own spread catches real traffic being lumpier than that
-// (a shared link, a newsletter, a bot burst). Using only the first
-// flags too much; using only the second lets four lucky equal weeks
-// make the band zero wide.
+// The verdict for one metric. The noise is the larger of two estimates:
+// sqrt(mean), the variation of counts arriving at random, and the
+// baseline's actual spread, since real traffic is lumpier (a shared link,
+// a newsletter, a bot burst). The first alone flags too much; the second
+// alone would be zero after four equal weeks.
 export function judge(current: number, baseline: number[]): MetricChange {
   if (baseline.length < MIN_BASELINE_PERIODS) {
     return {
@@ -196,10 +195,10 @@ export function judge(current: number, baseline: number[]): MetricChange {
   };
 }
 
-// The period against the same span 1..BASELINE_PERIODS weeks earlier
-// (whole multiples of a week for a longer period), so the weekday mix
-// always matches. `clauseFor` resolves the segment per period, since an
-// entry-based condition depends on which sessions started in it.
+// Compares the period with the same span 1..BASELINE_PERIODS weeks
+// earlier (whole weeks apart for longer periods), so the weekdays always
+// match. `clauseFor` resolves the segment for each period, because an
+// entry-page condition depends on which sessions started in it.
 export function getTrafficChange(
   db: Database.Database,
   period: Period,
@@ -209,15 +208,17 @@ export function getTrafficChange(
   event: string | undefined,
   clauseFor: (period: Period) => SegmentClause,
 ): TrafficChange {
-  // A period still running is compared up to now, and each baseline up
-  // to the same local clock time, or "today so far" reads as a drop.
+  // A period that hasn't ended is compared up to now, and each baseline
+  // up to the same clock time; otherwise "today so far" would look like a
+  // drop.
   const cutAtNow = Date.parse(period.to) > now.getTime();
   const current: Period = cutAtNow
     ? { from: period.from, to: now.toISOString() }
     : period;
 
-  // The step comes from the whole period asked for, not the part before
-  // now: "this week so far" is still compared with earlier weeks.
+  // The distance between periods comes from the whole period asked for,
+  // not just the part until now, so "this week so far" is still compared
+  // with earlier weeks.
   const days = enumerateDays(period.from, period.to, timezone).length;
   const stepDays = Math.ceil(days / 7) * 7;
 
@@ -245,11 +246,11 @@ export function getTrafficChange(
     });
   }
 
-  // A baseline nobody was tracking would count as zeros, and any period
-  // would read as a rise. Two ways to spot one: it starts before the
-  // metric's oldest row (a new deployment, or rows deleted by
-  // retention), or nothing at all was stored in it (a stray test event
-  // months before the script went live, or weeks the snippet was gone).
+  // A baseline period when nothing was tracked would count as zeros, and
+  // every period would look like a rise. Such periods are left out when
+  // they start before the metric's oldest row (a new deployment, or rows
+  // deleted by retention) or have no stored rows at all (for example,
+  // weeks when the script was missing from the site).
   const usable = (oldest: string | null) =>
     baselinePeriods.filter(
       (b) => oldest !== null && b.from >= oldest && b.rowsStored > 0,

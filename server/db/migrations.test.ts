@@ -144,9 +144,8 @@ test("migrate creates a NOT NULL consent_mode column on events", () => {
   }[];
   const consentMode = columns.find((c) => c.name === "consent_mode");
   assert.ok(consentMode);
-  // Every row has a consent mode — an event that says nothing about
-  // consent is consentless, not unknown. Enforcing it here is what lets
-  // getConsentBreakdown report exactly two buckets.
+  // Every row has a consent mode, so getConsentBreakdown has exactly two
+  // groups.
   assert.equal(consentMode.notnull, 1, "consent_mode should be NOT NULL");
 });
 
@@ -157,9 +156,8 @@ test("migrate is safe to call twice — the second call is a no-op", () => {
   assert.equal(db.pragma("user_version", { simple: true }), migrations.length);
 });
 
-// Every live database was created at version 1, with rows in it. The
-// column has to arrive on those, and arrive empty: NULL is what tells a
-// row from before the lookup apart from one it found nothing for.
+// Existing databases get the country column with NULL in every row:
+// NULL means "not looked up", unlike ZZ, "looked up, not found".
 test("a version-1 database gains an empty country column and keeps its rows", () => {
   const db = new Database(":memory:");
   runMigrations(db, migrations.slice(0, 1));
@@ -183,11 +181,9 @@ test("a version-1 database gains an empty country column and keeps its rows", ()
   assert.deepEqual(rows, [{ visitor_id: "visitor-1", country: null }]);
 });
 
-// Every event-type-plus-period query depends on this composite index,
-// and an index is the kind of thing that can be
-// dropped by accident while the queries still return correct results —
-// just slowly. Pinning it means that regression fails a test rather
-// than quietly becoming a performance problem later.
+// Every query by event type and period needs this index. Without it the
+// results are still right, only slow, so nothing else would notice it
+// missing.
 test("migrate creates the (event, ts) composite index", () => {
   const db = new Database(":memory:");
   migrate(db);
@@ -222,8 +218,8 @@ test("runMigrations only runs migrations after the database's current version", 
     },
   ];
 
-  // Pretend this database already went through migration 0 — e.g. an
-  // existing production database seeing migration 1 for the first time.
+  // As if this database already ran migration 0, like an existing one
+  // getting migration 1 for the first time.
   db.pragma("user_version = 1");
 
   runMigrations(db, fakeMigrations);
@@ -254,8 +250,8 @@ test("runMigrations runs every migration in order on a brand-new database", () =
   assert.equal(db.pragma("user_version", { simple: true }), 2);
 });
 
-// Pinning an older image tag is an ordinary user action once tags are
-// published, and the version number is the only thing that can notice.
+// Going back to an older image is common, and only the version number
+// can tell that the database is newer than the code.
 test("runMigrations refuses a database written by a newer build", () => {
   const db = new Database(":memory:");
   const ran: number[] = [];

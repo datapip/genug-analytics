@@ -1,21 +1,18 @@
 import type Database from "better-sqlite3";
 
-// Raw event rows, newest first — for spot-checking that tracking works
-// at all, not for analysis. Sibling of rejectedEvents.ts: both list raw
-// rows rather than aggregating them, and mcp/diagnostics.ts exposes the
-// pair together.
+// The latest stored events, newest first, for checking that tracking
+// works, not for analysis. mcp/diagnostics.ts offers it together with
+// rejectedEvents.ts, which lists rejected requests the same way.
 
 export interface RecentEvent {
   event: string;
   url: string;
   ts: string;
   props: unknown;
-  // The envelope fields a spot check is actually about: "are these two
-  // hits one session", "did the consent banner switch modes", "did the
-  // referrer survive". All of it already reaches the agent through the
-  // aggregates — except visitor_id, which stays out: delete_visitor_data
-  // treats an id read from a tool result as untrusted, and not returning
-  // one is the simplest way to keep that true.
+  // The fields a spot check needs: are these two events one session, did
+  // the consent mode switch, did the referrer arrive. visitor_id is left
+  // out on purpose: delete_visitor_data must not trust an id taken from a
+  // tool result, and never returning one keeps it that way.
   sessionId: string;
   consentMode: string;
   referrer: string | null;
@@ -23,17 +20,16 @@ export interface RecentEvent {
   browser: string | null;
 }
 
-// How much serialized JSON one answer may carry. A row's size is
-// already bounded — every string prop is capped, and a whole event by
-// the 16KB request body — but 100 rows at that bound is ~1.6MB, far past
-// any model's context. 64K characters still fits 100 ordinary rows
-// (~500 characters each) and at least four of the largest possible ones.
+// The most JSON one answer may contain. Each row is at most about 16KB
+// (the request size limit), but 100 such rows would be ~1.6MB, far more
+// than an agent can read. 64K characters fits 100 normal rows (~500
+// characters each) or at least four of the largest possible ones.
 export const MAX_RECENT_EVENTS_CHARS = 64_000;
 
 export interface RecentEvents {
   rows: RecentEvent[];
-  // True when rows were dropped to stay inside the budget, so fewer came
-  // back than `limit` asked for even though more exist.
+  // True when rows were left out to stay under the size limit, so fewer
+  // came back than `limit` asked for although more exist.
   truncated: boolean;
 }
 
@@ -74,8 +70,8 @@ export function getRecentEvents(
     browser: row.browser,
   }));
 
-  // Always keep the newest row, so a single oversized one still comes
-  // back rather than an empty list that reads as "no traffic".
+  // Always keep the newest row, even if it alone is too big: an empty
+  // list would read as "no traffic".
   let chars = 0;
   for (let i = 0; i < events.length; i++) {
     chars += JSON.stringify(events[i]).length + 1;

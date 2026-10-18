@@ -24,9 +24,8 @@ test("newestTag ignores tags at or behind the current version", () => {
   assert.equal(newestTag(["v0.6.0", "v0.5.0"], [0, 6, 0]), null);
 });
 
-// The repo's tags list can hold anything that isn't a release
-// (a branch-shaped or malformed name) — parseVersion filters those
-// out rather than newestTag having to know the shape twice.
+// The repo's tags may include names that aren't releases; parseVersion
+// filters them out.
 test("newestTag skips tag names that aren't release versions", () => {
   assert.equal(newestTag(["not-a-version", "v0.6.0"], [0, 6, 0]), null);
 });

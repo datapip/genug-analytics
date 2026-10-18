@@ -75,10 +75,8 @@ test("insertEvent stores consentMode when given", () => {
   assert.equal(row.consent_mode, "consentful");
 });
 
-// There is no third "unknown" consent state: the envelope's own consent
-// field defaults to false, so an event that says nothing about consent
-// was not collected with consent. The column is NOT NULL to keep that
-// true at the storage layer, not just by convention.
+// A stored row is either with or without consent, never unknown. The
+// column is NOT NULL, so the database enforces that.
 test("insertEvent stores consentless when no consent mode is given", () => {
   const db = setupDb();
   insertEvent(db, {

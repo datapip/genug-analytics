@@ -40,9 +40,7 @@ test("creates the directory if it does not exist yet", () => {
   );
 });
 
-// Refused, not truncated: unlike a file that grew stale after the cap
-// changed under it, a save from the cockpit has someone right there to
-// shorten the text instead.
+// Refused, not cut short: the owner is at the form and can shorten it.
 test("refuses a save over the byte cap and writes nothing", () => {
   const dir = emptyDir();
   const tooBig = "x".repeat(MAX_PROSE_FIELD_BYTES + 1);
@@ -53,14 +51,12 @@ test("refuses a save over the byte cap and writes nothing", () => {
   assert.throws(() => readFileSync(join(dir, "ground-rules.md"), "utf8"));
 });
 
-// The cap is measured in bytes, not JS string length — a multi-byte
-// character would let a save through that the agent's document then
-// truncates mid-character at render time.
+// The limit is in bytes, not JavaScript string length; otherwise
+// characters of several bytes would let too much text through.
 test("measures the cap in UTF-8 bytes, not characters", () => {
   const dir = emptyDir();
-  // Each "€" is 3 bytes but 1 character: half the cap in character
-  // count is 1.5x the cap in bytes. A .length check would wrongly let
-  // this through; Buffer.byteLength must not.
+  // Each "€" is 3 bytes but 1 character, so this is half the limit in
+  // characters but 1.5 times it in bytes.
   const text = "€".repeat(MAX_PROSE_FIELD_BYTES / 2);
 
   const result = writeGroundRules(text, dir);

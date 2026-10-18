@@ -14,8 +14,8 @@ import {
 import { buildSegment } from "./segment.js";
 import { normalizePeriodBound } from "./period.js";
 
-// The bucketed shapes gained `visitors`; the older assertions here are
-// about the other three numbers, and a dedicated test below pins visitors.
+// Leaves out `visitors`, so these tests check the other three numbers;
+// a separate test below checks visitors.
 function withoutVisitors<T extends { visitors: number }>(rows: T[]) {
   return rows.map((row) =>
     Object.fromEntries(
@@ -222,7 +222,7 @@ test("getTrafficByDayOfWeek groups by weekday (Monday-first), summed across ever
       props: {},
     });
   }
-  // A second Monday — proves counts sum across weeks, not per-week.
+  // A second Monday: counts add up across weeks.
   insertEvent(db, {
     event: "page_view",
     visitorId: "v8",
@@ -376,10 +376,8 @@ test("getSessionSummary returns zeroes for a period with no events", () => {
   });
 });
 
-// A session is measured over its full length, not the part inside the
-// period — and belongs to the period it started in. Before, both
-// sessions here were clipped to the window: s1 (started the day
-// before) showed up as a 5-minute session and s2 as a 10-minute one.
+// A session is measured over its full length, not only the part inside
+// the period, and belongs to the period it started in.
 test("getSessionSummary measures sessions that started in the period over their full length", () => {
   const db = setupDb();
   // s1: began before the period — not this period's session at all.
@@ -461,9 +459,8 @@ test("getTrafficSummary and getTrafficByDay count distinct visitors", () => {
     [1, 1],
   );
 
-  // The two columns must not be interchangeable. Every other fixture in
-  // this file maps one visitor to one session, so counting visitors
-  // where the field says sessions passed everything.
+  // Visitors and sessions must differ here. The other tests have one
+  // session per visitor, so they couldn't tell the two apart.
   assert.equal(getTrafficSummary(db, period, "page_view").sessions, 3);
   assert.deepEqual(
     getTrafficByDay(db, period, "page_view", "UTC").map((row) => row.sessions),
@@ -471,9 +468,8 @@ test("getTrafficSummary and getTrafficByDay count distinct visitors", () => {
   );
 });
 
-// Same discriminating shape for the two bucketed queries, where neither
-// column was pinned against the other at all. One visitor, three
-// sessions, deliberately in three different hours on two weekdays.
+// The same for the per-weekday and per-hour queries: one visitor, three
+// sessions, in three different hours on two weekdays.
 test("getTrafficByHour and getTrafficByDayOfWeek count sessions, not visitors", () => {
   const db = setupDb();
   for (const [session, ts] of [
@@ -587,9 +583,8 @@ const BERLIN_PERIOD = {
   to: "2026-10-26T22:59:59.999Z",
 };
 
-// The invariant that catches a bad span: an overlap would count a row
-// twice, a gap would drop it, and a bucket the day list doesn't know
-// would vanish from the zero-filled result. Any of them breaks the sum.
+// Every row must be counted exactly once: overlapping time spans would
+// count a row twice, a gap would drop it. Either breaks the sum.
 test("getTrafficByDay in a zone with a clock change: local days, every row counted once", () => {
   const db = berlinClockChangeDb();
   const byDay = getTrafficByDay(
@@ -649,8 +644,9 @@ test("getTrafficByDayOfWeek in a zone buckets by the local weekday", () => {
   assert.equal(views.Tuesday, 0);
 });
 
-// The spans join adds columns to the outer query; a segment clause pasted
-// after it names events' columns unqualified and must still resolve.
+// The time-span join adds columns to the query; a segment condition
+// added after it uses event columns without a table name and must still
+// work.
 test("a segment still narrows the zone-bucketed queries", () => {
   const db = berlinClockChangeDb();
   const mobile = buildSegment(
@@ -672,10 +668,9 @@ test("a segment still narrows the zone-bucketed queries", () => {
   );
 });
 
-// The spans are found between the first and last stored rows, not the
-// bounds asked for. Bounds a whole year wide around the same rows must
-// give the same answer — a "simplification" to the bounds' offsets
-// would put the 25-hour day's last hour on the wrong date.
+// The time spans are found between the first and last stored rows, not
+// the requested bounds. A period a year wider around the same rows must
+// give the same answer.
 test("wide bounds around a clock change bucket the same as tight ones", () => {
   const db = berlinClockChangeDb();
   const wide = {

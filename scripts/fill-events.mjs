@@ -1,22 +1,20 @@
-// Fills an events table with synthetic rows, so query time can be
-// measured against a database the size a deployment will actually reach.
-// Ingest throughput is scripts/load-events.mjs's job — this one only
-// cares how big the table is when a question is asked of it, so it
-// writes rows directly, in one transaction per batch.
+// Fills the events table with made-up rows, so query speed can be
+// measured on a database as big as a real one gets. (Measuring how fast
+// events are accepted is scripts/load-events.mjs's job.) It writes rows
+// directly, in one transaction per batch.
 //
 //   node scripts/fill-events.mjs ./genug.db 1000000
 //
-// Point it at a database the server has already created (it needs the
-// schema, and writes nothing else), with the server stopped. Keep the
-// result as a pristine copy and restore it before each measurement:
-// load-events.mjs writes rows timestamped now, so one run leaves every
-// later window measurement reading its leftovers rather than this fill.
+// Use a database the server has already created (it needs the tables),
+// with the server stopped. Keep the result as a clean copy and restore it
+// before each measurement: load-events.mjs writes rows dated now, which
+// would distort later measurements.
 //
-// The rows are plausible rather than real: page views, outbound clicks
-// and orders spread over a year, with a handful of pages, referrers,
-// devices and languages. order_completed is not a built-in event. Add
-// it as docs/recipe-add-event.md shows before querying, or the cockpit
-// and get_orphaned_events report its rows as stranded.
+// The rows look realistic: page views, outbound clicks and orders spread
+// over a year, with a few pages, referrers, devices and languages.
+// order_completed is not a built-in event. Add it as
+// docs/recipe-add-event.md shows before querying, or the cockpit and
+// get_orphaned_events report its rows as orphaned.
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -54,8 +52,8 @@ const REFERRERS = [
 const DEVICES = ["desktop", "mobile", "tablet"];
 const BROWSERS = ["Chrome", "Safari", "Firefox", "Edge"];
 const LANGS = ["en", "de", "fr", "en"];
-// A tenth of the traffic is a conversion-shaped event with props worth
-// summing, because several queries only touch those rows.
+// A tenth of the rows are orders with a value to sum, because several
+// queries only read those.
 const EVENTS = [
   "page_view",
   "page_view",

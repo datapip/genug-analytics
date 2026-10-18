@@ -29,9 +29,8 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   }
 }
 
-// A copy that would fill the disk leaves the live database no room to
-// write, so it is skipped with a reason, and nothing half-written is
-// left behind to fill it anyway.
+// A copy that would fill the disk is skipped with a reason, and nothing
+// half-written is left behind.
 test("runBackup skips a copy the disk has no room for", async () => {
   await withTempDir(async (dir) => {
     const db = new Database(":memory:");
@@ -46,9 +45,8 @@ test("runBackup skips a copy the disk has no room for", async () => {
   });
 });
 
-// The other half of that: expired copies still go when today's is
-// skipped. Pruning only after a successful copy would keep a full disk
-// full, its oldest week never freed.
+// Old copies are still deleted when today's is skipped; otherwise a full
+// disk would stay full.
 test("runBackup prunes expired copies even when it skips today's", async () => {
   await withTempDir(async (dir) => {
     const db = new Database(":memory:");
@@ -118,9 +116,8 @@ test("pruneOldBackups deletes only backup files older than 7 days", async () => 
   });
 });
 
-// The database survives a lost volume and its schemas do not, which
-// leaves a table full of events nothing can describe any more — the
-// data without the vocabulary.
+// The event files are backed up too, or a restore would bring back the
+// events without their definitions.
 test("runBackup copies the event schema directory beside the database", async () => {
   await withTempDir(async (dir) => {
     const db = new Database(":memory:");
@@ -150,13 +147,10 @@ test("runBackup copies the event schema directory beside the database", async ()
   });
 });
 
-// Both directories at once, which the events test above cannot check.
-// runBackup takes them as two optional parameters of the same shape, so
-// swapping them at a call site is invisible: every other test here
-// passes one, and would stay green either way. The restore that matters
-// is the history log — nothing can re-create an owner's record of what
-// happened to their own site — so it landing under the right name is
-// worth pinning.
+// Both folders at once. runBackup takes them as two optional parameters
+// of the same type, so swapping them wouldn't be noticed by tests that
+// pass only one. The history log matters most, since nothing else can
+// re-create it.
 test("runBackup copies the events and context directories to their own names", async () => {
   await withTempDir(async (dir) => {
     const db = new Database(":memory:");
@@ -213,8 +207,8 @@ test("runBackup still backs up the database when there is no events directory", 
   });
 });
 
-// unlink cannot remove a directory, so before the events copy existed
-// this loop only ever had files to delete.
+// Old backups include folders (the event files), which must be deleted
+// too.
 test("pruneOldBackups deletes an expired events directory, not just files", async () => {
   await withTempDir(async (dir) => {
     const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);

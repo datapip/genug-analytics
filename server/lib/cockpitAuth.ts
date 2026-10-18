@@ -19,22 +19,21 @@ import {
   type FailedAttemptLimiter,
 } from "./rateLimit.js";
 
-// Tighter than the /events limiter, and counted per failed attempt
-// rather than per request: a person typing the password wrong a few
-// times is fine, a script working through a wordlist is not.
+// Stricter than the /events limit, and counting failed attempts only: a
+// person mistyping the password a few times is fine, a script trying a
+// list of passwords is not.
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 
-// One budget for every place the cockpit password is typed: the sign-in
-// here and the two danger-zone confirmations in routes/cockpit/danger.ts. A
-// session cookie is not the password, so without this a stolen cookie
-// could test guesses at full speed against a confirmation box and come
-// away with the password itself. Shared, so ten wrong guesses anywhere
-// lock both doors.
+// One shared limit for every place the cockpit password is typed: the
+// sign-in here and the two danger-zone confirmations in
+// routes/cockpit/danger.ts. Otherwise someone with a stolen session
+// cookie could guess the password at full speed in a confirmation box.
+// Ten wrong guesses anywhere block all of them.
 export const cockpitPasswordLimiter: FailedAttemptLimiter =
   createFailedAttemptLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
 
-// The refusal a locked-out address gets, wherever it typed the password.
+// The response for a blocked address, wherever it typed the password.
 export function refuseLockedOut(
   limiter: FailedAttemptLimiter,
   ip: string,
@@ -53,26 +52,23 @@ export function refuseLockedOut(
   return true;
 }
 
-// Where a browser with no session is sent, as a constant. Never built
-// from anything on the request: a login page that redirects onward to an
-// address someone else chose is how a password ends up typed into
-// somebody's copy of this page.
+// Where a browser without a session is sent. A fixed value, never taken
+// from the request: a sign-in page that redirects wherever a link says
+// can send the owner to a fake copy of the page that collects the
+// password.
 export const LOGIN_PATH = "/cockpit/login.html";
 
-// The only paths this server answers under /cockpit without a session.
-// Exact strings, matched against req.path — no prefixes, no patterns,
-// because every "starts with" here is one path-traversal trick away from
-// being a hole. Express does not percent-decode req.path while
-// express.static does, so an encoded spelling like /cockpit%2Ecss simply
-// misses the set and gets a 401: this fails closed, which is the right
-// direction to fail.
+// The only paths under /cockpit served without a session. Exact strings
+// compared with req.path, no prefixes or patterns, because a "starts
+// with" rule is easy to get around with tricks like "../". req.path is
+// not percent-decoded (express.static decodes), so an encoded spelling
+// like /cockpit%2Ecss doesn't match and gets a 401, which is the safe
+// way to fail.
 //
-// These files are the login page and what it needs to look like a page.
-// They are markup, stylesheet, a ten-line theme switch and an icon
-// shipped in a public image — there is no deployment's data in any of
-// them. The cockpit's own index.html is deliberately *not* here, so
-// "the shell is public" never becomes something a later change quietly
-// relies on.
+// These are the sign-in page and the files it needs: markup, the
+// stylesheet, a small theme switch and an icon. They are public in the
+// image anyway and contain no data. The cockpit's index.html is
+// deliberately not on the list.
 const PUBLIC_GETS = new Set([
   "/login.html",
   "/login.js",
@@ -83,22 +79,20 @@ const PUBLIC_GETS = new Set([
 
 const SESSION_ROUTE = "/session";
 
-// A cookie the browser sends back to /cockpit and nowhere else. Path
-// keeps the owner's session off /events, which is public, CORS-enabled
-// and by far the busiest thing here.
+// The session cookie, sent by the browser to /cockpit only. Its path
+// keeps the session away from /events, which is public and the busiest
+// route.
 //
-// SameSite=Lax rather than Strict: Lax already withholds the cookie from
-// every cross-site POST/PUT/DELETE, which is every write this router
-// has, while Strict would additionally drop it on an ordinary link —
-// opening the cockpit from a bookmark in a chat window would land on the
-// login page with a live session sitting unused in the browser.
+// SameSite=Lax rather than Strict: Lax already stops the cookie on
+// cross-site POST/PUT/DELETE, which covers every write. Strict would
+// also drop it when following a normal link, so opening the cockpit from
+// a link in a chat would show the sign-in page although a session exists.
 //
-// Secure unconditionally, matching the visitor cookie in routes/events.ts
-// rather than reading req.secure, which is only as true as TRUST_PROXY
-// says it is and defaults to not trusting anything. Browsers treat
-// http://localhost as a secure context, so a local run still works; a
-// LAN address over plain http does not, and the login page says so
-// rather than leaving it to read as a wrong password.
+// Always Secure, like the visitor cookie in routes/events.ts, rather than
+// depending on req.secure (which depends on TRUST_PROXY). Browsers treat
+// http://localhost as secure, so a local run works. A LAN address over
+// plain http doesn't, and the sign-in page says so instead of it looking
+// like a wrong password.
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
@@ -106,22 +100,20 @@ const COOKIE_OPTIONS = {
   path: "/cockpit",
 } as const;
 
-// Cleared on logout. Module-level, per process, and reset by a restart —
-// the same shape and the same caveat as the failed-attempt limiter next
-// door. It makes the button mean what it says for as long as the server
-// is up, without a session store to migrate and empty on every redeploy.
+// The time of the last sign-out: tokens issued before it are refused. Kept
+// in memory, so a restart resets it (like the failed-attempt limit).
 //
-// One password means one owner, so this signs out every browser at once.
-// That is the honest behaviour for a tool with a single credential: the
-// reason to press it is that a copy is somewhere it should not be.
+// There is one password and one owner, so signing out signs out every
+// browser. The usual reason to sign out is that a session might be
+// somewhere it shouldn't be.
 let sessionsIssuedBefore = 0;
 
-// The per-IP lockout above cannot stop someone holding a stolen cookie:
-// they can send guesses from many addresses. The session is the one
-// thing they cannot rotate. So this many wrong confirmations in a row,
-// from anywhere, signs every browser out. Only a session reaches the
-// confirmation boxes, so a stranger cannot use this to lock the owner
-// out. The owner mistyping five times just signs in again.
+// The per-address lockout can't stop someone with a stolen cookie, who
+// can guess from many addresses. But they can't change the session. So
+// this many wrong confirmations in a row, from anywhere, sign every
+// browser out. Only a signed-in browser can reach the confirmation boxes,
+// so a stranger can't use this against the owner. If the owner mistypes
+// five times, they just sign in again.
 const MAX_CONFIRMATION_FAILURES = 5;
 let confirmationFailures = 0;
 
@@ -139,18 +131,17 @@ export function clearConfirmationFailures(): void {
 }
 
 export interface CockpitAuth {
-  // Mounted before the gate: the two routes a browser reaches without a
-  // session yet, or on the way out.
+  // Before the session check: signing in and signing out must work
+  // without a valid session.
   router: Router;
   // Everything else under /cockpit.
   requireSession: (req: Request, res: Response, next: NextFunction) => void;
 }
 
-// `password` is required rather than optional, so there is no way to end
-// up with an open cockpit: it serves recent event URLs and raw props —
-// where order ids and other business data live — at an entirely
-// predictable hostname. loadConfig (lib/config.ts) fails fast at
-// startup when COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
+// `password` is required, so the cockpit can never be left open: it
+// shows recent URLs and props, which can contain order ids and other
+// business data. loadConfig (lib/config.ts) stops the server when
+// COCKPIT_PASSWORD is unset, as for MCP_API_KEY.
 export function createCockpitAuth(
   password: string,
   sessionSalt: Buffer,
@@ -159,16 +150,15 @@ export function createCockpitAuth(
   const key = deriveSessionKey(password, sessionSalt);
   const router = Router();
 
-  // 1 KB. This is the only unauthenticated POST this server has outside
-  // /events, and nothing legitimate sends more than a password.
+  // 1 KB: apart from /events this is the only POST without a session,
+  // and it only needs to carry a password.
   router.post(SESSION_ROUTE, json({ limit: "1kb" }), (req, res) => {
     const ip = req.ip ?? "unknown";
     if (refuseLockedOut(limiter, ip, res)) return;
 
-    // The same header every other write on this router requires. Belt
-    // and braces beside SameSite: a login a stranger's page can trigger
-    // is not an account takeover here, but it can log the owner into a
-    // session of someone else's choosing, and refusing it costs a line.
+    // The same header every cockpit write requires, in addition to
+    // SameSite. Otherwise another site could submit a sign-in form in the
+    // owner's browser.
     if (req.get("x-genug-cockpit") !== "1") {
       res.status(400).json({
         ok: false,
@@ -183,10 +173,7 @@ export function createCockpitAuth(
         ? (body as { password: unknown }).password
         : undefined;
 
-    // Every request here carries a guess, unlike the Basic Auth
-    // handshake this replaced — where a browser's first, credential-less
-    // request was not an attempt at anything and counting it spent the
-    // budget on nobody's guesses. So each failure counts, no exception.
+    // Every request here contains a guess, so every failure counts.
     if (
       typeof supplied !== "string" ||
       !timingSafeStringEqual(supplied, password)
@@ -203,19 +190,15 @@ export function createCockpitAuth(
     res.json({ ok: true });
   });
 
-  // Reachable without a session, so a stale tab can still sign out. But
-  // only a live session sent from the cockpit itself moves the watermark
-  // that signs out every browser: it is global, and when anyone could
-  // move it, a curl loop — or a hidden form on any page — kept the owner
-  // out of the cockpit for as long as it ran. Anyone else just has their
-  // own cookie cleared. Clearing has to repeat the options the cookie was
-  // set with — a clearCookie that disagrees about path or sameSite
-  // silently clears nothing, and the owner is left believing they logged
-  // out.
+  // Works without a session, so an old tab can still sign out. But only a
+  // valid session, sent from the cockpit itself, signs out every browser.
+  // Otherwise anyone (a script, or a hidden form on another site) could
+  // keep the owner signed out. Other requests only clear their own
+  // cookie. Clearing must use the same options the cookie was set with,
+  // or the browser keeps it and the owner wrongly thinks they signed out.
   //
-  // `revoked` says which of the two happened. The reason to press the
-  // button is often that a copy leaked, so a stale tab must not be told
-  // it signed out every browser when it did not.
+  // `revoked` says whether every browser was signed out, so an old tab
+  // isn't told it signed out everyone when it didn't.
   router.post("/logout", (req, res) => {
     const token = parseCookies(req.headers.cookie)[COCKPIT_SESSION_COOKIE];
     const session = verifySessionToken(token, key);
@@ -248,15 +231,13 @@ export function createCockpitAuth(
       return;
     }
 
-    // Sec-Fetch-Dest, not Accept. A browser typing the address in sends
-    // "document" and wants the login page; cockpit.js's fetch() sends
-    // "empty" and wants a status code it can act on. Accept looks like
-    // the obvious test and is the wrong one — fetch sends `*/*`, which
-    // matches text/html, so every JSON call would be answered with the
-    // login page's HTML and surface as a parse error.
+    // Check Sec-Fetch-Dest, not Accept. Opening the address in the
+    // browser sends "document" and should get the sign-in page;
+    // cockpit.js's fetch() sends "empty" and needs a status code. Accept
+    // doesn't work: fetch sends `*/*`, which matches text/html, so JSON
+    // requests would get the sign-in page's HTML.
     //
-    // Anything that sends neither header — curl, a monitor — gets the
-    // 401, which is the safer default of the two.
+    // Clients that send neither (curl, a monitor) get the 401.
     if (req.get("sec-fetch-dest") === "document") {
       res.redirect(LOGIN_PATH);
       return;
@@ -268,9 +249,9 @@ export function createCockpitAuth(
   return { router, requireSession };
 }
 
-// Only for tests: the logout timestamp above outlives a single
-// createCockpitAuth call, so one test's logout would otherwise invalidate
-// the sessions every later test issues.
+// Only for tests: the sign-out time above is shared by all
+// createCockpitAuth calls, so one test's sign-out would otherwise
+// invalidate the sessions of every later test.
 export function resetSessionRevocationForTests(): void {
   sessionsIssuedBefore = 0;
   confirmationFailures = 0;

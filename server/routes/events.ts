@@ -33,58 +33,49 @@ import type { CountryTable } from "../lib/country.js";
 import type { DiskGuard } from "../lib/diskSpace.js";
 
 const VISITOR_ID_COOKIE = "genug_vid";
-// 13 months — the ceiling CNIL treats as the maximum life for an
-// analytics identifier. Chrome would allow 400 days; the shorter one is
-// what's defensible for the EU deployments this is built for. Counted
-// from the last explicit consent, since only that sets it again
-// (lib/identity.ts).
+// 13 months: the longest life the French regulator CNIL accepts for an
+// analytics identifier. Chrome would allow 400 days, but 13 months is
+// the safer choice in the EU. Counted from the last explicit consent,
+// since only that sets the cookie again (lib/identity.ts).
 const VISITOR_ID_COOKIE_MAX_AGE_MS = 396 * 24 * 60 * 60 * 1000;
-// One object for setting and for clearing: a clear only removes the
-// cookie the browser actually holds if its attributes match the ones it
-// was set with, so these must not be allowed to drift apart.
+// The same options for setting and for clearing the cookie: the browser
+// only deletes it if the options match the ones it was set with.
 const VISITOR_ID_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
   sameSite: "lax",
 } as const;
 
-// How each role is written in an event file, so a deployment reading the
-// rejection knows exactly which key to add. Kept here rather than
-// exported from the registry: it exists only to word this one message.
+// How each role is written in an event file, so the rejection message
+// can say exactly which key to add.
 const AUTO_ROLE_TAG_KEYS: Record<string, string> = {
   pageView: "pageView",
   outboundClick: "automaticOutboundClick",
   fileDownload: "automaticFileDownload",
 };
 
-// The prop each automatic link event puts the clicked URL in. Fixed by
-// the client script, not by the event file, which is why it can live here.
+// The prop in which each automatic link event sends the clicked URL.
+// The client script decides these names, not the event file.
 const ROLE_URL_PROPS: Record<string, string> = {
   outboundClick: "target_url",
   fileDownload: "file_url",
 };
 
-// Plain boolean, not a type predicate: event names come from JSON files
-// read at startup, so `EventType` is `string` and narrowing to it would
-// say nothing. The runtime check is the real one either way, and it has
-// to be — hasOwnProperty rather than `in`, because `in` also matches
-// inherited Object.prototype keys ("constructor", "toString"), which
-// would look up a registry entry that isn't an event at all.
+// Returns a plain boolean, not a type predicate: event names come from
+// JSON files, so the type is just `string`. Uses hasOwnProperty rather
+// than `in`, because `in` also matches built-in object keys such as
+// "constructor" and "toString", which aren't events.
 function isKnownEventType(event: string): boolean {
   return Object.prototype.hasOwnProperty.call(eventRegistry, event);
 }
 
-// A short "path: message" summary of the first failing issue — e.g.
-// "props.value: Expected number, received string" — so a rejected
-// request leaves behind more than just "this happened N times" (see
-// get_top_rejected_events). Only the first issue, not every one: this is
-// a diagnostic hint for a human/agent skimming rejection counts, not a
-// full validation report.
-// Capped, because the message can embed the offending input: a Zod
-// `unrecognized_keys` issue names the key, so a 12,000-character prop
-// key produced a 12,000-character detail row. That defeats the point of
-// the envelope's own length caps, and this value is handed to the AI
-// agent verbatim by get_top_rejected_events.
+// A short "path: message" summary of the first validation problem, such
+// as "props.value: Expected number, received string", so a rejection
+// says why (see get_top_rejected_events). Only the first problem: it is
+// a hint, not a full report.
+// Length-limited, because the message can contain the sender's input
+// (an unknown key's name, for example), and get_top_rejected_events
+// shows it to the agent as it is.
 const MAX_DETAIL_LENGTH = 200;
 
 function firstIssueDetail(error: ZodError): string {
@@ -93,12 +84,10 @@ function firstIssueDetail(error: ZodError): string {
   return `${path}: ${issue.message}`.slice(0, MAX_DETAIL_LENGTH);
 }
 
-// Only a locale-shaped token is stored (BCP 47: "en", "en-US",
-// "zh-Hant-TW"). The header is visitor-written text, read back by
-// get_top_languages and now also a segment condition; without this it
-// was the one envelope field with no cap at all, bounded only by Node's
-// header limit, while the raw User-Agent is dropped for exactly the
-// singling-out reason. Anything else is treated as no header.
+// Only a language tag is stored (BCP 47: "en", "en-US", "zh-Hant-TW").
+// The header is text the visitor's browser sends, and get_top_languages
+// shows it to the agent, so anything else is treated as if there were
+// no header.
 const LOCALE_TAG = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 function parsePrimaryLanguage(
@@ -108,11 +97,11 @@ function parsePrimaryLanguage(
   return token && LOCALE_TAG.test(token) ? token : undefined;
 }
 
-// Known origins only, never a wildcard/reflect-any-origin policy (see
-// Deployment model docs). The requesting origin is echoed back rather
-// than a fixed configured value, because with more than one allowed
-// origin the header has to name the one actually asking — which is also
-// what makes `Vary: Origin` below load-bearing rather than tidiness.
+// Only the listed origins are allowed, never "*" or any origin that
+// asks. The response names the origin that asked, because with several
+// allowed origins the header must name the one making the request. That
+// is also why `Vary: Origin` below is needed: caches must keep one
+// answer per origin.
 function cors(
   allowedOrigins: ReadonlySet<string>,
   req: Request,
@@ -123,21 +112,19 @@ function cors(
   if (origin !== undefined && allowedOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    // Requests carry cookies by default (sendBeacon always; the fetch
-    // fallback via credentials: "include") — the browser requires this
-    // whenever Allow-Origin names a specific origin rather than "*".
+    // Requests carry cookies (sendBeacon always does; the fetch fallback
+    // uses credentials: "include"), and the browser requires this header
+    // for that.
     res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Methods", "POST");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    // Every event is a cross-origin POST sending application/json, which
-    // is not a CORS-safelisted content type — so the browser preflights
-    // each one. Without this header it caches that preflight for about
-    // five seconds, making a visitor's every event two round trips
-    // instead of one. Browsers clamp the value to their own ceiling
-    // (Chrome 2 hours, Firefox 24), so this asks for the longest any of
-    // them will grant rather than a number picked to mean something.
+    // Every event is a cross-origin POST with JSON, so the browser first
+    // sends a preflight request. Without this header it remembers the
+    // preflight for only about five seconds, so most events would need
+    // two requests. Browsers cap the value (Chrome at 2 hours, Firefox at
+    // 24), so this asks for the most any of them allows.
     res.setHeader("Access-Control-Max-Age", "86400");
     res.sendStatus(204);
     return;
@@ -145,14 +132,14 @@ function cors(
   next();
 }
 
-// What the route needs from the server that runs it. The daily salt is
-// rotated by whoever made it (startRotation); this router only reads it.
+// What the route needs from the server. The daily salt is replaced by
+// its owner (startRotation); this router only reads it.
 export interface EventsRouterDeps {
   db: Database.Database;
   allowedOrigins: ReadonlySet<string>;
   // The sites of those origins (siteHost, lib/url.ts). An event's url
-  // must be on one: the url is the sender's to write, and its host
-  // decides the visitor, the session and what the host segment lists.
+  // must be on one of them: the sender writes the url, and its host
+  // decides the visitor, the session and the host segment's sites.
   siteHosts: ReadonlySet<string>;
   dailySalt: DailySalt;
   // Stops storing a little before the volume is full (lib/diskSpace.ts).
@@ -161,24 +148,18 @@ export interface EventsRouterDeps {
   countries?: CountryTable;
 }
 
-// express.json() defaults to a 100KB body, which is far more than any
-// real event needs and enough to make storage abuse cheap. This is the
-// bound on `props` specifically: the envelope caps its own fields
-// (schema-registry/envelope.ts), but props are open by design, so the
-// only sane limit on them is the size of the whole request. 16KB still
-// leaves room for a 2KB url, a 2KB referrer and a generous set of
-// props; anything past it is a mistake or an attack, and gets a 413
-// rather than a row.
+// The largest request body accepted. The envelope limits its own fields
+// (schema-registry/envelope.ts); this mainly limits `props`. 16KB leaves
+// room for a 2KB url, a 2KB referrer and plenty of props. Anything
+// bigger is a mistake or an attack and gets a 413.
 const parseBody = json({ limit: "16kb" });
 
-// Deliberately strict: only this one key, only `true`. A body that also
-// carries an event name is an event, not an opt-out, and must not be
-// able to reach the early return below.
+// Strict on purpose: exactly this one key, with the value `true`. A body
+// that also has an event name is an event, not an opt-out.
 const optOutSchema = z.strictObject({ optOut: z.literal(true) });
 
-// What a refused event leaves behind: a rejected_events row, so the
-// cockpit and get_top_rejected_events can say why, and the 400 the
-// sender sees.
+// Records a refused event in rejected_events, so the cockpit and
+// get_top_rejected_events can show why, and answers 400.
 interface Rejection {
   reason: RejectionReason;
   event?: string;
@@ -197,8 +178,8 @@ interface ValidEvent {
   props: Record<string, unknown>;
 }
 
-// POST /events, the public, unauthenticated route every tracked page
-// sends to. Mounted behind the per-address rate limit (app.ts).
+// POST /events: the public route every tracked page sends events to, with
+// no sign-in. It sits behind the per-address rate limit (app.ts).
 export function createEventsRouter(deps: EventsRouterDeps): Router {
   const router = Router();
   router.use((req, res, next) => cors(deps.allowedOrigins, req, res, next));
@@ -211,28 +192,24 @@ function receiveEvent(
   req: Request,
   res: Response,
 ): void {
-  // Stamped once, up front, and reused everywhere below (a rejected
-  // request's ts, a real event's ts, the daily salt): one reading of the
-  // clock per request, not a slightly different one at each call site.
+  // Read the clock once and use the same time everywhere below.
   const now = new Date();
 
-  // Dropped silently — same 204 a real event gets — rather than erroring,
-  // so a false positive here never surfaces a client-visible error. See
-  // lib/bots.ts for what "bot" means here (best-effort, not adversarial).
+  // Bots are dropped with the same 204 a real event gets, so a real
+  // visitor mistaken for a bot never sees an error. See lib/bots.ts.
   if (isBotUserAgent(req.headers["user-agent"])) {
     recordBotHit(botActivityCounter);
     res.status(204).end();
     return;
   }
 
-  // An opt-out is not an event and never becomes a row. It exists only
-  // so the identifier can actually leave the device: the cookie is
-  // httpOnly, so the tracked site's own JavaScript cannot delete it and
-  // only a response from here can. The client sets its own opt-out
-  // cookie and then goes silent, so this is the last request it makes.
+  // An opt-out is not an event and is never stored. It exists so the
+  // visitor cookie can be deleted: the cookie is httpOnly, so the site's
+  // JavaScript can't delete it, only a response from here. The client
+  // sets its own opt-out cookie and then sends nothing more.
   //
-  // Checked before the envelope, because an opt-out carries neither an
-  // event name nor a role and would be rejected as malformed.
+  // Checked before the envelope, because an opt-out has no event name or
+  // role and would otherwise be rejected.
   if (optOutSchema.safeParse(req.body).success) {
     if (parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE]) {
       res.clearCookie(VISITOR_ID_COOKIE, VISITOR_ID_COOKIE_OPTIONS);
@@ -241,10 +218,10 @@ function receiveEvent(
     return;
   }
 
-  // After the opt-out, which writes nothing and must still reach the
-  // cookie; before the envelope, because a rejected event is a row too.
-  // A 503 rather than the bot path's quiet 204: the event is lost, and
-  // a browser's network panel is one more place that says so.
+  // After the opt-out, which writes nothing and must still clear the
+  // cookie; before the envelope, because a rejected event is written too.
+  // A 503 rather than a quiet 204: the event is lost, and the browser's
+  // network panel should show it.
   if (!deps.diskGuard.hasRoom(now.getTime())) {
     res.set("Retry-After", "60");
     res.status(503).json({ error: "server disk is full" });
@@ -261,14 +238,13 @@ function receiveEvent(
 
   storeEvent(deps, req, res, checked.value, now);
 
-  // A deduped duplicate still gets the same 204 a real event does — the
-  // client can't tell the difference, same as the bot-drop above, so a
-  // refreshed confirmation page never sees an error to retry or surface.
+  // A duplicate gets the same 204 as a stored event, so a reloaded
+  // confirmation page never sees an error.
   res.status(204).end();
 }
 
-// Every check a body goes through before it may become a row, in order.
-// Each step refuses with the reason the cockpit then counts it under.
+// Every check an event goes through before it is stored, in order. Each
+// step that refuses gives the reason the cockpit counts it under.
 function checkEvent(
   body: unknown,
   siteHosts: ReadonlySet<string>,
@@ -277,11 +253,10 @@ function checkEvent(
   if (!parsed.ok) return parsed;
   const { envelope, url, referrer } = parsed.value;
 
-  // A browser only gets this far from a page on an allowed origin (the
-  // CORS preflight), and the script sends that page's own address, so
-  // this refuses nothing real. Anything else is a hand-made request
-  // planting a site: a lookalike host for the agent to pick, or text in
-  // the host list the host segment's error shows it.
+  // A browser only gets here from a page on an allowed origin (because
+  // of CORS), and the script sends that page's address, so real events
+  // always pass. This refuses hand-made requests that would add a fake
+  // site, such as a lookalike host, to what the agent sees.
   if (!siteHosts.has(siteHost(url))) {
     return reject({
       reason: "invalid_envelope",
@@ -308,16 +283,14 @@ function parseEnvelope(
 ): Checked<{ envelope: Envelope; url: string; referrer: string | undefined }> {
   const result = envelopeSchema.safeParse(body);
   if (!result.success) {
-    // The body's shape is unknown at this point (that's exactly what
-    // just failed), so the event name is best-effort only.
+    // The body failed validation, so the event name may be missing or
+    // wrong.
     const maybeEvent =
       typeof body === "object" &&
       body !== null &&
       typeof (body as Record<string, unknown>).event === "string"
-        ? // Truncated to the same cap envelopeSchema enforces: the
-          // schema rejected this body, so the name never passed that
-          // check, and the envelope's comment is explicit that the cap
-          // exists precisely because the rejection is what reaches disk.
+        ? // Cut to the same length envelopeSchema allows, because the
+          // name hasn't been checked and is stored with the rejection.
           (body as { event: string }).event.slice(0, MAX_EVENT_NAME_LENGTH)
         : undefined;
     return reject({
@@ -329,15 +302,13 @@ function parseEnvelope(
   }
   const envelope = result.data;
 
-  // Stripped here as well as in the client: /events is public, so a
-  // caller that isn't the client script reaches this line with whatever
-  // query string it likes. See lib/url.ts.
+  // Remove unwanted URL parts here as well as in the client: /events is
+  // public, so a request may not come from the client script. See
+  // lib/url.ts.
   //
-  // The envelope capped the raw value, but stripping re-serializes the
-  // URL, and that percent-encodes what the sender left bare — a query of
-  // 2,000 "(" comes out three times as long. Checked again afterwards,
-  // since the cap is what bounds the text a stranger can put in front of
-  // the agent.
+  // The envelope already limited the length, but cleaning the URL can
+  // make it longer (it percent-encodes characters, so 2,000 "(" become
+  // three times as long). So the length is checked again.
   const url = stripUnknownParams(envelope.url);
   const referrer =
     envelope.referrer === undefined
@@ -354,17 +325,14 @@ function parseEnvelope(
   return { ok: true, value: { envelope, url, referrer } };
 }
 
-// The client script sends a role rather than a name for the three
-// events it fires itself, because it does not know what this deployment
-// calls them — so the name is decided here, from the registry, on every
-// request. A cached copy of the script therefore cannot send a name
-// that no longer exists.
+// For the three events the client script sends by itself, it sends a
+// role instead of a name, because it doesn't know what this deployment
+// calls them. The name is looked up here, on every request, so an old
+// cached script can never send a name that no longer exists.
 //
-// A literal `event` is folded to lowercase before it's looked up: every
-// registered name is enforced lowercase (isValidEventName), so this only
-// ever helps — a track() call with stray-case matches the event it
-// plainly meant instead of being rejected as unknown over nothing but
-// casing. A role-resolved name is already lowercase from the registry.
+// An event name is lowercased before lookup. All registered names are
+// lowercase (isValidEventName), so a track() call with different
+// casing still finds the event it meant.
 function resolveEventName(envelope: Envelope): Checked<string> {
   const name =
     envelope.event?.toLowerCase() ??
@@ -372,9 +340,9 @@ function resolveEventName(envelope: Envelope): Checked<string> {
   if (name !== undefined && isKnownEventType(name)) {
     return { ok: true, value: name };
   }
-  // An unresolved role is stored under the role it asked for, with the
-  // tag to add as the detail. Same reason/counter as a mistyped event
-  // name: one place to look when something isn't being recorded.
+  // A role no event has is rejected under the role's name, with the tag
+  // to add as the detail. It counts like a mistyped event name, so there
+  // is one place to look when something isn't recorded.
   if (name === undefined) {
     return reject({
       reason: "unknown_event_type",
@@ -394,23 +362,20 @@ function normaliseProps(
   eventName: string,
   envelope: Envelope,
 ): Record<string, unknown> {
-  // Folded the same way the event name is, and for the same reason: every
-  // declared prop name is enforced lowercase, so a stray-case key from the
-  // client (a typo'd data-genug-props, or a site's own inconsistent casing)
-  // matches the prop it plainly meant instead of tripping the schema's
-  // strict "unrecognized key" rejection over nothing but casing.
+  // Prop names are lowercased too, for the same reason: all declared prop
+  // names are lowercase, so a key with different casing still matches
+  // instead of being rejected as unknown.
   const props: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(envelope.props)) {
     props[key.toLowerCase()] = value;
   }
 
-  // The link a visitor clicked carries the same ?email= and tokens a page
-  // URL can, so it gets the same allowlist. The client strips it too;
-  // this is the backstop, as for `url`. Keyed on the resolved event, not
-  // on how it was sent, so a track() call naming the event by hand is
-  // filtered the same way and the prop's description stays true. Only
-  // these two events: there the client script fixes the prop name, while
-  // a deployment's own props are its own to name.
+  // A clicked link can contain ?email= or tokens just like a page URL, so
+  // it is cleaned the same way. The client does this too; this is the
+  // safety net, as for `url`. Based on the event, not on how it was sent,
+  // so a track() call for the same event is cleaned too. Only these two
+  // events, because only there does the client script decide the prop
+  // name.
   for (const [role, prop] of Object.entries(ROLE_URL_PROPS)) {
     const linkUrl = props[prop];
     if (
@@ -443,8 +408,8 @@ function reject(rejection: Rejection): { ok: false; rejection: Rejection } {
   return { ok: false, rejection };
 }
 
-// Who sent it, which session it belongs to, and the row itself. Also
-// sets or clears the visitor cookie, which is why it takes the response.
+// Works out the visitor and session and builds the row. Also sets or
+// clears the visitor cookie, which is why it takes the response.
 function storeEvent(
   { db, dailySalt, countries }: EventsRouterDeps,
   req: Request,
@@ -452,16 +417,14 @@ function storeEvent(
   event: ValidEvent,
   now: Date,
 ): void {
-  // Narrowed to a block before it is hashed or looked up (see
-  // lib/ip.ts). The rate limiter narrows differently, and less: it keeps
-  // an IPv4 address whole, because it has to tell one abuser from the
-  // office around them.
+  // Shortened to a block before hashing or the country lookup (see
+  // lib/ip.ts). The rate limiter shortens differently: it keeps a full
+  // IPv4 address, to tell one abuser from the office around them.
   const ip = truncateIp(req.ip ?? "");
   const country = countries?.lookup(ip);
   const userAgent = req.headers["user-agent"];
-  // The header itself goes no further than this request: it feeds the
-  // bot check and the consentless hash below, and only what it
-  // classifies to is stored (see db/migrations.ts).
+  // The User-Agent itself isn't stored: it is used for the bot check and
+  // the hash below, and only its category is saved.
   const device =
     userAgent === undefined ? undefined : classifyUserAgent(userAgent);
   const visitorLanguage = parsePrimaryLanguage(req.headers["accept-language"]);
@@ -469,10 +432,9 @@ function storeEvent(
   // visitor hash and the session (lib/url.ts).
   const site = siteHost(event.url);
 
-  // Who this request belongs to, and what that means for their cookie.
-  // The decision is lib/identity.ts's; applying it is this route's,
-  // because the cookie's name and lifetime are deployment surface that
-  // the identity rules themselves have no business knowing.
+  // Who sent this request, and what to do with their cookie.
+  // lib/identity.ts decides; this route sets or clears the cookie, since
+  // it knows the cookie's name and lifetime.
   const { visitorId, consentful, cookie } = resolveVisitorIdentity({
     consent: event.envelope.consent,
     visitorCookie: parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE],

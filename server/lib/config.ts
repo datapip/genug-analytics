@@ -13,21 +13,20 @@ import { parseRetentionDays } from "./retention.js";
 import { siteHost } from "./url.js";
 import { parseLocalBackupsEnabled } from "./backup.js";
 
-// Every setting the server is started with, read once, in one place,
-// and refused loudly when it is missing or malformed: a deployment that
-// comes up with a setting it did not mean is subtly wrong, not visibly
-// broken. index.ts calls this first and hands the result to everything
-// it builds, so no other module reads the environment for these.
+// Reads every setting once, at startup. A missing or invalid setting
+// stops the server with an error: a server running with a setting nobody
+// meant would give wrong numbers without anyone noticing. index.ts calls
+// this first and passes the result on, so no other module reads these
+// from the environment.
 //
-// A few settings are still read where they are used, because many
-// modules share them and none of them is required: EVENTS_PATH (the
-// schema registry, whose loaded events are live bindings),
-// CONTEXT_PATH (lib/context.ts), KEPT_QUERY_PARAMS and KEPT_HASH_VALUES
-// (lib/url.ts) and GENUG_VERSION (lib/version.ts).
+// A few optional settings are read where they are used, because many
+// modules need them: EVENTS_PATH (the schema registry), CONTEXT_PATH
+// (lib/context.ts), KEPT_QUERY_PARAMS and KEPT_HASH_VALUES (lib/url.ts)
+// and GENUG_VERSION (lib/version.ts).
 export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
-  // `/data` is where the Docker and Coolify docs tell the operator to
-  // mount a persistent volume, so most deployments never set DB_PATH.
-  // Overridable for running outside Docker.
+  // The docs tell owners to mount a persistent volume at `/data`, so
+  // most deployments never set DB_PATH. Set it when running outside
+  // Docker.
   const dbPath = env.DB_PATH ?? "/data/genug.db";
   const allowedOrigins = parseAllowedOrigins(requireEnv("ALLOWED_ORIGIN", env));
   return {
@@ -40,19 +39,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     trustProxyHops: parseTrustProxy(env.TRUST_PROXY),
     port: parsePort(env.PORT),
     dbPath,
-    // Beside the database, on the same volume: the daily salt, the
-    // cockpit's session salt and the local backups.
+    // The folder of the database, on the same volume. It also holds the
+    // daily salt, the cockpit's session salt and the local backups.
     dataDir: dirname(dbPath),
     // undefined keeps events forever (RETENTION_DAYS=-1).
     retentionDays: parseRetentionDays(env.RETENTION_DAYS),
-    // Unset falls back to a default rather than to forever, which is
-    // worth saying at startup: see index.ts.
+    // Whether RETENTION_DAYS was unset, so index.ts can log that the
+    // default applies.
     retentionDaysIsDefault: env.RETENTION_DAYS === undefined,
     localBackups: parseLocalBackupsEnabled(env.LOCAL_BACKUPS),
     updateCheck: parseUpdateCheckEnabled(env.UPDATE_CHECK),
     countryLookup: parseCountryLookup(env.COUNTRY_LOOKUP),
-    // Where scripts/fetch-country-data.mjs puts the table, which is
-    // where the image has it. Overridable for a table kept elsewhere.
+    // Where scripts/fetch-country-data.mjs saves the table in the image.
+    // Can be set to use a table kept elsewhere.
     countryDataDir:
       env.COUNTRY_DATA_DIR ??
       fileURLToPath(new URL("../../country-data/", import.meta.url)),
@@ -61,16 +60,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
 
 export type Config = ReturnType<typeof loadConfig>;
 
-// A comma-separated list, because one site legitimately has more than
-// one origin: an apex plus a `www.` host that doesn't redirect, or a
-// staging host reporting to the same collector. Every entry still has to
-// match exactly — this widens the set of known origins, it never relaxes
-// into a wildcard or an echo-anything policy.
+// A comma-separated list of origins, because a site can have several
+// (example.com plus www.example.com, a staging host) and one installation
+// can collect for several sites. Each must match exactly; there are no
+// wildcards.
 //
-// An empty result fails: requireEnv only proves the variable is set, not
-// that it holds an origin. It matters more here than elsewhere because
-// an unlisted origin fails inside the browser, which leaves no trace in
-// this server's logs at all.
+// An empty list stops the server. requireEnv only checks that the
+// variable is set. A wrong origin fails in the visitor's browser and
+// leaves nothing in this server's logs, so it is worth catching here.
 function parseAllowedOrigins(value: string): ReadonlySet<string> {
   const origins = new Set(
     value
@@ -86,10 +83,9 @@ function parseAllowedOrigins(value: string): ReadonlySet<string> {
   return origins;
 }
 
-// The sites the origins belong to, as siteHost (lib/url.ts) names them:
-// the only hosts /events stores a url on. An entry that is no origin at
-// all matched no browser's Origin header before either, so it fails here
-// rather than quietly allowing nothing.
+// The sites the origins belong to, in siteHost's form (lib/url.ts).
+// /events only stores urls on these hosts. An entry that isn't a valid
+// origin stops the server rather than quietly matching nothing.
 function siteHostsOf(origins: ReadonlySet<string>): ReadonlySet<string> {
   return new Set(
     [...origins].map((origin) => {

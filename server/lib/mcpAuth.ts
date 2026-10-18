@@ -8,18 +8,18 @@ import {
 
 type Middleware = (req: Request, res: Response, next: NextFunction) => void;
 
-// Hosted agents (claude.ai and others) call from addresses shared with
-// every other customer of that vendor, so anything counted per address
-// alone is counted across strangers too. A request with the right key
-// is the one thing a stranger cannot send, so the key decides which
-// budget a request spends: the owner's, or everyone else's.
+// Hosted agents (claude.ai and others) call from addresses they share
+// with all their other customers, so a limit per address alone would be
+// shared with strangers. A stranger can't send the right key, so the key
+// decides which rate limit a request counts against: the owner's, or the
+// one for everyone else.
 //
-// There is no failed-attempt lockout here any more. A lockout that
-// refuses the right key is one any stranger on the same address can
-// trigger; one that lets the right key through still tells a guesser
-// right from wrong, so it bounds nothing. What bounds guessing is the
-// keyless budget and the key's length (shortMcpApiKeyWarning in env.ts
-// warns when it is short).
+// There is deliberately no lockout after failed attempts. A lockout that
+// also blocks the right key lets any stranger on the same address lock
+// the owner out; one that lets the right key through still tells a
+// guesser when they are right, so it limits nothing. Guessing is limited
+// by the rate limit for requests without the key and by the key's length
+// (shortMcpApiKeyWarning in env.ts warns when it is short).
 export function createMcpAuthMiddleware(
   apiKey: string,
   limiters: { keyed: Middleware; keyless: Middleware } = {
@@ -28,9 +28,9 @@ export function createMcpAuthMiddleware(
   },
 ): Middleware {
   return function requireApiKey(req, res, next): void {
-    // Compared once, here. A second comparison elsewhere that read the
-    // header slightly differently would let a stranger into the owner's
-    // budget.
+    // The key is checked only here. A second check elsewhere that read
+    // the header slightly differently could put a stranger under the
+    // owner's rate limit.
     const header = req.headers.authorization ?? "";
     if (timingSafeStringEqual(header, `Bearer ${apiKey}`)) {
       limiters.keyed(req, res, next);

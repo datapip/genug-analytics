@@ -1,17 +1,15 @@
 import type { Request, Response, NextFunction } from "express";
 
-// Applied to every response. Cheap, and correct regardless of route:
-// nothing this server serves should ever be content-type-sniffed, and
-// nothing should leak its URL as a referrer to another origin.
+// Headers for every response: browsers must not guess a content type, and
+// no URL from this server is sent as the referrer to other sites.
 //
-// HSTS too, so that after one visit a browser never tries this host over
-// plain http, where someone on the same network could keep it there and
-// read the cockpit password as it is typed. Sent on every response
-// rather than only when req.secure says https, which is only as true as
-// TRUST_PROXY: browsers ignore the header over http, so the only place it
-// takes effect is the https it describes. This host only — no
-// includeSubDomains, since the rest of the deployer's domain is not ours
-// to pin — and no preload, which is a list a deployment opts into itself.
+// HSTS makes a browser use https for this host after one visit, so nobody
+// on the same network can keep it on plain http and read the cockpit
+// password. It is sent on every response, not only when req.secure says
+// https (which depends on TRUST_PROXY being right); browsers ignore it
+// over http anyway. It covers this host only: no includeSubDomains,
+// because the rest of the owner's domain isn't ours to decide, and no
+// preload, which a deployment has to sign up for itself.
 const HSTS = "max-age=31536000";
 
 export function baseSecurityHeaders(
@@ -25,13 +23,11 @@ export function baseSecurityHeaders(
   next();
 }
 
-// The cockpit is the only HTML this server serves, so it's the only
-// place a content policy means anything. See "Security headers" in
-// docs/decisions.md for why each directive is what it is; the one
-// worth knowing while editing this file is that style-src still needs
-// 'unsafe-inline' because cockpit.js sets inline style *attributes* for
-// values it computes at runtime (a bar's width, a series colour). script-src
-// needs no such exemption — the page has no inline script at all.
+// The Content-Security-Policy for the cockpit, the only HTML this server
+// serves. "Security headers" in docs/decisions.md explains each rule.
+// style-src needs 'unsafe-inline' because cockpit.js sets style
+// attributes it computes at runtime (a bar's width, a line's colour).
+// script-src doesn't: the page has no inline script.
 const COCKPIT_CSP = [
   "default-src 'self'",
   "script-src 'self'",

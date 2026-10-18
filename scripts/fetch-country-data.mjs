@@ -1,16 +1,15 @@
-// Downloads the IP-to-country table COUNTRY_LOOKUP=true reads
+// Downloads the IP-to-country table that COUNTRY_LOOKUP=true uses
 // (server/lib/country.ts) into server/country-data/. The Docker build
-// runs it, so every image carries a table as fresh as the image; run it
-// by hand to try the lookup outside Docker.
+// runs it; run it by hand to try the lookup outside Docker.
 //
 //   node scripts/fetch-country-data.mjs
 //
 // The table is ip-location-db's "user-country", public domain (PDDL):
 // https://github.com/sapics/ip-location-db
 //
-// Exits non-zero on any failure, so an image is never built without it.
-// Each file is written beside its final name and renamed into place, so
-// a failed download never leaves half a table for the server to load.
+// Exits with an error on any failure, so no image is built without the
+// table. Each file is written under a temporary name and then renamed,
+// so a failed download never leaves half a table.
 import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { URL, fileURLToPath } from "node:url";
@@ -33,8 +32,8 @@ for (const file of FILES) {
   const partial = join(dir, `${file}.partial`);
   writeFileSync(partial, text);
   renameSync(partial, join(dir, file));
-  // The upstream file changes daily and is not pinned, so the build log
-  // is where an image records which table it carries.
+  // The source file changes daily and no version is pinned, so log
+  // which table this image contains.
   const sha256 = createHash("sha256").update(text).digest("hex");
   console.log(
     `${file}: ${text.split("\n").filter(Boolean).length} ranges, sha256 ${sha256}`,

@@ -7,13 +7,11 @@ import {
 } from "./context.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// The cockpit's only write to ground-rules.md: a whole-file overwrite,
-// because the file is free prose with no shape to merge against (see
-// lib/context.ts). Checked against the same cap the agent's document
-// enforces at render time, but refused here rather than truncated —
-// truncation is what render time does to a file that changed size after
-// it was written; a save from a form has someone right there to shorten
-// it instead.
+// Saves the cockpit's ground-rules text to ground-rules.md, replacing the
+// whole file (it is free prose, so there is nothing to merge). Text over
+// the size cap is refused here rather than cut short: the owner is at the
+// form and can shorten it. Only a file edited by hand to be too long gets
+// cut, when lib/context.ts reads it.
 export type WriteGroundRulesResult =
   { ok: true } | { ok: false; error: string };
 

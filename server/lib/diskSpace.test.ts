@@ -16,8 +16,8 @@ test("has room above the floor and none below it", () => {
   assert.equal(guard.hasRoom(120_000), true, "resumes by itself");
 });
 
-// /events asks on every request; the filesystem is asked at most once
-// per window, so a burst costs one system call.
+// /events asks on every request, but the filesystem is only asked once
+// per interval.
 test("reuses its answer inside the recheck window", () => {
   let calls = 0;
   const guard = createDiskGuard(
@@ -36,8 +36,8 @@ test("reuses its answer inside the recheck window", () => {
   assert.equal(calls, 2);
 });
 
-// A filesystem that cannot report its space is not a full one, and
-// stopping collection over it would lose every event for no reason.
+// A filesystem that can't report its free space isn't full; stopping
+// collection would lose every event for no reason.
 test("an unknown free space never stops collection", () => {
   const guard = createDiskGuard("/data", () => undefined, FLOOR);
   assert.equal(guard.hasRoom(0), true);

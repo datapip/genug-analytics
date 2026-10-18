@@ -31,8 +31,7 @@ test("offsetMinutes follows the clock change", () => {
   assert.equal(offsetMinutes(Date.parse("2026-12-01T12:00:00Z"), "UTC"), 0);
 });
 
-// 00:30 in Berlin in summer is 22:30 the day before in UTC: the example
-// this whole module exists for.
+// 00:30 in Berlin in summer is 22:30 the day before in UTC.
 test("localDate is the site's day, not UTC's", () => {
   assert.equal(
     localDate(Date.parse("2026-09-30T22:30:00Z"), "Europe/Berlin"),
@@ -76,8 +75,8 @@ test("offsetSpans is one open span when no clock changes inside the period", () 
   );
 });
 
-// Contiguous and half-open: the end of one is the start of the next, in
-// the exact format `ts` is stored in.
+// The spans touch without overlap: each ends where the next starts, in
+// the format `ts` is stored in.
 test("offsetSpans splits at the clock change, contiguous and in the stored format", () => {
   assert.deepEqual(
     offsetSpans(
@@ -97,8 +96,8 @@ test("offsetSpans splits at the clock change, contiguous and in the stored forma
   );
 });
 
-// An agent can ask from year 1. The scan follows the stored rows
-// instead, so a silly bound costs nothing.
+// An agent can ask from year 1. The search follows the stored rows, so a
+// huge period costs nothing.
 test("localSpans scans only between the stored rows, not the bounds asked for", () => {
   const db = new Database(":memory:");
   migrate(db);
@@ -133,9 +132,9 @@ test("enumerateDays lists local days, including a 25-hour one", () => {
   );
 });
 
-// The rule that makes this module matter: a day or hour bucket cut on
-// raw `ts` is UTC's, plausible while wrong. Read from the compiled
-// siblings of this test, which carry the same SQL text as the sources.
+// No query may group by day or hour with a plain strftime on `ts`,
+// which would use UTC. Checks the compiled files next to this test,
+// which contain the same SQL as the sources.
 test("no query in lib/ buckets on ts without the site's offset", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const offenders = readdirSync(dir)

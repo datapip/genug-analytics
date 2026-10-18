@@ -1,85 +1,76 @@
 interface GenugAnalyticsApi {
-  // idempotencyKey: a value the site itself knows uniquely identifies
-  // this occurrence (e.g. an order id) — pass it for events where a
-  // refreshed or back-navigated page firing twice would double-count
-  // (a purchase, not a page view). The tracker can't generate this
-  // itself: a client-generated id would differ on every refresh and
-  // defeat the point, since it has to identify the real-world event,
-  // not the beacon.
+  // idempotencyKey: a value that uniquely identifies this occurrence,
+  // such as an order id. Pass it for events that must not count twice
+  // when the page is reloaded or revisited with the back button (a
+  // purchase, not a page view). The script can't make one up: a random
+  // id would be different after every reload.
   track(
     event: string,
     props?: Record<string, unknown>,
     idempotencyKey?: string,
   ): void;
   setConsent(consent: boolean): void;
-  // Stops this script sending anything at all, for this browser, until
-  // optIn() is called. Distinct from setConsent(false), which is about
-  // *how* a visitor is identified and leaves consentless collection
-  // running: an opt-out is the Art. 21 objection route a deployment
-  // relying on legitimate interest has to offer.
+  // Stops this script from sending anything from this browser until
+  // optIn() is called. Not the same as setConsent(false), which only
+  // changes how the visitor is identified and keeps counting without a
+  // cookie. Opting out is how a visitor objects (GDPR Art. 21), which a
+  // site relying on legitimate interest must offer.
   optOut(): void;
   optIn(): void;
   isOptedOut(): boolean;
-  // Present only on the pre-load stub, never on the real API this script
-  // installs. A site that calls track() from its own inline code can't
-  // rely on this script having loaded yet — it's a separate <script src>
-  // and may still be in flight — and calling a method on an undefined
-  // object throws. The documented stub (see README) defines
-  // window.genugAnalytics up front with methods that just push their
-  // arguments here; this script replays them on init and then replaces
-  // the stub outright. Untyped args because the stub is hand-written
-  // plain JS on the site's own page, not compiled with this file.
+  // Only exists on the stub, never on the real API. A site's own inline
+  // code may call track() before this script has loaded, which would
+  // throw. The stub from the README defines window.genugAnalytics early
+  // with methods that just store their arguments here; this script
+  // replays them when it starts and then replaces the stub. The arguments
+  // are untyped because the stub is plain JavaScript on the site's page.
   q?: QueuedCall[];
 }
 
 type QueuedCall = [method: string, args: unknown[]];
 
-// A plain top-level interface merges directly with the real global
-// Window type here (no `declare global` needed) since tsconfig forces
-// this import-free file to be treated as a script, not a module.
+// This file is compiled as a script, not a module (see tsconfig), so a
+// top-level interface adds to the global Window type directly, without
+// `declare global`.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- global augmentation, not a local type
 interface Window {
   genugAnalytics?: GenugAnalyticsApi;
   genugAnalyticsConfig?: {
-    // Left unset (rather than false) when your consent manager hasn't
-    // answered yet — the server treats "unknown" differently from "no"
-    // (see the README's "Embedding the client script").
+    // Leave unset (not false) while your consent banner hasn't answered:
+    // the server treats "unknown" differently from "no" (see "Embedding
+    // the client script" in the README).
     consent?: boolean;
-    // Default false: no automatic page_view on load — call track()
-    // yourself, or use data-genug-on-load on <html> (see below),
-    // which fires regardless of this flag. Set true to get the
-    // built-in page_view event (title + language) automatically.
+    // Default false: no automatic page_view on load. Call track()
+    // yourself, or put data-genug-on-load on <html> (see below), which
+    // works regardless of this flag. Set true to send the built-in
+    // page_view event (title and language) automatically.
     enableAutoPageTracking?: boolean;
-    // Default false: no automatic outbound-link or file-download
-    // tracking. Set true to fire the built-in outbound_link_click and
+    // Default false: no automatic tracking of outbound links and file
+    // downloads. Set true to send the built-in outbound_link_click and
     // file_download events (see below).
     enableAutoLinkTracking?: boolean;
-    // Default false: in a single-page app, route changes fire nothing,
-    // so a visitor who browses ten routes is recorded as seeing one
-    // page. Set true to fire a page event on every route change too.
-    // Additive rather than a replacement: what fires is decided by the
-    // page-load opt-ins above, so on its own this sends nothing.
+    // Default false: in a single-page app, route changes send nothing, so
+    // a visitor who browses ten routes counts as one page. Set true to
+    // also send the page event on every route change. It repeats what
+    // the page-load options above send, so on its own it sends nothing.
     enableAutoRouteTracking?: boolean;
   };
 }
 
-// Everything, helpers included, lives inside this function. A top-level
-// const or function in a classic script is a global on the site that
-// embeds it: a name the site already uses either throws here, killing
-// tracking, or quietly replaces the site's own. Only window.genugAnalytics
-// is meant to be left behind.
+// Everything, helpers included, is inside this function. In a classic
+// script, a top-level const or function becomes a global on the site: a
+// name the site already uses would either throw (and stop tracking) or
+// replace the site's own. Only window.genugAnalytics should be global.
 (function (): void {
-  // Extensions treated as a download when clicked. Necessarily a guess —
-  // a URL's extension is a hint, not a declaration — so this is
-  // best-effort in the same documented way as bot detection: it catches
-  // the ordinary cases and doesn't pretend to be exhaustive. A link
-  // carrying an explicit `download` attribute skips this list entirely,
-  // since that one isn't a guess at all.
+  // File extensions that count as a download when clicked. This is a
+  // guess, since an extension is only a hint, so it covers the common
+  // cases and isn't complete. A link with a `download` attribute always
+  // counts, whatever its extension.
   const DOWNLOAD_EXTENSION =
     /\.(pdf|zip|rar|7z|tar|gz|tgz|doc|docx|xls|xlsx|ppt|pptx|csv|rtf|txt|dmg|exe|msi|pkg|deb|rpm|apk|iso|epub|mp3|wav|mp4|mov|avi|mkv)$/i;
 
-  // Long enough to identify which link was clicked, short enough that a
-  // whole paragraph wrapped in an <a> doesn't become the prop value.
+  // Long enough to tell which link was clicked, short enough that a whole
+  // paragraph inside an <a> doesn't become the prop value.
   const MAX_LINK_TEXT_LENGTH = 120;
 
   function isDownloadLink(anchor: HTMLAnchorElement): boolean {
@@ -94,10 +85,9 @@ interface Window {
     return match ? match[1]!.toLowerCase() : "";
   }
 
-  // Link text arrives with whatever indentation the page's HTML happens to
-  // have, so it's collapsed to single spaces — otherwise the same link
-  // yields different prop values on different pages and fragments any
-  // grouping by it.
+  // Link text includes the HTML's indentation, so whitespace is reduced
+  // to single spaces. Otherwise the same link would have different
+  // values on different pages.
   function collapseLinkText(text: string | null): string {
     return (text ?? "")
       .replace(/\s+/g, " ")
@@ -105,20 +95,17 @@ interface Window {
       .slice(0, MAX_LINK_TEXT_LENGTH);
   }
 
-  // Query parameters and fragments worth keeping. Everything else is
-  // dropped before the URL leaves the browser at all: a newsletter link's
-  // ?email=, a magic link's single-use token, a search page's typed query,
-  // an OAuth response's access_token in the fragment. The server drops the
-  // same set again for anything POSTing to /events directly (see
-  // server/lib/url.ts) — this copy is what keeps it out of the request in
-  // the first place.
+  // The query parameters and fragments to keep. Everything else is
+  // removed before the URL leaves the browser: a newsletter link's
+  // ?email=, a login link's one-time token, a search page's query, an
+  // access_token in the fragment. The server removes them again (see
+  // server/lib/url.ts) for requests that don't come from this script.
   //
-  // This file is an import-free classic script, so it can't read the
-  // server's lists. The server writes them in instead, replacing the
-  // placeholder string below as it serves the file (server/lib/
-  // clientScript.ts). "*" keeps everything; a list keeps only those
-  // values. Served without that step, the placeholder is neither, so
-  // every parameter and fragment is dropped: fails closed.
+  // This script can't import the server's lists, so the server writes
+  // them in, replacing the placeholder below when it serves the file
+  // (server/lib/clientScript.ts). "*" keeps everything; a list keeps only
+  // those values. If the placeholder isn't replaced, it is neither, so
+  // everything is removed, which is the safe way to fail.
   interface KeptUrlParts {
     params: "*" | string[];
     hashes: "*" | string[];
@@ -132,8 +119,8 @@ interface Window {
   function strippedUrl(href: string): string {
     const url = new URL(href);
     for (const key of [...url.searchParams.keys()]) {
-      // Held lowercased by the server: a hand-typed utm_Source is plainly
-      // the same parameter. Fragments are matched exactly.
+      // Parameter names are lowercase in the list and compared ignoring
+      // case. Fragments must match exactly.
       if (!keeps(KEPT_URL_PARTS.params, key.toLowerCase())) {
         url.searchParams.delete(key);
       }
@@ -142,59 +129,49 @@ interface Window {
     return url.toString();
   }
 
-  // A second copy of this script on the same page — a tag manager
-  // alongside a hardcoded tag, a theme alongside a plugin — would
-  // install a second set of listeners and fire a second page event,
-  // permanently doubling every count with nothing on the stored row to
-  // show it happened. The pre-load stub carries `q`; the API installed
-  // below never does, so "present, but with no queue" means an earlier
-  // copy already ran and this one must do nothing at all.
+  // A second copy of this script on the same page (a tag manager plus a
+  // hard-coded tag, say) would add a second set of listeners and send
+  // every event twice, with nothing in the data to show it. The stub has
+  // `q`, the real API never does, so an API without a queue means an
+  // earlier copy already ran, and this one stops.
   const installed = window.genugAnalytics;
   if (installed && !installed.q) return;
 
   const scriptEl = document.currentScript as HTMLScriptElement | null;
-  // Falls back to a relative path when there's no <script src> URL to
-  // read an origin from. Both halves of that check matter: an inlined
-  // <script> gives a non-null element whose `src` is the empty string,
-  // and `new URL("")` throws — which would escape this IIFE and leave
-  // window.genugAnalytics undefined, killing tracking entirely rather than
-  // falling back.
+  // Uses a relative path when there is no <script src> to take the server
+  // from. Both checks are needed: an inline <script> exists but has an
+  // empty `src`, and `new URL("")` throws, which would stop the script
+  // before window.genugAnalytics exists.
   const scriptSrc = scriptEl?.src;
   const endpoint = scriptSrc ? new URL(scriptSrc).origin : "";
 
-  // A real third state, not coerced to a boolean: `undefined` means
-  // "not yet answered" and must reach the server as such, since it's
-  // handled differently from an explicit `false` (see events.ts).
-  // JSON.stringify below drops it from the body entirely when it's
-  // undefined, the same way it already drops idempotencyKey.
+  // Three states, not a boolean: `undefined` means "not answered yet",
+  // which the server handles differently from `false` (see events.ts).
+  // When undefined, JSON.stringify leaves it out of the body.
   let consent = window.genugAnalyticsConfig?.consent;
 
-  // Either a literal event name — what track() and data-genug-on-click
-  // carry — or one of the three roles this script fires on its own. A
-  // role travels instead of a name because this script does not know
-  // what this deployment calls those events, and deliberately no longer
-  // has to: the server resolves the role against its own registry, so
-  // renaming one of them can never leave a cached copy of this file
-  // sending a name that no longer exists.
+  // Either an event name (from track() or data-genug-on-click) or one of
+  // the three roles this script sends by itself. A role is sent because
+  // this script doesn't know what the deployment calls those events; the
+  // server looks the name up, so a cached copy of this file can't send a
+  // name that was renamed.
   type EventIdentity =
     | { event: string; auto?: never }
     | { auto: "pageView" | "outboundClick" | "fileDownload"; event?: never };
 
-  // The opt-out cookie is read before every send and written by
-  // optOut()/optIn(). First-party on the tracked site's own domain and
-  // deliberately not httpOnly: this script has to be able to read it
-  // before deciding to stay silent, and it holds a flag, not an
+  // The opt-out cookie, read before every send and written by optOut()
+  // and optIn(). It is set on the site's own domain and is not httpOnly,
+  // because this script must read it; it holds a flag, not an
   // identifier.
   //
-  // Storing it is itself writing to the device, which is the thing
-  // consentless mode otherwise avoids — but a record of "this person
-  // asked not to be tracked" is the one thing you cannot honour
-  // without remembering it, and it is exactly the case § 25(2) TDDDG
-  // exempts as strictly necessary for a service the user asked for.
+  // Setting it writes to the device, which consentless mode otherwise
+  // never does. But "this person asked not to be tracked" can't be
+  // respected without remembering it, and § 25(2) TDDDG allows storage
+  // that is strictly necessary for something the user asked for.
   const OPT_OUT_COOKIE = "genug_optout";
 
-  // Chrome caps a JS-set cookie at 400 days regardless, so asking for
-  // more would only make the code look like it promised longer.
+  // Chrome limits cookies to 400 days anyway, so asking for more would
+  // only look like a longer promise.
   const OPT_OUT_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 
   function optedOut(): boolean {
@@ -204,9 +181,9 @@ interface Window {
   }
 
   function writeOptOutCookie(maxAgeSeconds: number): void {
-    // Secure only over https: a Secure cookie set on http is discarded
-    // silently, which would make opting out fail without saying so on
-    // a local or plain-http site.
+    // Secure only over https: the browser silently drops a Secure cookie
+    // set over http, so opting out would quietly fail on a plain-http or
+    // local site.
     const secure = location.protocol === "https:" ? "; Secure" : "";
     document.cookie =
       `${OPT_OUT_COOKIE}=1; Max-Age=${maxAgeSeconds}; Path=/; ` +
@@ -218,23 +195,21 @@ interface Window {
     props: Record<string, unknown> = {},
     idempotencyKey?: string,
   ): void {
-    // One check, at the single point every event goes through: track(),
-    // the automatic page view, link clicks and route changes all end up
-    // here, so opting out cannot be defeated by a path that forgot to
-    // ask.
+    // Every event passes through here (track(), automatic page views,
+    // link clicks, route changes), so checking the opt-out once here
+    // covers all of them.
     if (optedOut()) return;
 
-    // JSON.stringify drops a key entirely when its value is undefined,
-    // so idempotencyKey is simply absent from the body when not given —
-    // no separate branch needed for the common (undefined) case. The
-    // same is true of whichever half of `identity` isn't set.
+    // JSON.stringify leaves out keys whose value is undefined, so an
+    // unset idempotencyKey (or the unused half of `identity`) is simply
+    // missing from the body.
     const body = JSON.stringify({
       ...identity,
       consent,
       url: strippedUrl(location.href),
-      // "" for a direct visitor, which new URL() would throw on — and an
-      // internal navigation's referrer is one of this site's own pages,
-      // so it carries exactly the same query strings worth dropping.
+      // "" for a direct visitor, which new URL() would throw on. For a
+      // click within the site, the referrer is one of its own pages, so
+      // its query string is cleaned the same way.
       referrer: document.referrer ? strippedUrl(document.referrer) : "",
       idempotencyKey,
       props,
@@ -243,24 +218,19 @@ interface Window {
     post(blob);
   }
 
-  // sendBeacon where it works, fetch where it does not. Shared with
-  // optOut(), whose own beacon call used to be unguarded — so on a
-  // browser without sendBeacon it threw into the site's own code, after
-  // setting the local flag but before the server could clear the
-  // httpOnly visitor-id cookie. That is the route a visitor exercises
-  // their right to object through, so it is the last one that should
-  // depend on an optional API.
+  // Sends with sendBeacon where it works, otherwise with fetch. optOut()
+  // uses it too: opting out must also work in browsers without
+  // sendBeacon, because only the server's answer can delete the httpOnly
+  // visitor cookie.
   function post(blob: Blob): void {
     const url = `${endpoint}/events`;
 
-    // sendBeacon doesn't only fail by being absent: it returns false
-    // when the browser refuses to queue the payload (its transfer queue
-    // is full, or the body is over the per-origin limit). Treating that
-    // the same as "unavailable" means those events fall back to fetch
-    // instead of being dropped without a trace.
+    // sendBeacon can also return false when the browser won't queue the
+    // data (its queue is full, or the body is too large). Then use fetch
+    // too, instead of losing the event.
     if (!navigator.sendBeacon || !navigator.sendBeacon(url, blob)) {
-      // sendBeacon includes cookies by default; fetch needs this
-      // explicitly for the cross-subdomain visitor-id cookie to ride along.
+      // sendBeacon sends cookies by default; fetch needs this to send the
+      // visitor cookie to the collector's subdomain.
       fetch(url, {
         method: "POST",
         body: blob,
@@ -270,9 +240,9 @@ interface Window {
     }
   }
 
-  // Shared by both data-genug-props call sites (click and load) —
-  // a hand-authored JSON attribute is a plausible typo target, so this
-  // warns instead of either crashing or failing silently.
+  // Reads data-genug-props (for clicks and page loads). It is JSON typed
+  // by hand, so typos are likely; this warns instead of crashing or
+  // failing silently.
   function parsePropsAttribute(
     raw: string | undefined,
   ): Record<string, unknown> {
@@ -287,13 +257,13 @@ interface Window {
     }
   }
 
-  // Captured before the stub is replaced below — anything the site
-  // called while this script was still loading is waiting in here.
+  // Saved before the stub is replaced below: it holds every call the site
+  // made while this script was loading.
   const queued = window.genugAnalytics?.q;
 
   const api: GenugAnalyticsApi = {
-    // A public call always names its event: the role form exists only
-    // for the three this script fires itself.
+    // A track() call always names its event; roles are only for the
+    // three events this script sends by itself.
     track(
       event: string,
       props?: Record<string, unknown>,
@@ -306,11 +276,11 @@ interface Window {
     },
     optOut(): void {
       writeOptOutCookie(OPT_OUT_MAX_AGE_SECONDS);
-      // The last request this script will make, and the reason opting
-      // out is not simply "stop sending": the visitor-id cookie is
-      // httpOnly, so only a response from the collector can remove it.
-      // This body carries no event, no url and no referrer — the server
-      // stores nothing for it (see routes/events.ts).
+      // The last request this script sends. Opting out can't just mean
+      // "stop sending": the visitor cookie is httpOnly, so only a
+      // response from the collector can delete it. The body has no event,
+      // url or referrer, and the server stores nothing (see
+      // routes/events.ts).
       post(
         new Blob([JSON.stringify({ optOut: true })], {
           type: "application/json",
@@ -326,12 +296,11 @@ interface Window {
   };
   window.genugAnalytics = api;
 
-  // Replayed in the order the calls were originally made, and before any
-  // automatic page-load event fires below. Order matters for more than
-  // tidiness: a cookie banner that called setConsent(true) before this
-  // script finished loading has to take effect *before* the page_view it
-  // precedes, or that first event would be recorded as consentless when
-  // the visitor had in fact already agreed.
+  // Replay the saved calls in their original order, before the automatic
+  // page-load event below. The order matters: if the cookie banner called
+  // setConsent(true) while this script was loading, that must apply
+  // before the page_view, or the first event would be stored without
+  // consent although the visitor had agreed.
   if (queued) {
     for (const [method, args] of queued) {
       if (method === "track") {
@@ -347,9 +316,8 @@ interface Window {
       } else if (method === "optIn") {
         api.optIn();
       } else {
-        // A typo in the hand-written stub, most likely. Warn rather than
-        // throw, same as malformed data-genug-props below: one bad
-        // entry shouldn't take the rest of the queue down with it.
+        // Probably a typo in the hand-written stub. Warn instead of
+        // throwing, so one bad entry doesn't stop the rest of the queue.
         console.warn(
           `genug: ignoring queued call to unknown method "${method}"`,
         );
@@ -357,11 +325,10 @@ interface Window {
     }
   }
 
-  // Zero-JS tracking for simple cases: tag any element with
-  // data-genug-on-click (and optionally data-genug-props, a
-  // JSON string) and a click anywhere inside it fires that event.
-  // closest() means clicking an icon/span *inside* a tagged button
-  // still counts, not just the exact tagged element.
+  // Tracking without writing JavaScript: give any element
+  // data-genug-on-click (and optionally data-genug-props, a JSON string),
+  // and a click anywhere inside it sends that event. closest() makes a
+  // click on an icon inside a tagged button count too.
   document.addEventListener("click", (event) => {
     const target = event.target as Element | null;
     const el = target?.closest<HTMLElement>("[data-genug-on-click]");
@@ -373,50 +340,43 @@ interface Window {
     send({ event: eventName }, parsePropsAttribute(el.dataset.genugProps));
   });
 
-  // Opt-in automatic outbound-link and file-download tracking. This
-  // exists despite data-genug-on-click already covering "track this
-  // click" because links inside CMS or user-generated content can't be
-  // hand-tagged — which is exactly where outbound links tend to live.
+  // Optional automatic tracking of outbound links and file downloads.
+  // Needed in addition to data-genug-on-click, because links in CMS or
+  // user content can't be tagged by hand, and that is where most outbound
+  // links are.
   if (window.genugAnalyticsConfig?.enableAutoLinkTracking === true) {
     const handleLinkActivation = (event: MouseEvent): void => {
-      // auxclick covers middle-click ("open in new tab"), a common way
-      // to follow an outbound link that never fires a plain click.
-      // Button 1 only — button 2 is the context menu, which isn't a
-      // navigation and shouldn't be counted as one.
+      // auxclick covers the middle mouse button ("open in new tab"), a
+      // common way to open an outbound link that fires no normal click.
+      // Only button 1: button 2 opens the context menu, which isn't a
+      // navigation.
       if (event.type === "auxclick" && event.button !== 1) return;
 
       const target = event.target as Element | null;
       const anchor = target?.closest<HTMLAnchorElement>("a[href]");
       if (!anchor) return;
 
-      // An explicit data-genug-on-click on this link supersedes the
-      // automatic one. Without this, both listeners match the same click
-      // — the tagged one and this one — and a single click is recorded
-      // twice, silently inflating the count.
+      // A data-genug-on-click on this link replaces the automatic event.
+      // Otherwise both listeners would handle the same click and it would
+      // be counted twice. (data-genug-on-load likewise wins over
+      // enableAutoPageTracking: one action, one event.)
       //
-      // Same precedence data-genug-on-load already takes over
-      // enableAutoPageTracking, for the same reason: one action, one
-      // event, and an explicit tag is a statement of intent that beats a
-      // blanket fallback.
-      //
-      // Scoped with contains() so it only applies when the tag is on the
-      // link itself (or something inside it). A tagged *ancestor* — an
-      // outbound link inside a <div data-genug-on-click="card_click">
-      // — still fires both, because those describe two genuinely
-      // different things rather than the same click twice.
+      // contains() limits this to a tag on the link itself or inside it.
+      // An outbound link inside a <div data-genug-on-click="card_click">
+      // still sends both, because they describe two different things.
       const tagged = target?.closest<HTMLElement>("[data-genug-on-click]");
       if (tagged?.dataset.genugOnClick && anchor.contains(tagged)) return;
 
-      // Anything that isn't a web navigation — mailto:, tel:, a bare
-      // #anchor, javascript: — is neither an outbound visit nor a
-      // download, so it's left alone rather than guessed at.
+      // Links that don't open a web page (mailto:, tel:, #anchor,
+      // javascript:) are neither outbound visits nor downloads, so they
+      // are ignored.
       if (anchor.protocol !== "http:" && anchor.protocol !== "https:") return;
 
       const linkText = collapseLinkText(anchor.textContent);
 
-      // Download wins when a link is both (an outbound PDF): what the
-      // visitor did was download a file; whose server it sat on is
-      // incidental. See file_download.json.
+      // A link that is both (a PDF on another site) counts as a download:
+      // the visitor downloaded a file, wherever it was. See
+      // file_download.json.
       if (isDownloadLink(anchor)) {
         send(
           { auto: "fileDownload" },
@@ -445,23 +405,20 @@ interface Window {
     document.addEventListener("auxclick", handleLinkActivation);
   }
 
-  // Read off <html>, not <body> — <html> exists the instant parsing
-  // starts, so this works even if the script runs before <body> has
-  // been parsed yet (e.g. placed in <head> without defer). Presence of
-  // the attribute is itself the opt-in, same as data-genug-on-click
-  // for clicks — no config flag needed, and it takes priority over
-  // enableAutoPageTracking so a page doesn't fire both.
+  // Read from <html>, not <body>: <html> exists from the start, so this
+  // works even when the script runs before <body> exists (in <head>
+  // without defer). The attribute alone turns it on, like
+  // data-genug-on-click, and it wins over enableAutoPageTracking so a
+  // page doesn't send both.
   const root = document.documentElement;
   const autoPageTracking =
     window.genugAnalyticsConfig?.enableAutoPageTracking === true;
 
-  // Called once at load and, when enableAutoRouteTracking is on, again
-  // on every route change. Deliberately one function rather than two
-  // similar ones: the attribute-beats-flag precedence above then applies
-  // to a route change by construction, instead of being a second set of
-  // rules that could drift out of step with this one. The dataset is
-  // re-read per call, so a framework that updates data-genug-on-load
-  // between routes is honoured rather than replayed stale.
+  // Called once at load and, with enableAutoRouteTracking, again on
+  // every route change. One function for both, so the rule that the
+  // attribute wins over the flag also applies to route changes. The
+  // attribute is read again on each call, so a framework that changes
+  // data-genug-on-load between routes is respected.
   function firePageEvent(): void {
     const customLoadEvent = root.dataset.genugOnLoad;
     if (customLoadEvent) {
@@ -484,12 +441,10 @@ interface Window {
 
   firePageEvent();
 
-  // The hash is deliberately excluded: #faq -> #pricing is an in-page
-  // jump, not a navigation, and counting it would fire a page event for
-  // every anchor link and "back to top" button — the same line the
-  // automatic link tracking already draws by ignoring bare #anchor
-  // links. The cost is that hash-routed SPAs (#/about) aren't tracked
-  // at all; a documented gap rather than an oversight.
+  // The fragment is ignored on purpose: #faq -> #pricing is a jump within
+  // the page, and counting it would send a page event for every anchor
+  // link and "back to top" button. The downside, which is documented:
+  // apps that route with the fragment (#/about) aren't tracked.
   function currentRoute(): string {
     return location.pathname + location.search;
   }
@@ -498,14 +453,12 @@ interface Window {
     let lastRoute = currentRoute();
     let scheduled = false;
 
-    // Deferred to the next tick rather than fired inline, for three
-    // reasons. Frameworks set document.title *after* the route change,
-    // so firing immediately captures the previous page's title. A route
-    // guard redirecting /old to /new calls pushState twice in one tick,
-    // and coalescing records one event at the URL the visitor actually
-    // landed on instead of two, one of which they never saw. And it
-    // gives the unchanged-route check somewhere to sit, so a router
-    // re-pushing the current URL doesn't count as a second visit.
+    // Wait until the next tick instead of sending right away, for three
+    // reasons. Frameworks set document.title after the route change, so
+    // sending now would use the previous page's title. A redirect from
+    // /old to /new calls pushState twice at once, and waiting records only
+    // the page the visitor ended up on. And a router pushing the same URL
+    // again isn't counted as a second visit.
     const scheduleRouteEvent = (): void => {
       if (scheduled) return;
       scheduled = true;
@@ -518,11 +471,11 @@ interface Window {
       }, 0);
     };
 
-    // The History API fires no event of its own when a router navigates
-    // — popstate covers only back/forward — so pushState is wrapped to
-    // report it. replaceState is left alone deliberately: it means
-    // "rewrite the current entry" (canonicalising a URL, stripping a
-    // token, storing filter state), which isn't a visit.
+    // The browser fires no event when a router navigates (popstate is
+    // only for back/forward), so pushState is wrapped to notice it.
+    // replaceState isn't wrapped on purpose: it changes the current entry
+    // (tidying a URL, removing a token, saving filters), which isn't a
+    // new page.
     const originalPushState = history.pushState.bind(history);
     history.pushState = (
       data: unknown,
@@ -536,17 +489,15 @@ interface Window {
     window.addEventListener("popstate", scheduleRouteEvent);
   }
 
-  // Opt-in, and separate from enableAutoPageTracking on purpose. Plenty
-  // of sites call pushState for things that aren't navigation — a
-  // lightbox, a wizard step, filter state — and firing page events for
-  // those would inflate the stored numbers permanently, with nothing on
-  // the row to tell a phantom view from a real one. A deployment that
-  // misses this flag under-collects, but every number it does report is
-  // true; one that over-collects reports false numbers forever. This
-  // also patches a global the site owns, which shouldn't happen unasked.
+  // Optional, and separate from enableAutoPageTracking on purpose. Many
+  // sites call pushState for things that aren't new pages (a lightbox, a
+  // form step, filters), and counting those would inflate the numbers
+  // for good, with no way to tell them apart later. Missing some page
+  // views is better than counting false ones. It also changes a browser
+  // function the site owns, which shouldn't happen without being asked.
   if (window.genugAnalyticsConfig?.enableAutoRouteTracking === true) {
-    // Additive, so with no page-load opt-in there is nothing for a route
-    // change to repeat and this would silently do nothing at all.
+    // It only repeats the page-load event, so without a page-load option
+    // there is nothing to repeat.
     if (!root.dataset.genugOnLoad && !autoPageTracking) {
       console.warn(
         "genug: enableAutoRouteTracking is enabled, but no page-load tracking is configured for it to repeat — set enableAutoPageTracking, or add data-genug-on-load to <html>. Those events will not be sent.",

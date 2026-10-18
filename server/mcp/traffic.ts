@@ -29,9 +29,8 @@ import {
   type ToolRegistrar,
 } from "./shared.js";
 
-// "How much traffic, and when" — the aggregate shape of activity over a
-// period, however it's sliced (whole period, per day, per weekday, per
-// hour), and for whichever sessions a segment selects.
+// Tools about how much traffic there was and when: totals, per day, per
+// weekday, per hour, and changes between periods.
 
 const TRAFFIC_FIELDS =
   "sessions, visitors (distinct visitor ids — over several days a consentless visitor counts once per day they came, since their id rotates daily by design; see get_consent_breakdown), interactionEvents (every non-page-view event) and viewEvents (the page-view event). interactionEvents and viewEvents are additive — they don't overlap.";
@@ -56,11 +55,9 @@ export const registerTrafficTools: ToolRegistrar = (
           pageViewEventType,
           clause,
         );
-        // A zero-everywhere summary is ambiguous to an agent — genuinely quiet
-        // period, or has the client script never actually reached this server?
-        // Only the latter case gets a note; a quiet period within otherwise-
-        // present data is a normal, correct answer. sessions === 0 already
-        // implies no events matched at all, so it alone is enough to check.
+        // All zeros can mean a quiet period or a script that never reached
+        // this server. Add a note for the second case only. No sessions
+        // means no events matched, so checking sessions is enough.
         const result =
           summary.sessions === 0 && !hasAnyEvents(db)
             ? {
@@ -169,8 +166,9 @@ export const registerTrafficTools: ToolRegistrar = (
       },
     },
     async ({ from, to, event, segment }) => {
-      // Local days, as the step is counted: in UTC milliseconds a month
-      // with the autumn clock change measures one day too long.
+      // Count local days, not milliseconds: a month containing the autumn
+      // clock change is an hour longer, which would round up to an extra
+      // day.
       const days = enumerateDays(from, to, timezone).length;
       if (days > MAX_CHANGE_DAYS) {
         return toolError(
@@ -186,9 +184,10 @@ export const registerTrafficTools: ToolRegistrar = (
       if (event !== undefined && !isRegisteredEvent(event)) {
         return unknownEventError(event);
       }
-      // Resolved once against the period asked for, so a bad segment is
-      // an error before any query runs. Each baseline resolves its own,
-      // because entry-based conditions depend on the period.
+      // Resolve the segment for the requested period first, so a bad
+      // segment fails before any query runs. Each comparison period
+      // resolves its own, because entry-page conditions depend on the
+      // period.
       return withSegment(db, segment, { from, to }, () =>
         jsonContent(
           getTrafficChange(

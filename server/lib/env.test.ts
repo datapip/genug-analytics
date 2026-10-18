@@ -70,8 +70,8 @@ test("parseReadOnly is off unless set to exactly true", () => {
   assert.equal(parseReadOnly("true"), true);
 });
 
-// A typo must not silently mean "writes allowed" on a deployment whose
-// key is public.
+// A typo must not quietly allow writes on a deployment with a public
+// key.
 test("parseReadOnly refuses anything that is not true or false", () => {
   for (const value of ["1", "yes", "TRUE", "ture"]) {
     assert.throws(() => parseReadOnly(value), /READ_ONLY must be/);
@@ -86,7 +86,7 @@ test("shortMcpApiKeyWarning warns on a short key, saying how to make one", () =>
   assert.equal(shortMcpApiKeyWarning("a".repeat(32), false), undefined);
 });
 
-// The demo publishes its key, so its length guards nothing.
+// A read-only key is public anyway, so its length doesn't matter.
 test("shortMcpApiKeyWarning stays quiet on a READ_ONLY deployment", () => {
   assert.equal(shortMcpApiKeyWarning("demo", true), undefined);
 });
@@ -97,8 +97,8 @@ test("parseTimezone accepts an IANA name and returns its canonical spelling", ()
   assert.equal(parseTimezone("UTC"), "UTC");
 });
 
-// A fixed offset would pass Intl but be wrong for half the year
-// wherever clocks change, so it is refused along with nonsense.
+// Intl accepts a fixed offset, but it is wrong for half the year where
+// clocks change, so it is refused.
 test("parseTimezone refuses a fixed offset, an unknown name and an empty value", () => {
   for (const value of ["+01:00", "CET+1", "Mars/Olympus", ""]) {
     assert.throws(
@@ -109,8 +109,8 @@ test("parseTimezone refuses a fixed offset, an unknown name and an empty value",
   }
 });
 
-// A city without its region is the likely mistake. The error names the
-// zone it probably meant, and always says where the full list is.
+// A city without its region is the usual mistake. The error suggests the
+// likely zone and says where the full list is.
 test("parseTimezone suggests the zone for a bare city and links the list", () => {
   assert.throws(() => parseTimezone("Berlin"), /Did you mean Europe\/Berlin\?/);
   assert.throws(

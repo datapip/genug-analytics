@@ -2,19 +2,19 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { blockIndex } from "./ip.js";
 
-// The visitor's country, looked up on this server from the shortened
-// address (lib/ip.ts) in a table shipped with the image. Nothing is
-// asked of any outside service and only the two-letter code is stored.
-// Off unless COUNTRY_LOOKUP=true: see "Country" in docs/decisions.md.
+// Looks up the visitor's country from the shortened address (lib/ip.ts)
+// in a table that ships with the image. No outside service is asked, and
+// only the two-letter code is stored. Off unless COUNTRY_LOOKUP=true; see
+// "Country" in docs/decisions.md.
 //
 // The table is ip-location-db's "user-country" (public domain, PDDL),
-// fetched at image build by scripts/fetch-country-data.mjs. It is as
-// fresh as the image, which is fine at country level.
+// downloaded when the image is built (scripts/fetch-country-data.mjs).
+// It is as current as the image, which is good enough for countries.
 
 // Stored when the lookup ran and found nothing: an unreadable address,
-// or a block the table does not list. Distinct from NULL, which means
-// no lookup ran — a row from before COUNTRY_LOOKUP was on, or with it
-// off — so the two are never reported as one "unknown".
+// or a range the table doesn't list. NULL means something else, that no
+// lookup ran (the setting was off), so the two are never reported
+// together as "unknown".
 export const NO_COUNTRY = "ZZ";
 
 export const COUNTRY_FILES = {
@@ -22,36 +22,36 @@ export const COUNTRY_FILES = {
   6: "user-country-ipv6-num.csv",
 } as const;
 
-// The codes are what the agent reads back, so the file may only hold
-// this shape; anything else refuses the whole table. That keeps the
-// column a closed list rather than text from a download.
+// The agent reads these codes, so the file may contain only two capital
+// letters per row; anything else rejects the whole table. That way no
+// downloaded text can reach the agent.
 const COUNTRY_CODE = /^[A-Z]{2}$/;
 
-// The real files hold hundreds of thousands of ranges. Far fewer means
-// a truncated download, and a table that quietly answers ZZ for most
-// visitors is the plausible-while-wrong failure, so it refuses instead.
+// The real file has hundreds of thousands of ranges. Far fewer means the
+// download was cut short, and such a table would quietly answer ZZ for
+// most visitors, so it is rejected.
 const MIN_RANGES = 10_000;
 
-// And far more means something that is not this table at all. Checked
-// before reading, so an oversized download stops the start with a
-// reason instead of running a small server out of memory.
+// Far more means it is some other file. This is checked before reading,
+// so an oversized file stops the startup with a clear reason instead of
+// using up a small server's memory.
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
-// The file's numbers are whole addresses; a lookup has only a block
-// (an IPv4 /24, an IPv6 /48). Shifting both ends down to block indexes
-// makes the search exact on what is actually known.
+// The file lists full addresses, but a lookup only has a block (an IPv4
+// /24, an IPv6 /48). Converting both to block numbers lets the search
+// compare like with like.
 const BLOCK_SHIFT = { 4: 8n, 6: 80n } as const;
 
 interface Ranges {
-  // Block indexes, sorted and non-overlapping; codes[i] is the
-  // index into `names` for the range starts[i]..ends[i].
+  // Block numbers, sorted and not overlapping. codes[i] is the position
+  // in `names` of the country for the range starts[i]..ends[i].
   starts: Float64Array;
   ends: Float64Array;
   codes: Uint16Array;
 }
 
 export interface CountryTable {
-  // Takes truncateIp's output, never an address.
+  // Takes truncateIp's output, never a full address.
   lookup(truncated: string): string;
 }
 
@@ -71,7 +71,7 @@ export function loadCountryTable(
       if (block === undefined) return NO_COUNTRY;
       const { starts, ends, codes } = tables[block.family];
 
-      // The last range starting at or before the block.
+      // Find the last range that starts at or before the block.
       let low = 0;
       let high = starts.length - 1;
       let found = -1;
@@ -144,8 +144,8 @@ function loadRanges(
     const end = Number(last >> shift);
     if (start < previousEnd) throw fail("the ranges are not in order");
 
-    // A block split between several ranges takes the country of its
-    // lowest part; the rest of that block is already claimed.
+    // A block that spans several ranges gets the country of its first
+    // range; later ranges in the same block are skipped.
     if (start === previousEnd) start += 1;
     if (start > end) continue;
 

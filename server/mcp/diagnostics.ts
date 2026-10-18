@@ -18,13 +18,10 @@ import {
   VISITOR_TEXT_CAVEAT,
 } from "./shared.js";
 
-// Kept apart from registerDiagnosticTools below, and from
-// mcp/tools.ts's toolModules, the same way registerAdminTools is: this
-// is the only diagnostic tool that hands back raw rows (url, props,
-// referrer verbatim) rather than an aggregate, so it is the one
-// docs/decisions.md already named as "the one a cautious deployment can
-// unregister" — READ_ONLY now does that for it, on the same reasoning
-// as a write: a public MCP key should not double as a raw event export.
+// Registered separately from the other diagnostic tools because it is
+// the only tool that returns raw rows (url, props, referrer as stored)
+// instead of totals. READ_ONLY leaves it out, so a public MCP key can't be
+// used to export raw events.
 export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
   server.registerTool(
     "get_recent_events",
@@ -38,8 +35,8 @@ export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
       const { rows, truncated } = getRecentEvents(db, limit);
       const result = jsonContent(rows);
       if (truncated) {
-        // A second block rather than a wrapper object, so the first
-        // stays the same plain array it has always been.
+        // A second content block, so the first stays a plain array of
+        // rows.
         result.content.push({
           type: "text",
           text: `Only the newest ${rows.length} of the ${limit} requested events are shown: the rest would have made this answer too large. Ask for a smaller limit, or use the aggregate tools for anything beyond a spot check.`,
@@ -50,11 +47,9 @@ export const registerRecentEventsTool: ToolRegistrar = (server, db) => {
   );
 };
 
-// "Is tracking actually working" — quality-assurance signals rather
-// than analytics. None of these describe visitor behaviour; they
-// describe the health of the pipeline itself. Unlike get_recent_events
-// above, none returns a raw row, so all of them stay registered under
-// READ_ONLY — a demo deployment still needs to see that tracking works.
+// Tools that answer "is tracking working?" rather than describing
+// visitors. None returns raw rows, so they stay available under
+// READ_ONLY: a public demo still needs to show that tracking works.
 export const registerDiagnosticTools: ToolRegistrar = (
   server,
   db,
@@ -81,7 +76,8 @@ export const registerDiagnosticTools: ToolRegistrar = (
       inputSchema: {},
     },
     async () => {
-      // pageViewEventType is a live binding: read it here, per call.
+      // pageViewEventType changes when events are reloaded, so read it
+      // on each call.
       return jsonContent(
         getCollectionHealth(db, new Date(), pageViewEventType),
       );
@@ -96,9 +92,8 @@ export const registerDiagnosticTools: ToolRegistrar = (
       inputSchema: {},
     },
     async () => {
-      // Live bindings, read per call (see AGENTS.md): a reload replaces
-      // them, and a module-level copy would report the errors of the
-      // registry that was loaded at startup forever.
+      // Read these on each call: reloading the events replaces them, and a
+      // copy saved at startup would keep reporting the startup errors.
       return jsonContent({ source: eventsSource, errors: schemaErrors });
     },
   );

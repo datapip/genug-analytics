@@ -88,12 +88,9 @@ test("reports zero when nothing was ever stored under the name", () => {
   assert.equal(result.ok === true ? result.storedCount : -1, 0);
 });
 
-// The whole point of this function's design: it does not know or care
-// whether an event carries a role tag. routes/cockpit/events.ts is what checks
-// the consequence, via the real registry loader, and calls restore()
-// if that loader refuses the result — see the wiring tests for the
-// end-to-end version of that (a real collision, a real 409, a real
-// restored file).
+// This function ignores role tags. routes/cockpit/events.ts reloads the
+// registry and calls restore() if the loader refuses the result (see the
+// wiring tests).
 test("deletes an event carrying a role tag without refusing", () => {
   const dir = directory();
   const result = deleteEventFile(database(), dir, "page_view");
@@ -116,9 +113,7 @@ test("restore() puts back the exact bytes that were deleted", () => {
   assert.equal(readFileSync(join(dir, "page_view.json"), "utf8"), before);
 });
 
-// A file already broken before the request is not a file the server is
-// routing anything through by name — there is nothing left to protect,
-// so this stays deletable rather than stuck.
+// A file that is already broken isn't loaded, so it can be deleted.
 test("allows deleting a file that does not currently load", () => {
   const dir = directory({
     "broken.json": { _description: "x", bad: "not-a-real-rule" },

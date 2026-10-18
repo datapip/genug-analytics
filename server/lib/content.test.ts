@@ -98,7 +98,7 @@ test("getTopPages merges URLs that only differ by query string or hash", () => {
 });
 
 // One installation may collect for several sites, and "/" on two of
-// them is two pages; www is the same site, so it folds into the apex.
+// them is two pages. www.example.com counts as example.com.
 test("the page queries keep one site's path apart from another's", () => {
   const db = setupDb();
   const views: [string, string][] = [
@@ -138,8 +138,8 @@ test("the page queries keep one site's path apart from another's", () => {
     );
   }
 
-  // A url that does not parse keeps its whole text as the path, on no
-  // site, and a newline in it must not move where the key splits.
+  // An unparseable url keeps its whole text as the path, with no site,
+  // and a newline in it must not break the grouping key.
   insertEvent(db, {
     event: "page_view",
     visitorId: "s6",
@@ -158,8 +158,7 @@ test("the page queries keep one site's path apart from another's", () => {
 
 test("getTopReferrers counts sessions and buckets no-referrer as direct (null)", () => {
   const db = setupDb();
-  // Distinct counts per bucket (3/2/1) so the expected order is
-  // unambiguous regardless of the underlying row iteration order.
+  // Different counts per row (3/2/1), so the expected order is clear.
   const referrers = [
     "https://www.google.com/search?q=genug",
     "https://www.google.com/search?q=analytics",
@@ -210,10 +209,10 @@ test("getTopReferrers counts sessions and buckets no-referrer as direct (null)",
 
 test("getTopReferrers attributes a session once, however many pages it reads", () => {
   const db = setupDb();
-  // The case that made this session-scoped. On a single-page app
-  // document.referrer does not change on a route change, so every page
-  // view of this one visit carries the Google referrer — counted per
-  // view, one visitor reading six pages was six Google visits.
+  // Why referrers are counted per session: in a single-page app,
+  // document.referrer doesn't change between routes, so every page view
+  // of this visit has the Google referrer. Counted per page view, one
+  // visitor reading six pages would be six Google visits.
   for (let i = 0; i < 6; i++) {
     insertEvent(db, {
       event: "page_view",
@@ -254,12 +253,10 @@ test("getTopReferrers attributes a session once, however many pages it reads", (
 
 test("getTopReferrers keeps an ordinary multi-page session on its entry referrer", () => {
   const db = setupDb();
-  // The discriminating case for the MIN(ts) row pick: unlike an SPA,
-  // here the later views carry the site's own pages. Pick the wrong row
-  // of the group and the referrer is a self-referral, so the session is
-  // not merely misattributed — it is dropped from the report entirely.
-  // That asymmetry is why this matters more here than in getEntryPages,
-  // where a wrong row still counts the session, just under another path.
+  // Checks that the referrer comes from the session's first row
+  // (MIN(ts)). Here the later page views have the site's own pages as
+  // referrer; taking one of those would drop the session from the report
+  // as a self-referral.
   const views = [
     {
       ts: "2026-01-01T10:00:00.000Z",
@@ -280,7 +277,7 @@ test("getTopReferrers keeps an ordinary multi-page session on its entry referrer
     });
   });
 
-  // deepEqual on the whole array, so a stray direct bucket fails too.
+  // Compare the whole array, so an extra "direct" row fails too.
   assert.deepEqual(getTopReferrers(db, PERIOD, 10, "page_view").items, [
     { host: "www.google.com", sessions: 1 },
   ]);
@@ -288,12 +285,9 @@ test("getTopReferrers keeps an ordinary multi-page session on its entry referrer
 
 test("getTopReferrers does not count a session that began before the period", () => {
   const db = setupDb();
-  // The session started the day before, so it belongs to that day's
-  // referrer split, not this one — its Google entry was already counted
-  // there. Pinned because it is a real edge with a real cost: referrer
-  // totals come out below the period's active-session count. (Before
-  // sessions were scoped by their start, this only passed because the
-  // in-window view's referrer happened to be a self-referral.)
+  // The session started the day before, so it counts for that day, not
+  // this one. So referrer totals can be lower than the number of
+  // sessions active in the period.
   insertEvent(db, {
     event: "page_view",
     visitorId: "v1",
@@ -309,9 +303,8 @@ test("getTopReferrers does not count a session that began before the period", ()
     sessionId: "s1",
     ts: "2026-01-01T00:01:00.000Z",
     url: "https://example.com/pricing",
-    // An external referrer on the in-window view, so this only passes
-    // because the session is scoped out — not because the self-referral
-    // rule happened to drop it.
+    // An external referrer on the view inside the period, so the test
+    // only passes because the session belongs to the day before.
     referrer: "https://t.co/abc",
     props: {},
   });
@@ -321,19 +314,18 @@ test("getTopReferrers does not count a session that began before the period", ()
 
 test("getTopReferrers excludes a self-referral entry, apex and www alike", () => {
   const db = setupDb();
-  // Session-scoping removes most internal navigation by construction,
-  // but not a session that begins mid-visit: 30 minutes idle ends one
-  // (see lib/session.ts), so the next page view starts a session whose
-  // entry carries the site's own previous page. Both spellings, since a
-  // visitor can cross between them.
+  // Counting per session removes most links within the site, but not a
+  // session that starts mid-visit: after 30 minutes without activity
+  // (lib/session.ts), the next page view starts a new session with the
+  // site's own page as referrer. Both with and without www.
   const rows: { url: string; referrer: string }[] = [
     { url: "https://example.com/x", referrer: "https://example.com/" },
     { url: "https://example.com/x", referrer: "https://www.example.com/a" },
     { url: "https://www.example.com/x", referrer: "https://example.com/b" },
     { url: "https://www.example.com/x", referrer: "https://www.example.com/c" },
-    // A referral from another subdomain is NOT folded away: without a
-    // public suffix list there is no telling one of the deployment's own
-    // subdomains from an unrelated site sharing a parent domain.
+    // A link from another subdomain is not removed: without the public
+    // suffix list, the site's own subdomains can't be told from unrelated
+    // sites under the same parent domain.
     { url: "https://example.com/x", referrer: "https://blog.example.com/p1" },
     { url: "https://example.com/x", referrer: "https://blog.example.com/p2" },
     { url: "https://example.com/x", referrer: "https://www.google.com/?q=1" },
@@ -402,8 +394,8 @@ test("getEntryPages ranks sessions by their first page-view path", () => {
     url: "https://example.com/pricing",
     props: {},
   });
-  // A non-page-view event before s3's page_view — must not be mistaken
-  // for an earlier "entry" than the actual first page view.
+  // A non-page-view event before s3's page_view must not count as its
+  // entry.
   insertEvent(db, {
     event: "outbound_link_click",
     visitorId: "v3",
@@ -557,10 +549,9 @@ test("getEntryPages/getExitPages/getBouncePages return empty arrays for a period
   assert.deepEqual(getBouncePages(db, PERIOD, 10, "page_view").items, []);
 });
 
-// The edge every session-shaped query used to get wrong: a session
-// under way at `from` had its first in-window view reported as its
-// entry, and one with views before `from` reported as a bounce. A
-// session belongs to the period it started in and is read in full.
+// A session belongs to the period it started in and is read in full.
+// Otherwise a session already running at `from` would get a wrong entry
+// page, and one with views before `from` would look like a bounce.
 const STRADDLE_PERIOD = {
   from: "2026-01-01T00:00:00.000Z",
   to: "2026-01-01T23:59:59.999Z",
@@ -586,9 +577,9 @@ function straddlingSessions(db: Database.Database) {
     url: "https://example.com/pricing",
     props: {},
   });
-  // s3: began before the period with a download, first page view
-  // inside it. Still not this period's session — the scope is on the
-  // session's first event of any type, not its first page view.
+  // s3: started before the period with a download; its first page view
+  // is inside the period. Still not this period's session: what counts
+  // is the session's first event of any kind.
   insertEvent(db, {
     event: "file_download",
     visitorId: "v3",
@@ -629,11 +620,9 @@ function straddlingSessions(db: Database.Database) {
   });
 }
 
-// The boundary the period's own start sits on. The scope condition
-// bounds the outer query with `ts >= @from` (see lib/sessionScope.ts),
-// and a strict `>` there would drop this session's first page view
-// while still counting the session — reporting /second as where it
-// entered, which is wrong and looks entirely plausible.
+// A session starting exactly at `from`. lib/sessionScope.ts uses
+// `ts >= @from`; with `>` the first page view would be dropped and
+// /second reported as the entry page.
 test("getEntryPages counts a page view landing exactly on the period's start", () => {
   const db = setupDb();
   insertEvent(db, {
@@ -689,9 +678,8 @@ test("getBouncePages judges a session on its full length, not the part inside th
   ]);
 });
 
-// The wrapper every ranked query returns: what was cut, and the
-// denominator for a share, so the agent never mistakes ten rows for
-// the whole and never needs a second call to compute a percentage.
+// Every ranked query also returns how many rows there were and their
+// total, so the agent knows the list was cut and can compute shares.
 test("getTopPages reports groups and total beyond the limit", () => {
   const db = setupDb();
   for (const [path, views] of [
@@ -718,8 +706,8 @@ test("getTopPages reports groups and total beyond the limit", () => {
   });
 });
 
-// Ranked by bounced sessions, not rate: a one-session page at 100%
-// must not outrank the page that actually loses the most visitors.
+// Ranked by bounced sessions, not by rate: a page with one session at
+// 100% must not rank above the page that loses the most visitors.
 test("getBouncePages ranks by bounced sessions, keeping the rate on the row", () => {
   const db = setupDb();
   // /big: 3 entries, 2 bounced (rate 0.6667).
@@ -773,7 +761,7 @@ test("getBouncePages ranks by bounced sessions, keeping the rate on the row", ()
   });
 });
 
-// Campaign parameters are kept at ingestion and were read by nothing.
+// Ranking sessions by a campaign parameter on their first page.
 test("getTopEntryParams ranks sessions by one entry-page query parameter", () => {
   const db = setupDb();
   const entries = [
@@ -792,7 +780,7 @@ test("getTopEntryParams ranks sessions by one entry-page query parameter", () =>
       props: {},
     });
   }
-  // s1's later view carries no parameter — the entry page is what counts.
+  // s1's later view has no parameter; only the entry page counts.
   insertEvent(db, {
     event: "page_view",
     visitorId: "s1",

@@ -45,10 +45,8 @@ test("each event's metadata mirrors the schema shape", () => {
 test("serializeRegistry mirrors the registry's metadata without its Zod schemas", () => {
   const summary = serializeRegistry();
 
-  // Compared against the registry itself rather than a hardcoded list:
-  // the point of this test is that serializeRegistry mirrors whatever
-  // is registered, so restating the names here would just mean every
-  // new event breaks a test that isn't about it.
+  // Compared with the registry itself, not a fixed list of names, so
+  // adding an event doesn't break this test.
   assert.deepEqual(
     Object.keys(summary).sort(),
     Object.keys(eventRegistry).sort(),
@@ -59,21 +57,16 @@ test("serializeRegistry mirrors the registry's metadata without its Zod schemas"
   );
   assert.deepEqual(summary.page_view.props, eventRegistry.page_view.props);
   assert.equal("schema" in summary.page_view, false);
-  // Only proves the field carries across, not that a *true* value
-  // survives — none of the shipped built-ins set _conversion, so both
-  // sides here are always false. See the dedicated test below.
+  // No built-in event sets _conversion, so this only checks that the
+  // field is passed through; the next test checks `true`.
   assert.equal(
     summary.page_view.conversion,
     eventRegistry.page_view.conversion,
   );
 });
 
-// The test above can't prove a true value survives, because nothing
-// shipped sets one — it would pass unchanged if serializeRegistry
-// hardcoded `conversion: false`. serializeRegistry takes a registry
-// parameter for exactly this: hand it a synthetic one built the same
-// way loadEvents.test.ts's fixtures are (a real temp directory), same
-// as resolveTaggedEvent's tests do above.
+// Checks that `conversion: true` is passed through, with a registry
+// built from a temporary folder (as in loadEvents.test.ts).
 test("serializeRegistry carries a true conversion flag through, not just false", () => {
   const dir = mkdtempSync(join(tmpdir(), "genug-events-"));
   writeFileSync(
@@ -90,11 +83,8 @@ test("serializeRegistry carries a true conversion flag through, not just false",
   assert.equal(summary.signup!.conversion, true);
 });
 
-// registry.ts throws when the shipped files do not load, which cannot
-// be caught from inside a test that had to import the module to run.
-// Asserting the files themselves are clean checks the same thing from
-// the other side — same approach as the pageView-tag test below, which
-// stands in for the throw it would otherwise have to provoke.
+// registry.ts throws when a built-in file doesn't load, which a test
+// importing it can't catch. So this checks the files themselves.
 test("every event file shipped in the image loads without errors", () => {
   const { registry, errors } = loadEvents(
     fileURLToPath(new URL("../events", import.meta.url)),
@@ -167,10 +157,9 @@ test("file_download rejects props with a missing field", () => {
   assert.equal(result.success, false);
 });
 
-// What the server resolves a client-sent role to. Derived from the
-// registry rather than restated, so a renamed event is recorded under
-// its new name with nothing else touched — and, unlike the name list
-// this replaced, without the client ever being told.
+// The event name the server uses for each role the client sends. Taken
+// from the registry, so a renamed event is stored under its new name
+// without any change to the client.
 test("roleEventNames maps each role to what this deployment registers", () => {
   assert.deepEqual(roleEventNames, {
     pageView: pageViewEventType,
@@ -179,11 +168,9 @@ test("roleEventNames maps each role to what this deployment registers", () => {
   });
 });
 
-// Deliberately not filled in with the built-in name. A deployment that
-// registers no outbound-click event has none, and an automatic outbound
-// click then rejects as an unknown event type naming the missing tag —
-// one diagnostic, in the place every other mistracked event already
-// surfaces.
+// No built-in name as a fallback: without an outbound-click event, an
+// automatic outbound click is rejected as unknown, naming the missing
+// tag, like every other rejected event.
 test("a role nothing carries resolves to undefined, not a default name", () => {
   assert.equal(
     resolveTaggedEvent({ a: {}, b: {} }, "outboundClick"),
@@ -192,8 +179,8 @@ test("a role nothing carries resolves to undefined, not a default name", () => {
   assert.equal(resolveTaggedEvent({ a: {}, b: {} }, "fileDownload"), undefined);
 });
 
-// The generalization that matters: the same resolver serves every role
-// tag, so all three client-fired names follow a rename identically.
+// The same lookup works for every role tag, so all three follow a
+// rename.
 test("resolveTaggedEvent reads whichever tag it is asked for", () => {
   const registry = {
     a_page: { pageView: true },
@@ -217,8 +204,8 @@ test("resolveTaggedEvent names the offending tag when two events share it", () =
   );
 });
 
-// A renamed built-in must still be found, which is the whole point of
-// tagging these rather than hardcoding their names anywhere.
+// A renamed built-in is still found, which is why roles are tags and
+// not fixed names.
 test("a renamed event is still found through its role tag", () => {
   const renamed = {
     seitenaufruf: { pageView: true },
@@ -231,13 +218,10 @@ test("a renamed event is still found through its role tag", () => {
   assert.equal(resolveTaggedEvent(renamed, "fileDownload"), "datei_download");
 });
 
-// The registry is what an AI agent reads to ground itself before
-// answering a question, so a blank or throwaway description isn't a
-// style problem — it's the agent being handed unlabeled data and
-// guessing. These run over whatever the deployment actually registers,
-// so a custom event added by someone tailoring their own instance is
-// held to the same bar as the built-ins. Prose can't be checked
-// automatically; emptiness and obvious placeholders can.
+// The agent reads the registry to understand the data, so empty or
+// placeholder descriptions leave it guessing. These checks run over all
+// registered events, including a deployment's own. Whether the text is
+// good can't be tested; whether it is missing can.
 test("every registered event describes itself", () => {
   for (const [name, definition] of Object.entries(eventRegistry)) {
     assert.ok(
@@ -262,11 +246,8 @@ test("every registered prop describes itself", () => {
   }
 });
 
-// Exactly one event must carry the pageView tag: resolveTaggedEvent
-// throws on more than one, and registry.ts throws on none. The zero case
-// used to be allowed, which put an "or this deployment has no page-view
-// concept" branch into every traffic result, the cockpit and five tool
-// descriptions, to serve a deployment that cannot meaningfully exist.
+// Exactly one event must have the pageView tag: resolveTaggedEvent
+// throws on more than one, and registry.ts throws on none.
 test("exactly one registered event carries the pageView tag", () => {
   const tagged = Object.entries(eventRegistry).filter(
     ([, definition]) => definition.pageView,
@@ -276,8 +257,7 @@ test("exactly one registered event carries the pageView tag", () => {
 });
 
 test("resolveTaggedEvent returns undefined when nothing carries the tag", () => {
-  // The registry module turns this into a startup throw; the resolver
-  // itself stays general, since the other two tags are allowed to be
-  // absent and fall back to their built-in names.
+  // registry.ts turns this into an error at startup. The lookup itself
+  // allows a missing tag, since the other two roles may be missing.
   assert.equal(resolveTaggedEvent({ a: {}, b: {} }, "pageView"), undefined);
 });

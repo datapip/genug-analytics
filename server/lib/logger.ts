@@ -1,10 +1,6 @@
-// A single-line JSON object per log line, instead of free-text
-// console.error/console.log — no dependency added (still just
-// console.error/console.log underneath), but now something a real log
-// aggregator (or a person grepping raw logs) can parse reliably instead
-// of guessing at each call site's own message format. Deliberately
-// minimal: two levels, no transports/formatters — this project doesn't
-// need more than "every failure path logs the same shape."
+// Writes each log entry as one line of JSON, so log tools (and grep) can
+// parse every entry the same way. Deliberately minimal: two levels,
+// written with console.log and console.error.
 export interface LogFields {
   [key: string]: unknown;
 }
@@ -15,9 +11,8 @@ function serializeError(error: unknown): string {
 }
 
 function write(level: "info" | "error", msg: string, fields: LogFields): void {
-  // JSON.stringify never emits a raw newline for a string field (a stack
-  // trace included) — it escapes it as \n — so the line as a whole stays
-  // single-line even when `fields.error` spans multiple logical lines.
+  // JSON.stringify escapes newlines inside strings as \n, so a multi-line
+  // stack trace still produces a single log line.
   const line = JSON.stringify({
     level,
     msg,

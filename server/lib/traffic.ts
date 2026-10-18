@@ -10,29 +10,25 @@ import {
   localSpans,
 } from "./timezone.js";
 
-// "How much traffic, and when" — aggregate activity over a period,
-// however it's bucketed. Pairs with mcp/traffic.ts, which exposes these.
+// Queries about how much traffic there was and when: totals, per day,
+// per weekday, per hour. Used by mcp/traffic.ts.
 //
-// Every query takes an optional segment (lib/segment.ts) and pastes its
-// clause into the WHERE, so "traffic from mobile" or "sessions that
-// bought X" is the same query narrowed, not a second tool.
+// Every query takes an optional segment (lib/segment.ts) and adds its
+// condition to the WHERE, so "traffic from mobile" is the same query
+// with a segment, not a separate tool.
 
 export interface TrafficSummary {
   sessions: number;
-  // Distinct visitor_ids. The first number anyone asks for. Over a
-  // multi-day period a consentless visitor counts once per day they
-  // came (daily-rotating id, see "Visitor identification" in
-  // docs/decisions.md); the description says so rather than leaving
-  // the number out.
+  // Distinct visitor_ids. Over several days, a visitor without consent
+  // counts once per day they came, because their id changes daily (see
+  // "Visitor identification" in docs/decisions.md). The tool
+  // description says so.
   visitors: number;
-  // Every event that ISN'T the page-view event — deliberately not the
-  // full total, so this and viewEvents are additive (sum to everything
-  // that happened) instead of viewEvents being a confusing subset of an
-  // "events" field that already included it.
+  // Every event that is not a page view. Together with viewEvents it adds
+  // up to all events.
   interactionEvents: number;
-  // Count of the page-view event specifically. Always present: exactly
-  // one registered event carries the pageView tag (see the schema
-  // registry), so zero here honestly means zero page views.
+  // The number of page views. There is always a page-view event (see
+  // the schema registry), so zero really means no page views.
   viewEvents: number;
 }
 
@@ -42,8 +38,8 @@ export function getTrafficSummary(
   pageViewEvent: string,
   segment: SegmentClause = NO_SEGMENT,
 ): TrafficSummary {
-  // One pass over the period: the page-view count is a conditional
-  // count beside the totals, not a second scan of the same rows.
+  // One pass over the rows: page views are counted with a condition next
+  // to the totals, not in a second query.
   const row = db
     .prepare(
       `SELECT
@@ -88,12 +84,11 @@ interface BucketTotals<K> {
   total: number;
 }
 
-// Holds the one rule the three bucketed queries below share: pair the
-// totals with the optional page-view counts, then split them additively
-// the way getTrafficSummary does. Their SQL stays written out per
-// function — passing the strftime() expression in would mean building
-// SQL text from a variable, which this project avoids even for
-// hardcoded values (see getEntryPages, lib/retention.ts).
+// Shared by the per-day, per-weekday and per-hour queries: combines the
+// totals with the page-view counts and splits them as getTrafficSummary
+// does. Each query keeps its own SQL, because passing the strftime()
+// expression in would mean building SQL from a variable, which this
+// project avoids.
 function bucketedCounts<K>(
   totals: BucketTotals<K>[],
   viewEvents: { bucket: K; count: number }[],
@@ -121,12 +116,11 @@ export interface TrafficByDay extends TrafficCounts {
   date: string; // YYYY-MM-DD, in the site's zone
 }
 
-// Same additive interactionEvents/viewEvents shape as getTrafficSummary,
-// just bucketed by day, so an agent that learned that vocabulary from
-// get_traffic_summary doesn't need a second one here. Days are calendar
-// days in the site's zone (lib/timezone.ts) and zero-filled, so a quiet
-// day reads as a dip rather than vanishing from the series. A day with
-// a clock change lasts 23 or 25 hours and reads as a small dip or bump.
+// The same fields as getTrafficSummary, per day. Days are in the site's
+// time zone (lib/timezone.ts), and days without events are included as
+// zero, so a quiet day shows as a dip instead of disappearing. A day
+// with a clock change lasts 23 or 25 hours, which shows as a small dip
+// or bump.
 export function getTrafficByDay(
   db: Database.Database,
   period: Period,
@@ -189,18 +183,16 @@ const WEEKDAY_NAMES = [
   "Saturday",
 ]; // index matches SQLite's strftime('%w', …): 0 = Sunday
 
-// Displayed Monday-first, not Sunday-first (SQLite's own order) — the
-// conventional business-week reading for "which days get the most
-// traffic".
+// Returned Monday first (SQLite starts on Sunday), as a work week is
+// usually read.
 const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 export interface TrafficByDayOfWeek extends TrafficCounts {
   day: string; // "Monday".."Sunday"
 }
 
-// The weekday in the site's zone, not the visitor's: a visitor in
-// another zone near midnight lands on the site's weekday, which is the
-// calendar the owner reads the result in.
+// The weekday in the site's time zone, not the visitor's, because the
+// owner reads the result in their own calendar.
 export function getTrafficByDayOfWeek(
   db: Database.Database,
   period: Period,
@@ -257,10 +249,10 @@ export interface TrafficByHour extends TrafficCounts {
   hour: number; // 0-23, in the site's zone
 }
 
-// The hour in the site's zone, not the visitor's. Where clocks change,
-// the fall-back night puts two real hours into one bucket and the
-// spring-forward night leaves one empty; over any period longer than a
-// few days that is noise, and the tool description says so.
+// The hour in the site's time zone, not the visitor's. When clocks go
+// back, two real hours fall into one hour; when they go forward, one
+// hour is empty. Over more than a few days that hardly matters, and the
+// tool description says so.
 export function getTrafficByHour(
   db: Database.Database,
   period: Period,
@@ -316,26 +308,25 @@ export function getTrafficByHour(
 export interface SessionSummary {
   // Sessions that started in the period.
   sessions: number;
-  // First event to last, averaged over all of them. A single-event
-  // session is 0 seconds, not excluded.
+  // Time from first to last event, averaged over all sessions. A session
+  // with one event counts as 0 seconds.
   averageSeconds: number;
-  // Of those sessions, how many viewed at least one page — the
-  // denominator of the bounce rate. A session made only of custom
-  // events never entered on a page, so it can't have bounced off one.
+  // How many of those sessions viewed at least one page: the basis of the
+  // bounce rate. A session with only custom events never viewed a page,
+  // so it can't have bounced.
   sessionsWithViews: number;
-  // Sessions whose only page view was their first: the same definition
-  // getBouncePages uses per entry page, summed site-wide.
+  // Sessions with only one page view, as getBouncePages counts them per
+  // page, for the whole site.
   bounced: number;
   // bounced / sessionsWithViews, 0-1.
   bounceRate: number;
 }
 
-// The session-shaped numbers, in one place: duration and bounce are
-// both "read the whole session, once it's over" — necessarily
-// query-time aggregates (see "Project maturity" in docs/decisions.md)
-// over sessions that started in the period. The site-wide bounce rate
-// lived nowhere before; summing getBouncePages' top rows gave a wrong
-// total the moment a page fell off the list.
+// Numbers that need the whole session: duration and bounce rate, over
+// sessions that started in the period. They are computed when queried
+// (see "Project maturity" in docs/decisions.md). Adding up
+// getBouncePages' rows would not give the site-wide bounce rate, because
+// that list is cut off.
 export function getSessionSummary(
   db: Database.Database,
   period: Period,

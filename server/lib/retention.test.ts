@@ -33,18 +33,14 @@ test("parseRetentionDays parses a valid positive number", () => {
   assert.equal(parseRetentionDays("30"), 30);
 });
 
-// -1 is the explicit way to ask for unlimited retention now that unset
-// no longer means it — same return value (undefined) as unset used to
-// produce, which is what tells the callers below "don't prune".
+// -1 means keep forever, returned as undefined, which tells the callers
+// not to delete anything.
 test("parseRetentionDays treats -1 as unlimited, on purpose", () => {
   assert.equal(parseRetentionDays("-1"), undefined);
 });
 
-// 0 is deliberately not the sentinel — "0 days" reads as "keep
-// nothing", the opposite of unlimited — and gets its own message
-// rather than falling into the generic one below, naming -1 as the
-// value that actually means what someone reaching for 0 probably
-// wants.
+// 0 is refused with its own message, which suggests -1: "0 days"
+// sounds like "keep nothing", the opposite of forever.
 test("parseRetentionDays refuses 0, naming -1 as the right value", () => {
   assert.throws(() => parseRetentionDays("0"), /Use -1 for no limit/);
 });
@@ -169,10 +165,10 @@ test("countEventsForVisitor and deleteVisitorData only affect the given visitor"
   assert.equal(countEventsForVisitor(db, "v2"), 1);
 });
 
-// An erasure has to reach the bytes, not just the index: without
-// secure_delete the row stays readable in the freed page, and without
-// the checkpoint it stays in the write-ahead log. A file database with
-// db/connection.ts's two pragmas, since neither applies in memory.
+// Deleting must remove the bytes: without secure_delete the row stays
+// readable in the file, and without the checkpoint it stays in the
+// write-ahead log. Uses a file database, since neither applies in
+// memory.
 test("deleteVisitorData leaves the erased rows in neither the file nor the log", () => {
   const path = join(mkdtempSync(join(tmpdir(), "genug-erase-")), "genug.db");
   const db = new Database(path);
@@ -209,9 +205,8 @@ test("deleteVisitorData leaves the erased rows in neither the file nor the log",
   db.close();
 });
 
-// The test above sets secure_delete itself, so it would still pass if
-// db/connection.ts stopped setting it. This checks the connection the
-// server actually opens.
+// The test above sets secure_delete itself; this checks that the
+// server's own connection (db/connection.ts) sets it.
 test("the server's own connection overwrites what it deletes", () => {
   const db = openConnection(
     join(mkdtempSync(join(tmpdir(), "genug-connection-")), "genug.db"),

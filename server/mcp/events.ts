@@ -29,9 +29,8 @@ import {
   VISITOR_TEXT_CAVEAT,
 } from "./shared.js";
 
-// "What happened, and in what order" — everything keyed on event types
-// and their props rather than on pages, so unlike content.ts none of
-// these need a page-view event to exist at all.
+// Tools about events and their props: what happened, and in what order.
+// Page tools are in content.ts.
 export const registerEventTools: ToolRegistrar = (server, db, { timezone }) => {
   const period = periodInput(timezone);
   server.registerTool(
@@ -175,9 +174,9 @@ export const registerEventTools: ToolRegistrar = (server, db, { timezone }) => {
         return unknownPropError(event, property);
       }
 
-      // Checked against the registry's declared type rather than the
-      // stored data: SUM over a non-numeric prop would silently return
-      // 0, which reads as "no revenue" rather than "wrong prop".
+      // Check the prop's declared type before summing: SUM over a text
+      // prop returns 0, which reads as "no revenue" instead of "wrong
+      // prop".
       const prop = eventProps(event)[property]!;
       if (prop.type !== "number") {
         return toolError(
@@ -222,9 +221,8 @@ export const registerEventTools: ToolRegistrar = (server, db, { timezone }) => {
         );
       }
       return withSegment(db, segment, { from, to }, (clause) => {
-        // The lib returns one shape for both scopes; the agent gets the
-        // field named for its unit, per the rule that a count says what
-        // it counts.
+        // The query returns the same shape for both scopes. Rename the
+        // field so its name says what is counted.
         const unit = scope === "session" ? "sessions" : "visitors";
         const steps_ = getStepsFunnel(
           db,

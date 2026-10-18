@@ -22,13 +22,12 @@ import {
   VISITOR_TEXT_CAVEAT,
 } from "./shared.js";
 
-// "Which pages, and where from" — every tool here ranks the page-view
-// event, which the schema registry guarantees exists (exactly one
-// registered event carries the pageView tag), so none of them has an
-// "unavailable here" case to report.
+// Tools about pages: which were viewed, and where visits started and
+// ended. They all count the page-view event, which always exists (the
+// registry falls back to the built-in one).
 
-// The four page tools group by site as well as path (lib/content.ts),
-// so "/" on two of an installation's sites never merges into one row.
+// The page tools group by site and path (lib/content.ts), so "/" on two
+// sites is two rows.
 const PAGE_ROW =
   'Each row is one page on one site: "host" is the site (www folded into the apex) and "path" the page on it, so the same path on two sites is two rows. Narrow to one site with the host segment.';
 

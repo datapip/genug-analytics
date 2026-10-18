@@ -3,22 +3,19 @@ export interface ClassifiedUserAgent {
   deviceType: "mobile" | "tablet" | "desktop" | "other";
 }
 
-// Deliberately simple, regex-based — not a full UA-parsing library.
-// Runs once per request, at write time (routes/events.ts), and only the
-// result is stored: the header itself never reaches the database, so a
-// fix here applies from then on rather than to history. That was the
-// other way round once — the raw string was kept so the classifier
-// could be corrected retroactively — and was reversed for data
-// minimisation; see "Device class instead of the User-Agent string" in
+// Deliberately simple regexes, not a full User-Agent parsing library.
+// Runs once per request (routes/events.ts) and only the result is stored;
+// the header itself never reaches the database, to collect as little as
+// possible. So a fix here applies to new events only, not to stored ones.
+// See "Device class instead of the User-Agent string" in
 // docs/decisions.md.
 export function classifyUserAgent(
   userAgent: string | null,
 ): ClassifiedUserAgent {
   const ua = userAgent ?? "";
 
-  // Order matters: Edge and Chrome UAs both contain "Safari/", and
-  // Edge's also contains "Chrome/" — most-specific match first, same
-  // reasoning as isBotUserAgent's regex ordering.
+  // Order matters: Edge and Chrome User-Agents both contain "Safari/",
+  // and Edge's also contains "Chrome/", so check the most specific first.
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /Chrome\//.test(ua)
@@ -29,11 +26,9 @@ export function classifyUserAgent(
           ? "Safari"
           : "Other";
 
-  // "other" (not a silent fallthrough to "desktop") for anything that
-  // doesn't match a known signature — a smart TV, game console, or
-  // e-reader UA should read as unclassified, not get miscounted as a
-  // desktop visit. Same "a mistake should look like a mistake" reasoning
-  // as get_top_referrers' explicit null-for-direct-traffic bucket.
+  // Anything unrecognised is "other", not "desktop": a smart TV, game
+  // console or e-reader should show up as unknown rather than be counted
+  // as a desktop visit.
   const deviceType = /Tablet|iPad/.test(ua)
     ? "tablet"
     : /Mobi/.test(ua)

@@ -15,27 +15,25 @@ import {
   type PropScalar,
 } from "./checkEvent.js";
 
-// Reads a directory of event files and turns it into a registry. One
-// file per event, named for the event: newsletter_signup.json defines
-// newsletter_signup. There is deliberately no `_name` key — a name and
-// the file holding it are two places to spell the same thing, and they
-// drift.
+// Reads a folder of event files and builds a registry from it. One file
+// per event, named after it: newsletter_signup.json defines
+// newsletter_signup. There is no `_name` key, so the name can't differ
+// from the file name.
 //
-// Never throws on a bad file. Errors come back alongside whatever did
-// load, so the caller can decide: a file baked into the image crashes
-// startup, a file dropped on a volume is skipped and reported.
+// Never throws on a bad file. Errors are returned together with what did
+// load, and the caller decides: a built-in file stops startup, a file on
+// the volume is skipped and reported.
 //
-// One directory is the whole registry. Nothing is layered on top of
-// anything, so there is no precedence to reason about — see
-// seedEvents.ts for how the volume comes to hold the built-ins.
+// One folder is the whole registry, so there is no order of precedence
+// to think about. See seedEvents.ts for how the built-ins get onto the
+// volume.
 
 export interface PropMetadata {
   description: string;
   example: PropScalar | PropScalar[];
-  // Declared type, whether the key may be omitted, and whether it holds
-  // several values rather than one. An agent reading the
-  // schema-registry resource would otherwise have to guess all three
-  // from `typeof example`.
+  // The declared type, whether the prop may be left out, and whether it
+  // holds a list of values, so the agent doesn't have to guess them from
+  // the example.
   type: PropTypeName;
   required: boolean;
   list: boolean;
@@ -48,19 +46,17 @@ export interface EventDefinition {
   outboundClick: boolean;
   fileDownload: boolean;
   conversion: boolean;
-  // Strict: unrecognized prop keys are rejected, not silently stripped —
-  // every prop an event sends must have a registry entry.
+  // Strict: unknown prop names are rejected, not silently dropped. Every
+  // prop an event sends must be declared.
   schema: z.ZodType<Record<string, unknown>>;
 }
 
 export interface SchemaFileError {
   file: string;
   messages: string[];
-  // True when `file` names the events directory rather than an event
-  // file in it — the volume could not be prepared, so nothing was
-  // rejected and everything is being read from the image instead. The
-  // cockpit says so under its own heading, because "N event files were
-  // rejected" describes something else entirely.
+  // True when `file` is the events folder rather than a file in it: the
+  // volume couldn't be prepared, so the events are read from the image.
+  // Nothing was rejected, so the cockpit shows it under its own heading.
   directory?: true;
 }
 
@@ -71,21 +67,17 @@ export interface LoadedEvents {
 
 const EVENT_NAME_PATTERN = /^[a-z0-9_]+$/;
 
-// The filename is the event name, so the two constraints are one. Kept
-// here beside the loader that enforces it, and exported because the
-// cockpit has to reject a bad name before writing a file rather than
-// after failing to load it.
+// The file name is the event name, so this rule covers both. Exported so
+// the cockpit can refuse a bad name before writing a file.
 //
-// Lowercase only, so "Signup" and "signup" can never both be registered
-// and split one action's count across two names. routes/events.ts folds
-// an incoming event name to lowercase before matching it here, so a
-// stray-case track() call still resolves instead of being rejected over
-// nothing but casing.
+// Lowercase only, so "Signup" and "signup" can't both exist and split one
+// action's count. routes/events.ts lowercases incoming names, so a
+// track() call with other casing still works.
 //
-// The pattern allows three names that every plain object already has.
-// The registry is keyed by name, so a file called __proto__.json would
-// replace the registry's prototype instead of adding an event: the
-// event would silently not exist.
+// The pattern alone would allow names every JavaScript object already
+// has. The registry is an object keyed by name, so a file called
+// __proto__.json would replace its prototype instead of adding an event,
+// and the event would silently not exist. Those names are refused.
 export const RESERVED_EVENT_NAMES: readonly string[] = [
   "__proto__",
   "constructor",
@@ -100,15 +92,15 @@ export function isValidEventName(name: string): boolean {
   );
 }
 
-// The rule in words, for every message that refuses a name.
+// The rule in words, for error messages.
 export const EVENT_NAME_RULE =
   "a name may only contain lowercase letters, digits and underscores, " +
   `be at most ${MAX_EVENT_NAME_LENGTH} characters, and not be ` +
   RESERVED_EVENT_NAMES.join(", ");
 
-// The role tags, as they appear on a loaded definition. Spelled out
-// rather than imported from registry.ts's EventRoleTag, because
-// registry.ts imports this module.
+// The role tags as they appear on a loaded definition. Written out here
+// instead of imported from registry.ts, because registry.ts imports this
+// module.
 const ROLE_TAGS: readonly EventRole[] = [
   "pageView",
   "outboundClick",
@@ -118,10 +110,9 @@ const ROLE_TAGS: readonly EventRole[] = [
 export function loadEvents(directory: string): LoadedEvents {
   const registry: Record<string, EventDefinition> = {};
   const errors: SchemaFileError[] = [];
-  // Which event has already claimed each role. Two files carrying one
-  // tag is not merely wrong, it stops the server: resolveTaggedEvent
-  // throws on a tie rather than picking a winner, and the registry is
-  // built at import.
+  // Which event already has each role. Two files with the same tag would
+  // stop the server (resolveTaggedEvent throws rather than picking one),
+  // so the second one is skipped.
   const tagHolders = new Map<EventRole, string>();
 
   let entries: string[];
@@ -141,9 +132,8 @@ export function loadEvents(directory: string): LoadedEvents {
     };
   }
 
-  // Sorted so the registry's order doesn't depend on the filesystem —
-  // it decides the order events appear in the MCP resource and the
-  // cockpit.
+  // Sorted, so the order (as shown in the MCP resource and the cockpit)
+  // doesn't depend on the filesystem.
   const files = entries.filter((name) => name.endsWith(".json")).sort();
 
   for (const file of files) {
@@ -228,9 +218,8 @@ function zodForRule(rule: PropRule): z.ZodType {
       : rule.type === "number"
         ? z.number()
         : z.boolean();
-  // An empty array is accepted: a page with no tags is not an error,
-  // and json_each simply contributes no rows for it. Only the declared
-  // example has to be non-empty (see checkEvent).
+  // An empty list is fine: a page without tags isn't an error. Only
+  // the example must not be empty (see checkEvent).
   const base = rule.list ? z.array(element).max(MAX_PROP_LIST_LENGTH) : element;
   return rule.required ? base : base.optional();
 }
@@ -245,8 +234,8 @@ function metadataFor(prop: CheckedProp): PropMetadata {
   };
 }
 
-// Formats a file's errors for a human: a startup crash message, or a
-// line in the cockpit. One file per block, one problem per line.
+// Formats file errors for people, for the startup error or the cockpit:
+// one block per file, one problem per line.
 export function formatSchemaErrors(errors: readonly SchemaFileError[]): string {
   return errors
     .map(({ file, messages }) =>

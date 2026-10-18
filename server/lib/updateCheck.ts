@@ -1,24 +1,15 @@
-// Whether a newer release exists than the one running, so the cockpit
-// can say so next to the version line. Nothing is created for this
-// repo's own tags (docs/releasing.md's CI only builds and pushes an
-// image on a tag push — see .github/workflows/ci.yml), so the GitHub
-// Releases endpoint would just 404; the plain tags list is what
-// actually has the data.
+// Checks whether a newer release exists, so the cockpit can show it next
+// to the version. It reads the repo's git tags, because releases are only
+// tags here (no GitHub Releases are created).
 const REPO = "datapip/genug-analytics";
 const TAGS_URL = `https://api.github.com/repos/${REPO}/tags`;
 
-// A live binding, same reasoning as eventRegistry in
-// @genug/schema-registry: startUpdateCheck below replaces it on its own
-// schedule, and a consumer has to read this export directly rather than
-// capture it in a local, or it would only ever see the value from the
-// moment it was imported.
+// Replaced by startUpdateCheck once a day. Read it where you need it;
+// a copy saved in a variable would keep the old value.
 export let latestVersion: string | null = null;
 
-// "v0.6.0" -> [0, 6, 0]. Anything that isn't exactly that shape (a
-// clone's "dev", a malformed tag) returns null rather than throwing —
-// this feature has nothing useful to say about a build with no
-// comparable version, not a reason to fail the check for every tag
-// around it.
+// "v0.6.0" -> [0, 6, 0]. Anything else ("dev", an odd tag) returns null
+// instead of throwing, so one odd tag doesn't break the whole check.
 export function parseVersion(version: string): number[] | null {
   const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) return null;
@@ -32,8 +23,7 @@ function isNewer(candidate: number[], current: number[]): boolean {
   return false;
 }
 
-// Exported for its own test rather than only through the network call,
-// same split as checkForUpdate/parseVersion above.
+// Exported so it can be tested without a network call.
 export function newestTag(
   tagNames: string[],
   current: number[],
@@ -48,11 +38,10 @@ export function newestTag(
   return best?.name ?? null;
 }
 
-// One request, best-effort. A deployment with no outbound access (or a
-// GitHub outage, or a rate limit) should behave exactly like one that
-// never asked — this is a convenience for the person reading the
-// cockpit, not a thing the server depends on, so a failure here is
-// never logged and never touches `latestVersion`.
+// One request, and failure is fine. Without internet access, during a
+// GitHub outage or when rate-limited, the server behaves as if it never
+// asked: this is only a hint in the cockpit. A failure is not logged and
+// leaves `latestVersion` unchanged.
 export async function checkForUpdate(currentVersion: string): Promise<void> {
   const current = parseVersion(currentVersion);
   if (!current) return;
@@ -69,19 +58,15 @@ export async function checkForUpdate(currentVersion: string): Promise<void> {
       current,
     );
   } catch {
-    // Offline, blocked egress, rate-limited, malformed response — all
-    // the same outcome: leave whatever was last known standing rather
-    // than flicker the pill off on one bad request.
+    // Offline, blocked, rate-limited or a bad response: keep the last
+    // known value, so one failed request doesn't hide the hint.
   }
 }
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-// Mirrors the retention/bot-activity jobs in index.ts: run once at
-// startup, then once a day. A day is frequent enough that a fresh
-// release shows up the same day for anyone who leaves the process
-// running, and infrequent enough that even a very small deployment
-// stays well inside GitHub's unauthenticated rate limit.
+// Runs once at startup, then once a day: often enough that a new release
+// shows up the same day, and far below GitHub's rate limit.
 export function startUpdateCheck(currentVersion: string): void {
   void checkForUpdate(currentVersion);
   setInterval(

@@ -28,9 +28,9 @@ function localAddresses(html: string): string[] {
     .filter((value) => !value.startsWith("#") && !/^[a-z]+:/i.test(value));
 }
 
-// The rewrite matches exact strings, so a new file, or one written as
-// "./cockpit.js", would slip through unversioned and silently bring the
-// stale-script problem back. This reads the real pages to catch that.
+// File names are replaced as exact strings, so a new file, or one
+// written as "./cockpit.js", would not get a version. This reads the real
+// pages to catch that.
 test("every file the real pages load gets a version", () => {
   for (const page of PAGES) {
     const addresses = localAddresses(renderCockpitPage(COCKPIT_DIR, page));
@@ -53,8 +53,8 @@ test("changing any asset changes the version", () => {
   const dir = mkdtempSync(join(tmpdir(), "genug-cockpit-page-"));
   try {
     cpSync(COCKPIT_DIR, dir, { recursive: true });
-    // Compared with the step before, not the start: otherwise every
-    // file after the first passes even if the hash ignores it.
+    // Compared with the previous step, not the first, so every file must
+    // change the hash.
     let before = cockpitAssetVersion(dir);
     for (const name of COCKPIT_ASSETS) {
       writeFileSync(join(dir, name), "changed " + name);

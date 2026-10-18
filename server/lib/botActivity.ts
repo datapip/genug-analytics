@@ -13,22 +13,19 @@ export function recordBotHit(counter: BotActivityCounter): void {
   counter.count++;
 }
 
-// Reads and resets in one step — takes the counter as a parameter
-// (rather than closing over module state) for the same reason
-// rateLimit.ts's isWithinRateLimit does: testable with a throwaway
-// counter, no state leaking between test cases. Safe against the real
-// request path incrementing concurrently: Node is single-threaded and
-// this has no `await` in it, so nothing can run between reading
-// `count` and resetting it.
+// Returns the count and resets it to zero. The counter is a parameter so
+// each test can use its own. No request can increment it between the read
+// and the reset: Node runs one thing at a time and there is no `await`
+// here.
 export function drainBotHits(counter: BotActivityCounter): number {
   const count = counter.count;
   counter.count = 0;
   return count;
 }
 
-// Module singleton for real use: routes/events.ts's bot check calls
-// recordBotHit(botActivityCounter) on every drop, and index.ts's hourly
-// job drains and persists it.
+// The counter the running server uses: routes/events.ts adds one for
+// every bot request it drops, and an hourly job in index.ts drains it
+// into the database.
 export const botActivityCounter: BotActivityCounter =
   createBotActivityCounter();
 

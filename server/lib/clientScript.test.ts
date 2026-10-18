@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderClientScript } from "./clientScript.js";
 
-// The real compiled client, as server/app.ts reads it, so a rename of
-// the placeholder on either side fails here rather than at startup.
+// The real compiled client, as server/app.ts reads it, so renaming the
+// placeholder on one side fails here, not at startup.
 const compiled = readFileSync(
   fileURLToPath(
     new URL("../../../packages/client/dist/index.js", import.meta.url),
@@ -24,8 +24,8 @@ test("renderClientScript writes the lists into the compiled client", () => {
   );
 });
 
-// Serving the file unchanged would not break it visibly: the client
-// fails closed and drops every campaign parameter on every site.
+// Serving the file without the lists wouldn't visibly break it: the
+// client would just drop every campaign parameter.
 test("renderClientScript refuses a script without exactly one placeholder", () => {
   const parts = { params: [], hashes: [] };
   assert.throws(() => renderClientScript("var x = 1;", parts), /exactly once/);
@@ -39,14 +39,11 @@ test("renderClientScript refuses a script without exactly one placeholder", () =
   );
 });
 
-// KEPT_QUERY_PARAMS/KEPT_HASH_VALUES only ban whitespace, commas and
-// "*" (see parseKeptList) — a quote, backslash or "</script>" is a
-// valid parameter name as far as that check is concerned. This is the
-// operator's own env var, not visitor input, but the result still ends
-// up as executable JS served to every visitor's browser, so it has to
-// stay syntactically inert regardless. new Function throws on invalid
-// syntax, which is a cheaper check than loading the whole thing in
-// jsdom the way packages/client's own tests do.
+// KEPT_QUERY_PARAMS and KEPT_HASH_VALUES only forbid spaces, commas and
+// "*" (see parseKeptList), so a quote, backslash or "</script>" is
+// allowed. The values end up in JavaScript sent to every visitor, so
+// they must not break or change the code. new Function throws on invalid
+// syntax, which is a quick way to check.
 test("renderClientScript stays valid, faithful JS for an adversarial value", () => {
   const tricky = ['a"b\\c', "</script><!--", "d'e"];
   const rendered = renderClientScript(compiled, {

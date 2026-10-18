@@ -36,8 +36,8 @@ test("at exactly midnight, today is empty and 7d ends 1 ms earlier", () => {
   );
 });
 
-// Pins the "complete days" promise across both modules: the daily
-// chart must get exactly N buckets, none of them today.
+// "7d" means 7 complete days: the daily chart must get exactly 7
+// days, without today.
 test("the daily chart gets exactly 7 and 30 days, without today", () => {
   for (const [range, n] of [
     ["7d", 7],
@@ -60,9 +60,9 @@ test("today starts at the site's midnight, not UTC's", () => {
   });
 });
 
-// Clocks go back on 25 October 2026, so the window starts at a summer
-// midnight (UTC+2) and ends at a winter one (UTC+1). Counted in 24-hour
-// steps it would start an hour off and cut the first day short.
+// Clocks go back on 25 October 2026, so the period starts at a summer
+// midnight (UTC+2) and ends at a winter one (UTC+1). Counting in 24-hour
+// steps would start an hour off.
 test("7d across a clock change starts and ends at local midnights", () => {
   const now = new Date("2026-10-28T12:00:00.000Z");
   const period = windowPeriod("7d", now, "Europe/Berlin");

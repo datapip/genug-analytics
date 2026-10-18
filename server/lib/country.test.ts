@@ -55,16 +55,15 @@ test("looks up the country of a shortened address", () => {
   assert.equal(countries.lookup(truncateIp("2001:db8:5::1")), "NL");
 });
 
-// Dual-stack Node reports every IPv4 peer this way, so it is the common
-// case on a real server, not an edge.
+// Node often reports IPv4 clients this way, so this is common on a real
+// server.
 test("a v4-mapped address is looked up as IPv4", () => {
   assert.equal(FIXTURE().lookup(truncateIp("::ffff:1.2.3.4")), "DE");
 });
 
-// The full address is never consulted, so a block split between
-// countries cannot be told apart; it takes its lowest part's. The
-// range that lost the shared block still owns the blocks after it —
-// thousands of real ranges start mid-block like this.
+// Only the block is known, so a block split between two countries gets
+// the first one. The other range still owns the blocks after it; many
+// real ranges start in the middle of a block.
 test("a block split between countries takes its lowest part's, and the rest keeps what follows", () => {
   const countries = FIXTURE();
   assert.equal(countries.lookup(truncateIp("5.6.7.200")), "AT");
@@ -84,8 +83,8 @@ test("an address the table does not list, or cannot be read, is ZZ", () => {
   assert.equal(countries.lookup(truncateIp("")), NO_COUNTRY);
 });
 
-// What is stored is read back to the agent, so the file may only hold
-// country codes, and a damaged file refuses rather than half-loading.
+// The agent sees the stored codes, so the file may only contain country
+// codes, and a damaged file is rejected, not partly loaded.
 test("a file that is not a country table is refused, naming the line", () => {
   const cases: [string[], RegExp][] = [
     [[`${v4("1.2.3.0")},${v4("1.2.3.255")},de`], /line 1: "de" is not/],

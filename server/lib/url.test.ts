@@ -10,9 +10,8 @@ import {
   type KeptUrlParts,
 } from "./url.js";
 
-// What an unconfigured deployment keeps, spelled out rather than read
-// from the module, so a test run with KEPT_* set in the shell still
-// tests the default.
+// What a deployment keeps by default, written out here, so the test
+// still checks the default when KEPT_* is set in the shell.
 const DEFAULTS: KeptUrlParts = {
   params: parseKeptQueryParams(undefined),
   hashes: parseKeptHashValues(undefined),
@@ -67,8 +66,8 @@ test("stripUnknownParams keeps utm parameters by default", () => {
   );
 });
 
-// Each ties a visit to one ad click on the platform's side; a
-// deployment that wants them opts in by name.
+// Click ids link a visit to one ad click; a deployment that wants them
+// lists them by name.
 test("stripUnknownParams drops click ids and ref by default", () => {
   assert.equal(
     stripUnknownParams(
@@ -79,9 +78,8 @@ test("stripUnknownParams drops click ids and ref by default", () => {
   );
 });
 
-// The reason this function exists: a newsletter link's address, a magic
-// link's token and a search page's typed query are all read back
-// verbatim by get_recent_events, and reach the agent's model vendor.
+// A newsletter link's email, a login link's token and a search query
+// would be shown by get_recent_events and sent to the agent's vendor.
 test("stripUnknownParams drops everything else", () => {
   assert.equal(
     stripUnknownParams("https://example.com/reset?token=secret123", DEFAULTS),
@@ -124,11 +122,8 @@ test("stripUnknownParams leaves a URL with no query string alone", () => {
   );
 });
 
-// The fragment used to be kept. It is the other half of the channel the
-// allowlist above exists to close: an OAuth implicit response puts
-// access_token there precisely to keep it out of server logs, and it
-// would have been stored verbatim, read back to an agent and rendered
-// in the cockpit.
+// The fragment is removed by default: some login flows (OAuth) put an
+// access_token there.
 test("stripUnknownParams drops the fragment by default", () => {
   assert.equal(
     stripUnknownParams("https://example.com/pricing#plans", DEFAULTS),
@@ -143,8 +138,8 @@ test("stripUnknownParams drops the fragment by default", () => {
   );
 });
 
-// Same fallback as parseUrl: referrer is deliberately not URL-validated,
-// so "" and anything unparseable pass through rather than throwing.
+// Like parseUrl: the referrer isn't checked as a URL, so "" and anything
+// unparseable are returned unchanged instead of throwing.
 test("stripUnknownParams passes an unparseable value through", () => {
   assert.equal(stripUnknownParams(""), "");
   assert.equal(stripUnknownParams("not-a-url"), "not-a-url");
@@ -200,8 +195,8 @@ test("a fragment list keeps exactly those fragments", () => {
   );
 });
 
-// The parser percent-encodes a fragment, so a list compared raw would
-// never keep #über however it was written down.
+// The URL parser percent-encodes fragments, so the list entries must be
+// encoded too, or #über would never match.
 test("a non-ASCII fragment matches whether written plain or encoded", () => {
   for (const written of ["über", "%C3%BCber"]) {
     const parts: KeptUrlParts = {
@@ -222,8 +217,8 @@ test("an empty value falls back to the default", () => {
   assert.deepEqual(parseKeptHashValues("  "), []);
 });
 
-// A glob would keep utm_email= too, and a stray space or comma is a
-// typo that would otherwise silently keep nothing under that name.
+// A pattern like utm_* would also keep utm_email=, and a space or comma
+// is a typo that would otherwise quietly keep nothing.
 test("a glob, an empty entry or a space inside a value refuses to start", () => {
   for (const bad of ["utm_*", "utm_source,,ref", "utm source", "*,ref"]) {
     assert.throws(() => parseKeptQueryParams(bad), /KEPT_QUERY_PARAMS/, bad);

@@ -28,10 +28,9 @@ test("finds nothing when every stored event is registered", () => {
   assert.deepEqual(getOrphanedEvents(db, ["page_view", "file_download"]), []);
 });
 
-// The case this exists for: page_view renamed to seitenaufruf, and
-// every row written before the rename now matching no page-scoped
-// query — while still counting toward the totals, which is what makes
-// it hard to spot without being told.
+// page_view renamed to seitenaufruf: the rows from before the rename
+// match no page query but still count in totals, which is hard to spot
+// without a report.
 test("reports rows left behind by a rename, with when they stop", () => {
   const db = setupDb();
   add(db, "page_view", "2026-01-01T10:00:00.000Z");
@@ -60,17 +59,15 @@ test("ranks by count, most abandoned rows first", () => {
   );
 });
 
-// An empty table is the normal case for a fresh deployment, and an
-// empty registry can't happen (registry.ts refuses to start without a
-// page-view event) — but neither should produce nonsense.
+// An empty table (a new deployment) and an empty registry (can't happen,
+// but still) must give a sensible answer.
 test("copes with no events at all", () => {
   assert.deepEqual(getOrphanedEvents(setupDb(), ["page_view"]), []);
 });
 
-// A name nothing registered can't get into this table — routes/events.ts
-// rejects it at ingestion — so anything found here is the deployment's
-// own doing, never a visitor's. That is what makes returning every row
-// unbounded safe.
+// Unknown names are rejected by /events, so orphaned rows only come from
+// the deployment's own renames, never from visitors. So returning all of
+// them without a limit is safe.
 test("is not something traffic can fill up", () => {
   const db = setupDb();
   add(db, "page_view", "2026-01-01T10:00:00.000Z");

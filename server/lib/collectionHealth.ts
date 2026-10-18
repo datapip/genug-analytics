@@ -1,14 +1,14 @@
 import type Database from "better-sqlite3";
 
-// How far back "the usual silence" is learned from, and how much history
-// there must be before it is believed. Two weeks holds a quiet weekend
-// and a quiet night several times over; under three days of data the
-// longest gap seen is just the gap since the site started.
+// How far back to look to learn the site's usual quiet periods, and how
+// much history is needed before trusting it. Two weeks includes several
+// quiet nights and weekends; with under three days of data there is not
+// enough to judge.
 const LOOKBACK_DAYS = 14;
 const MIN_HISTORY_DAYS = 3;
-// A silence shorter than this is never called unusual, however busy the
-// site: on one that gets an event a minute, a ten-minute lull would
-// otherwise be flagged, and an alert that cries wolf gets ignored.
+// A gap shorter than this is never reported, however busy the site.
+// Otherwise a site with an event a minute would be flagged after a
+// ten-minute lull, and a warning that fires too often gets ignored.
 const MIN_SILENCE_HOURS = 1;
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -18,11 +18,11 @@ export type SilenceVerdict =
   "never_seen" | "too_little_to_tell" | "normal" | "longer_than_usual";
 
 export interface Silence {
-  // The newest one stored, over all time (not only the lookback).
+  // The newest event ever stored (not only within the lookback).
   lastSeen: string | null;
   hoursSince: number | null;
-  // The longest quiet stretch between two events in the lookback that
-  // ends at lastSeen, so never the one that is still going on.
+  // The longest gap between two events in the lookback, which ends at
+  // lastSeen. So it never includes the gap that is still going on.
   longestEarlierGapHours: number | null;
   verdict: SilenceVerdict;
 }
@@ -35,7 +35,8 @@ export interface CollectionHealth {
   rejectedLast24h: number;
 }
 
-// Fixed fragments, never built from a value: the name is bound.
+// Fixed SQL snippets. The event name is passed as a bound parameter,
+// never pasted into the SQL.
 const ANY_EVENT = "";
 const ONE_EVENT = " AND event = @event";
 
@@ -68,15 +69,15 @@ function silence(
   }
 
   const hoursSince = (now.getTime() - Date.parse(range.last)) / HOUR_MS;
-  // The window ends at the last event, not at now. Ending it at now
-  // would leave a site dead for longer than the lookback with no events
-  // to learn from, and it would answer too_little_to_tell exactly when
-  // tracking has been broken longest.
+  // The lookback ends at the last event, not at now. If it ended at now,
+  // a site with no events for longer than the lookback would have nothing
+  // to learn from and answer too_little_to_tell, exactly when tracking has
+  // been broken longest.
   const since = new Date(
     Date.parse(range.last) - LOOKBACK_DAYS * DAY_MS,
   ).toISOString();
   // LAG pairs each event with the one before it; the biggest difference
-  // is the longest silence the site has had inside the window.
+  // is the longest gap inside the lookback.
   const gap = db
     .prepare(
       `SELECT MAX((julianday(ts) - julianday(prev)) * 24) AS hours
@@ -89,8 +90,8 @@ function silence(
     .get({ since, last: range.last, ...bound }) as { hours: number | null };
 
   const historyDays = (now.getTime() - Date.parse(range.first)) / DAY_MS;
-  // Fewer than two events in the window leaves no gap to learn from, and
-  // a young deployment has not yet had its usual quiet stretches.
+  // With fewer than two events there is no gap to measure, and a new
+  // deployment hasn't had its usual quiet periods yet.
   const tooLittle = gap.hours === null || historyDays < MIN_HISTORY_DAYS;
 
   let verdict: SilenceVerdict;
@@ -108,9 +109,9 @@ function silence(
 }
 
 // The newest stored event of any kind, for the cockpit's "last event"
-// line. The same bound as silence(): a row dated after now, left by a
-// clock that was set back, would otherwise read as an event still to
-// come.
+// line. Events dated after now are ignored, as in silence(): a clock that
+// was set back can leave such rows, and they would read as events still
+// to come.
 export function getLastEventAt(
   db: Database.Database,
   now: Date,
@@ -125,13 +126,12 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-// Is tracking still arriving, judged against the site's own history —
-// not a fixed "no events in 24 hours" threshold, which is wrong in both
-// directions: a busy shop is broken after one quiet hour, and a small
-// site's ordinary weekend is not. The page-view event is passed in by
-// the caller (never hardcoded; see pageViewEventType) and judged on its
-// own, because the script can lose its automatic page tracking while
-// custom events keep arriving.
+// Whether events are still arriving, judged against the site's own
+// history. A fixed rule like "no events in 24 hours" is wrong both ways:
+// a busy shop is broken after one quiet hour, while a small site is often
+// quiet all weekend. Page views are checked separately (the caller passes
+// the page-view event's name), because automatic page tracking can break
+// while custom events keep arriving.
 export function getCollectionHealth(
   db: Database.Database,
   now: Date,

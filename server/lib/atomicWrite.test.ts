@@ -27,11 +27,9 @@ test("replaces the file and leaves nothing beside it", () => {
   assert.deepEqual(readdirSync(dir), ["page_view.json"]);
 });
 
-// The point of it: a write that fails part-way — a full disk is the
-// likely cause — must leave the old definition whole. writeFileSync
-// alone truncates first, so the same failure would leave an empty file
-// the loader skips. A directory in the temporary file's place is a
-// failure that is easy to force on every platform.
+// A failed write (most likely a full disk) must leave the old file
+// unchanged. A folder where the temporary file should go makes the write
+// fail on every platform.
 test("a failed write leaves the old file untouched", () => {
   const dir = scratch();
   const path = join(dir, "page_view.json");

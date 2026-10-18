@@ -14,10 +14,9 @@ const PAGE_VIEW = {
   page_title_example: "Pricing — Genug",
 };
 
-// Real files in a real directory rather than a mocked filesystem: the
-// thing under test is largely "what happens to the contents of a
-// directory", and tsc does not copy .json into dist, so fixtures have
-// to be written at run time anyway.
+// Real files in a real folder, not a fake filesystem: this tests what
+// happens to a folder's files. (tsc doesn't copy .json files into dist,
+// so the test files are written when the tests run.)
 function directoryWith(files: Record<string, unknown>): string {
   const dir = mkdtempSync(join(tmpdir(), "genug-events-"));
   for (const [name, contents] of Object.entries(files)) {
@@ -91,9 +90,8 @@ test("builds a schema that validates props the way the rules say", () => {
     false,
     "a required prop may not be omitted",
   );
-  // Strict, not stripping: every prop an event sends must have a
-  // registry entry, so a typo shows up as a rejection rather than
-  // vanishing.
+  // Strict: an unknown prop is rejected, not silently dropped, so a
+  // typo is noticed.
   assert.equal(
     schema.safeParse({ order_total: 1, was_gift: false, extra: "x" }).success,
     false,
@@ -190,8 +188,8 @@ test("ignores files that aren't .json", () => {
   assert.deepEqual(Object.keys(registry), ["page_view"]);
 });
 
-// Filesystem order is not something to inherit: this decides the order
-// events appear in the MCP resource and the cockpit.
+// Sorted, not in filesystem order, since this is the order shown in the
+// MCP resource and the cockpit.
 test("registers events in filename order, whatever the directory says", () => {
   const { registry } = loadEvents(
     directoryWith({
@@ -202,8 +200,7 @@ test("registers events in filename order, whatever the directory says", () => {
   assert.deepEqual(Object.keys(registry), ["alpha", "zeta"]);
 });
 
-// The point of collecting errors instead of throwing: one bad file must
-// not take the rest of the deployment's events with it.
+// One bad file must not stop the other events from loading.
 test("a broken file is reported by name and the others still load", () => {
   const { registry, errors } = loadEvents(
     directoryWith({
@@ -234,9 +231,8 @@ test("rejects a filename that isn't a usable event name", () => {
   );
 });
 
-// Each is a name every plain object already has. __proto__.json would
-// replace the registry's prototype, and the event would silently not
-// exist.
+// Names every JavaScript object already has. __proto__.json would replace
+// the registry's prototype, and the event would silently not exist.
 test("rejects the names every object already has", () => {
   const { registry, errors } = loadEvents(
     directoryWith({
@@ -256,8 +252,8 @@ test("rejects the names every object already has", () => {
   assert.match(errors[0]!.messages.join(), /not be __proto__/);
 });
 
-// The volume directory in phase 2 may legitimately not exist. Reported,
-// never thrown — the caller decides whether that is fatal.
+// The events folder may not exist. That is reported, not thrown; the
+// caller decides what to do.
 test("a missing directory is an error, not a crash", () => {
   const { registry, errors } = loadEvents(
     join(tmpdir(), "genug-events-does-not-exist"),
@@ -305,11 +301,10 @@ test("each role tag may be carried by a different event", () => {
   assert.equal(resolveTaggedEvent(registry, "fileDownload"), "datei_download");
 });
 
-// Not merely wrong — resolveTaggedEvent throws on a tie, and the
-// registry is built at import, so without this the second file stops
-// the server from starting rather than being skipped like any other
-// bad one. Copying page_view.json to seitenaufruf.json instead of
-// renaming it is the way to arrive here.
+// Two files with the same role tag: the second is skipped. Otherwise
+// resolveTaggedEvent would throw and the server wouldn't start. This
+// happens when page_view.json is copied to seitenaufruf.json instead of
+// renamed.
 test("two files claiming one tag: the first wins, the second is reported", () => {
   const { registry, errors } = load({
     "page_view.json": PAGE_VIEW,
@@ -327,10 +322,9 @@ test("two files claiming one tag: the first wins, the second is reported", () =>
   );
 });
 
-// The rejection has to quote the key someone actually typed. The role
-// is called fileDownload internally but is written
-// "_automaticFileDownload", and a message naming the wrong one sends
-// the reader looking for a key that does not exist.
+// The error must name the key as written in the file
+// ("_automaticFileDownload"), not the internal role name
+// (fileDownload).
 test("the rejection names the JSON key, not the internal role name", () => {
   const { errors } = load({
     "a_download.json": { ...CUSTOM, _automaticFileDownload: true },
@@ -341,8 +335,8 @@ test("the rejection names the JSON key, not the internal role name", () => {
   assert.match(errors[0]!.messages.join(), /"_automaticFileDownload": true/);
 });
 
-// Files are read in sorted order, so which one loses is fixed rather
-// than whatever the filesystem happened to hand back.
+// Files are read in sorted order, so which one is skipped doesn't depend
+// on the filesystem.
 test("the losing file is decided by name, not by directory order", () => {
   const first = load({ "aaa.json": PAGE_VIEW, "zzz.json": PAGE_VIEW });
   const second = load({ "zzz.json": PAGE_VIEW, "aaa.json": PAGE_VIEW });
@@ -351,8 +345,8 @@ test("the losing file is decided by name, not by directory order", () => {
   assert.deepEqual(Object.keys(second.registry), ["aaa"]);
 });
 
-// A skipped file costs that event and nothing else — including the
-// tag it wanted, which stays with whoever already had it.
+// A skipped file only loses that event; the tag stays with the event
+// that had it first.
 test("a file rejected for a tag clash registers nothing at all", () => {
   const { registry, errors } = load({
     "order_placed.json": CUSTOM,
@@ -364,9 +358,8 @@ test("a file rejected for a tag clash registers nothing at all", () => {
   assert.equal(errors.length, 1);
 });
 
-// Unlike a role tag, _conversion carries no uniqueness rule: several
-// events marking several business goals is the ordinary case, not a
-// clash to report.
+// Unlike a role tag, any number of events may have _conversion: several
+// business goals are normal.
 test("any number of events may carry _conversion, with no clash reported", () => {
   const { registry, errors } = load({
     "signup.json": { ...CUSTOM, _conversion: true },

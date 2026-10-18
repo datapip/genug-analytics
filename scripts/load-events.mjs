@@ -1,6 +1,6 @@
-// Measures how many events a running Genug server actually accepts and
-// stores, so docs/operations.md can state a figure instead of guessing
-// one. Re-run it before changing that figure.
+// Measures how many events per second a running Genug server accepts and
+// stores, for the figure in docs/operations.md. Run it again before
+// changing that figure.
 //
 //   node scripts/load-events.mjs
 //
@@ -9,33 +9,29 @@
 // this sets X-Forwarded-For (see below), and ALLOWED_ORIGIN pointing at
 // its own port.
 //
-// Afterwards, check the rows landed rather than trusting the status
-// codes alone:
+// Afterwards, check that the rows were stored, not just the status
+// codes:
 //
 //   sqlite3 <DB_PATH> "SELECT COUNT(*) FROM events"
 //
-// **Do not measure query latency against a database this has run
-// against.** It writes ~60,000 rows timestamped now, so all of them land
-// inside every window you would then ask about — enough to take a 7-day
-// cockpit page from 0.26 s to 1.25 s on a million-row database, which
-// reads convincingly like a slow CPU and is not. Keep a pristine copy
-// and restore it before each read measurement (see docs/decisions.md).
+// **Don't measure query speed on a database this script has written to.**
+// It writes ~60,000 rows dated now, so they fall into every period you
+// then query, which can make a 7-day cockpit page on a million-row
+// database five times slower and look like a slow CPU. Keep a clean copy
+// and restore it before measuring queries (see docs/decisions.md).
 //
-// A closed-loop load generator for POST /events. No dependency: plain
-// node:http with keep-alive agents, which is what a browser does.
+// Sends POST /events as fast as the server answers, with a fixed number
+// of workers. No dependency: plain node:http with keep-alive, as a
+// browser does.
 //
-// Addresses are modelled on real traffic rather than picked for
-// convenience, because the server's own defences make an unrealistic
-// generator measure the wrong thing. A first attempt gave each worker
-// one address and measured nothing but the per-IP limiter refusing it
-// (600/min, so 10/s per address — every response was a 429).
+// The addresses imitate real traffic, because the rate limit would
+// otherwise be all that gets measured: one address per worker would only
+// get 429s (600/min is 10/s per address).
 //
-// So: a visitor is a /24, because that is what the consentless
-// visitor_id hashes (truncateIp), and each one sends five page views
-// before a new visitor arrives. That keeps every address far under the
-// limit, gives the session lookup on each insert a real prior row to
-// find four times out of five, and is what a site with this much
-// traffic actually looks like.
+// So each visitor is a /24 (what the consentless visitor_id hashes, see
+// truncateIp) and sends five page views before a new visitor starts.
+// That keeps every address far under the limit and gives four out of
+// five events an earlier event of the same session, as on a real site.
 import http from "node:http";
 
 const PORT = Number(process.env.PORT ?? 3012);
@@ -60,10 +56,10 @@ function body(worker, n) {
 
 const EVENTS_PER_VISITOR = 5;
 
-// A private range, so nothing here can reach a real host if this is
-// ever pointed somewhere by accident. 10.a.b is the visitor (the /24
-// the identity hash sees); the last octet is fixed, so the limiter
-// counts five requests per address.
+// A private range, so no real host is affected if this is pointed
+// somewhere by mistake. 10.a.b is the visitor (the /24 the hash uses);
+// the last number is fixed, so the rate limit sees five requests per
+// address.
 function addressFor(worker, n) {
   const visitor =
     (worker * 1000003 + Math.floor(n / EVENTS_PER_VISITOR)) % 65536;

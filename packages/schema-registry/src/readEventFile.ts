@@ -2,13 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkEvent, type CheckedEvent } from "./checkEvent.js";
 
-// The cockpit's edit and add-prop writes (server/lib/editEvent.ts,
-// server/lib/addEventProp.ts) both start the same way: read one event's
-// file, parse it, and run it through the same checker the loader uses,
-// so a write is refused on a file that would not load anyway rather
-// than being layered onto something already broken. `action` is the
-// one sentence that differs between callers — what exactly can't be
-// done here — spliced into the same message shape as the rest.
+// Reads one event file, parses it and runs the loader's check, for the
+// cockpit's edit and add-prop actions (server/lib/editEvent.ts,
+// server/lib/addEventProp.ts). A file that wouldn't load is refused
+// rather than changed further. `action` is the part of the error message
+// that differs between callers (what can't be done).
 
 export type LoadedEventFile =
   | {

@@ -1,27 +1,23 @@
 import type Database from "better-sqlite3";
 
-// Runs whichever migrations haven't been applied to this specific
-// database file yet, tracked via SQLite's own PRAGMA user_version (an
-// integer SQLite reserves in every database file's header — no extra
-// table needed). Each migration's SQL and its version bump happen in
-// one transaction, so a crash partway through never leaves a database
-// thinking it finished a step it didn't, or repeats one it already did.
+// Runs the migrations this database file hasn't had yet. The count of
+// those already run is kept in SQLite's PRAGMA user_version, a number in
+// the file's header, so no extra table is needed. Each migration and its
+// version update run in one transaction, so a crash can't leave a step
+// half done or run it twice.
 //
-// Exported (and taking `migrations` as a parameter, rather than just
-// reading the module-level list directly) purely so tests can hand it
-// a small throwaway list to verify the resume-from-current-version
-// behavior, without needing the real list to have more than one entry.
+// `migrations` is a parameter so tests can pass a small list of their
+// own.
 export function runMigrations(
   db: Database.Database,
   migrations: ((db: Database.Database) => void)[],
 ): void {
   const current = db.pragma("user_version", { simple: true }) as number;
 
-  // A database that has run more steps than this build knows about was
-  // written by a newer genug — the loop below would simply not run, and
-  // old code would go on querying a newer schema with nothing said.
-  // Pinning an older image tag is an ordinary thing to do, so this has
-  // to be loud.
+  // A database with more steps than this build knows was written by a
+  // newer version of Genug. Without this check the old code would run
+  // against tables it doesn't know, without any warning. Going back to
+  // an older image is common, so stop with an error.
   if (current > migrations.length) {
     throw new Error(
       `This database is at schema version ${current}, but this build only ` +
@@ -39,22 +35,19 @@ export function runMigrations(
   }
 }
 
-// The ordered list of schema changes: the whole first schema, then
-// each change since.
+// The schema changes in order: the first schema, then each change.
 //
-// APPEND ONLY. A database records in its own user_version which steps
-// it has already run, so editing or removing an entry below fixes
-// nothing on a database that ran the old version — it only makes this
-// file lie about what that database went through. Add new schema
-// changes as new entries at the end.
+// ONLY ADD AT THE END. A database remembers how many steps it has run,
+// so changing or removing an entry doesn't affect databases that
+// already ran it; it only makes this list wrong about them.
 export const migrations: ((db: Database.Database) => void)[] = [
   // Migration 0: the whole schema.
   //
-  // auto_vacuum has to be set before any table exists to take effect
-  // without a full VACUUM. INCREMENTAL lets the space freed by deleted
-  // rows be reclaimed a little at a time (see lib/retention.ts and the
-  // daily incremental_vacuum in server/index.ts) instead of never,
-  // avoiding the long blocking rewrite a full VACUUM would need.
+  // auto_vacuum must be set before any table exists, or it needs a full
+  // VACUUM. INCREMENTAL lets the space of deleted rows be given back a
+  // little at a time (lib/retention.ts and the daily incremental_vacuum
+  // in server/index.ts), without the long blocking rewrite of a full
+  // VACUUM.
   (db) => {
     db.pragma("auto_vacuum = INCREMENTAL");
     db.exec(`
@@ -160,9 +153,9 @@ export const migrations: ((db: Database.Database) => void)[] = [
   },
 
   // Migration 1: the visitor's country (lib/country.ts). A two-letter
-  // code, "ZZ" when the lookup found none, and NULL when no lookup ran
-  // — every row stored before this, and every row with COUNTRY_LOOKUP
-  // off — so "not looked up" never reads as "unknown country".
+  // code, "ZZ" when the lookup found nothing, and NULL when no lookup ran
+  // (rows stored before this column existed, or with COUNTRY_LOOKUP off),
+  // so "not looked up" never reads as "unknown country".
   (db) => {
     db.exec(`ALTER TABLE events ADD COLUMN country TEXT`);
   },

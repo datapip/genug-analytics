@@ -9,17 +9,14 @@ import { insertEvent } from "../db/events.js";
 import { createMcpServer, getToolManifest } from "./tools.js";
 import { VISITOR_TEXT_CAVEAT } from "./shared.js";
 
-// These drive the tools through the real MCP protocol rather than
-// calling the handlers directly, using the SDK's own linked in-memory
-// transport — no HTTP, no subprocess, nothing mocked. That matters
-// because most of what this layer does happens *around* the handler:
-// input-schema validation, the Zod period transform, and the
-// registerTool wrapper that adds the manifest entry and the inverted-
-// period guard. Calling a handler directly would skip all three.
+// These tests call the tools through the real MCP protocol, using the
+// SDK's in-memory transport (no HTTP, nothing mocked). Calling the
+// handlers directly would skip what happens around them: input
+// validation, the period conversion, and the registerTool wrapper (tool
+// list and period check).
 //
-// The lib/ modules already test the metric maths; these tests are about
-// the tool layer's own job — validation, gating, and the shape it
-// promises the agent.
+// The numbers are tested in lib/; these test the tool layer: validation,
+// read-only mode and the shape of the results.
 async function connect(
   seed?: (db: Database.Database) => void,
   timezone = "UTC",
@@ -74,8 +71,8 @@ function resourceText(contents: unknown[]): string {
   return first.text as string;
 }
 
-// Deliberately bare dates, not full timestamps: that's what an LLM
-// actually emits, and normalizing it is the whole point of periodInput.
+// Plain dates, not full timestamps, because that is what an agent
+// usually sends, and periodInput must convert them.
 const PERIOD = { from: "2026-01-01", to: "2026-01-01" };
 
 function pageView(overrides: Record<string, unknown> = {}) {
@@ -90,9 +87,9 @@ function pageView(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Arguments a tool needs beyond the period, so the generated tests below
-// reach the handler instead of failing schema validation first. Kept
-// honest by the coverage test that follows.
+// Arguments some tools need besides the period, so the generated tests
+// below reach the handler instead of failing validation. The next test
+// checks this list is complete.
 const EXTRA_ARGS: Record<string, Record<string, unknown>> = {
   get_events_by_property: { event: "page_view", property: "page_title" },
   get_property_sum: { event: "page_view", property: "page_title" },
@@ -119,13 +116,10 @@ function takesPeriod(tool: ListedTool): boolean {
 
 // --- the contract every tool owes the agent ---
 
-// A tool's description is the only documentation the agent ever gets:
-// it decides which tool to call, and how to read the result, from this
-// text alone. So the bar is a real sentence, not a label — a deployment
-// that adds `description: "orders"` has written a tool the agent will
-// misuse. Length is a crude proxy, but it's the only part of "is this
-// description any good" a test can check; whether it's *accurate* stays
-// a human review job, and is this project's likeliest failure mode.
+// A tool's description is all the agent knows about it: it decides which
+// tool to call and how to read the result from this text. So it must be
+// a real sentence, not a label like "orders". A test can only check the
+// length; whether the text is correct needs a human review.
 const MIN_TOOL_DESCRIPTION = 40;
 
 test("every registered tool describes itself to the agent", async () => {
@@ -144,9 +138,8 @@ test("every registered tool describes itself to the agent", async () => {
   await client.close();
 });
 
-// The cockpit's tool overview is built from this manifest, so a drift
-// between it and what's actually registered would show the deployer a
-// list that isn't real.
+// The cockpit's tool list comes from this manifest, so it must match the
+// tools that are really registered.
 test("the manifest matches what is actually registered", async () => {
   const { db, client } = await connect();
   const listed = (await listTools(client)).map((tool) => ({
@@ -163,10 +156,10 @@ test("the manifest matches what is actually registered", async () => {
   await client.close();
 });
 
-// A client that asks before a risky call decides from these hints alone,
-// and visitor text can try to talk an agent into the erasure tool. So
-// every read says it reads, and the two writers say they write — the
-// delete as destructive.
+// A client that asks before risky calls decides from these hints, and
+// visitor text may try to talk an agent into deleting data. So every
+// reading tool is marked read-only, and the two writing tools say they
+// write (the delete as destructive).
 test("every tool says whether it writes, and the delete says it destroys", async () => {
   const { client } = await connect();
   const { tools } = await client.listTools();
@@ -188,11 +181,9 @@ test("every tool says whether it writes, and the delete says it destroys", async
   await client.close();
 });
 
-// The read-only promise is that nothing behind a public key can write.
-// Checked through the protocol, because "not registered" is the whole
-// mechanism: a tool that is absent from tools/list cannot be called at
-// all, whereas a flag inside its handler could be forgotten by the
-// next writing tool.
+// In read-only mode nothing can write. Checked through the protocol,
+// because the writing tools must not be registered at all: a tool that
+// isn't in tools/list can't be called.
 test("a read-only server registers no writing tool, and its manifest says so", async () => {
   const db = new Database(":memory:");
   migrate(db);
@@ -205,16 +196,15 @@ test("a read-only server registers no writing tool, and its manifest says so", a
 
   const names = (await listTools(client)).map((tool) => tool.name);
   assert.ok(!names.includes("delete_visitor_data"));
-  // Writes text the deployment-context document tells every later
-  // session to act on, so it is at least as public-key-sensitive as the
-  // delete above.
+  // Writes text that every later session is told to follow, so it must
+  // not be available with a public key either.
   assert.ok(!names.includes("add_history_note"));
-  // Writes nothing, but hands back raw rows instead of an aggregate —
-  // a public key shouldn't double as a raw event export either.
+  // Writes nothing, but returns raw rows, which a public key shouldn't
+  // allow exporting.
   assert.ok(!names.includes("get_recent_events"));
   assert.ok(names.includes("get_traffic_summary"), "reads are still there");
-  // The other diagnostics stay: they answer "is tracking working",
-  // which a read-only demo deployment still needs.
+  // The other diagnostic tools stay: a read-only demo still needs to
+  // show that tracking works.
   assert.ok(names.includes("get_schema_errors"));
   assert.ok(names.includes("get_bot_activity"));
 
@@ -222,7 +212,7 @@ test("a read-only server registers no writing tool, and its manifest says so", a
     (t) => t.name,
   );
   assert.deepEqual([...manifest].sort(), [...names].sort());
-  // And the writable manifest is a different list, not the same cache.
+  // And normal mode has its own tool list, not the same cached one.
   const writableNames = getToolManifest(db, { timezone: "UTC" }).map(
     (t) => t.name,
   );
@@ -232,15 +222,14 @@ test("a read-only server registers no writing tool, and its manifest says so", a
 });
 
 // Without this, a new tool with a new required argument would make the
-// generated tests below pass for the wrong reason — failing validation
-// long before reaching the behaviour they mean to check.
+// generated tests below pass for the wrong reason: by failing validation
+// before reaching what they check.
 test("test fixtures cover every tool's required arguments", async () => {
   const { client } = await connect();
   const uncovered: string[] = [];
 
-  // Scoped to the tools the generated tests actually call. A
-  // non-period tool (delete_visitor_data) needs its own fixture in its
-  // own test, not one here.
+  // Only the tools the generated tests call. A tool without a period
+  // (delete_visitor_data) has its own test.
   for (const tool of (await listTools(client)).filter(takesPeriod)) {
     const supplied = new Set([
       "from",
@@ -260,14 +249,11 @@ test("test fixtures cover every tool's required arguments", async () => {
   await client.close();
 });
 
-// The generated tests below call every tool whose input has `from` and
-// `to`, for real, with no arrangement made for what it might do. That is
-// safe only while that shape means "a read over a period". A writing
-// tool that declared the same pair would be swept in and actually run —
-// against whatever path the environment points at on the machine running
-// the suite, which is the hazard, not the wasted call. Derived from the
-// read-only registration split rather than a list of names, so it holds
-// for the next writing tool too.
+// The generated tests below really call every tool that has `from` and
+// `to`. That is only safe for tools that read. A writing tool with the
+// same arguments would actually write, on the machine running the tests.
+// So this checks that none of them is a writing tool, using the read-only
+// split rather than a list of names.
 test("no writing tool declares a query period", async () => {
   const db = new Database(":memory:");
   migrate(db);
@@ -291,9 +277,8 @@ test("no writing tool declares a query period", async () => {
   await client.close();
 });
 
-// Generated from the tool list rather than a hand-kept one, so a new
-// period-taking tool is covered the day it's written — the same
-// reasoning the guard itself uses to find them.
+// Generated from the tool list, so a new tool with a period is tested
+// automatically.
 test("every period-taking tool rejects an inverted period", async () => {
   const { client } = await connect();
   const periodTools = (await listTools(client)).filter(takesPeriod);
@@ -326,8 +311,8 @@ test("a tool with no period is left alone by that guard", async () => {
 });
 
 test("get_recent_events adds a note when rows were dropped to fit the budget", async () => {
-  // insertEvent skips the registry's prop caps, so a row this size can
-  // only come from before them — which is what the budget is for.
+  // insertEvent doesn't apply the prop length limits, so a row this big
+  // can be stored here to test the size limit.
   const { client } = await connect((db) => {
     for (let i = 0; i < 5; i++) {
       insertEvent(
@@ -350,11 +335,10 @@ test("get_recent_events adds a note when rows were dropped to fit the budget", a
   await client.close();
 });
 
-// The bug that started all of this: SQLite compares ts as a string, so a
-// bare "2026-01-01" as `to` sorts below every real timestamp that day
-// and silently drops it. A wrong number an agent reports confidently is
-// worse than an error, so this is the regression test that matters most
-// in this file.
+// SQLite compares ts as text, so a plain "2026-01-01" as `to` sorts
+// before every timestamp of that day and would drop the whole day. The
+// agent would report the wrong number with confidence, so this is the
+// most important test in this file.
 test("a bare `to` date covers the whole day, not midnight", async () => {
   const { client } = await connect((db) => {
     insertEvent(db, pageView({ ts: "2026-01-01T23:59:59.500Z" }));
@@ -365,8 +349,8 @@ test("a bare `to` date covers the whole day, not midnight", async () => {
   await client.close();
 });
 
-// Reaches the agent as an ordinary tool error it can read and retry —
-// not a thrown protocol exception, and not a silently wrong number.
+// Returned as a normal tool error the agent can read and retry, not as
+// a protocol exception or a wrong number.
 test("an unparseable date comes back as a readable validation error", async () => {
   const { client } = await connect();
   const result = await callRaw(client, "get_traffic_summary", {
@@ -393,8 +377,7 @@ test("get_traffic_by_day refuses a period longer than its cap", async () => {
   await client.close();
 });
 
-// Each refusal names what to do instead, rather than judging a period
-// it cannot judge or an event that does not exist.
+// Each refusal says what to do instead.
 test("get_traffic_change refuses what it cannot judge", async () => {
   const { client } = await connect();
   const long = await call(client, "get_traffic_change", {
@@ -404,8 +387,8 @@ test("get_traffic_change refuses what it cannot judge", async () => {
   assert.match(String(long.error), /31/);
   assert.match(String(long.error), /get_traffic_by_day/, "offers a way out");
 
-  // A 31-day month across the autumn clock change is 31 local days,
-  // though it measures 32 in UTC milliseconds.
+  // A 31-day month with the autumn clock change is 31 local days,
+  // although its length in milliseconds rounds up to 32 days.
   const { client: berlin } = await connect(undefined, "Europe/Berlin");
   const october = await call(berlin, "get_traffic_change", {
     from: "2026-10-01",
@@ -429,9 +412,9 @@ test("get_traffic_change refuses what it cannot judge", async () => {
   await client.close();
 });
 
-// Every other test here runs in UTC, where a bare date is the same day
-// either way — so a tool that dropped the zone would pass them all.
-// 22:30 UTC on the 29th is 00:30 on the 30th in Berlin.
+// The other tests use UTC, where a plain date is the same day either
+// way, so a tool ignoring the time zone would pass them. 22:30 UTC on
+// the 29th is 00:30 on the 30th in Berlin.
 test("a bare date means the site's day, through the tool layer", async () => {
   const { client } = await connect((db) => {
     insertEvent(db, {
@@ -487,8 +470,8 @@ test("get_events_by_property names the valid props for an undeclared one", async
   await client.close();
 });
 
-// SUM over a text prop would return 0 — which reads as "no revenue"
-// rather than "wrong prop".
+// SUM over a text prop would return 0, which reads as "no revenue"
+// instead of "wrong prop".
 test("get_property_sum refuses a non-numeric prop and points elsewhere", async () => {
   const { client } = await connect();
   const result = await call(client, "get_property_sum", {
@@ -502,8 +485,8 @@ test("get_property_sum refuses a non-numeric prop and points elsewhere", async (
   await client.close();
 });
 
-// The protocol's own flag for a failed call. Without it a client shows
-// the refusal as an ordinary result and a model can't tell it from data.
+// MCP's flag for a failed call. Without it a client shows the error as
+// a normal result.
 test("a tool error is flagged as isError at the protocol level", async () => {
   const { client } = await connect();
   const result = await callRaw(client, "get_events_by_property", {
@@ -547,7 +530,7 @@ test("a segment condition must name exactly one dimension", async () => {
   await client.close();
 });
 
-// Shapes that pass the schema but could only ever match nothing.
+// Values that pass the schema but can never match anything.
 test("a segment refuses a URL as a host, a slashless path, a non-locale language and a repeated dimension", async () => {
   const { client } = await connect();
   const cases: [Record<string, unknown>[], RegExp][] = [
@@ -579,8 +562,8 @@ test("a segment refuses a URL as a host, a slashless path, a non-locale language
   await client.close();
 });
 
-// With the lookup off no row has a country, so any country would
-// match nothing and read as "nobody from there".
+// With the lookup off no row has a country, so any country would match
+// nothing and look like "nobody from there".
 test("countries refuse to answer when no lookup ran, and a country segment too", async () => {
   const { client } = await connect((db) => {
     insertEvent(db, pageView());
@@ -621,8 +604,8 @@ test("a country segment takes a two-letter code in either case", async () => {
   await client.close();
 });
 
-// The day the lookup is turned on, a period holds both kinds of
-// session. Only a period with no country at all is the mistake.
+// On the day the lookup is turned on, a period has sessions with and
+// without a country. Only a period with no country at all is an error.
 test("countries answer for a period that is only partly looked up", async () => {
   const { client } = await connect((db) => {
     insertEvent(db, pageView({ sessionId: "s1" }));
@@ -638,8 +621,8 @@ test("countries answer for a period that is only partly looked up", async () => 
   await client.close();
 });
 
-// A typo'd host, or the host of a site another installation collects
-// for, would otherwise read as a site nobody visited.
+// A mistyped host, or a site of another installation, would otherwise
+// look like a site nobody visited.
 test("a host segment names the hosts in the period when its own has no session", async () => {
   const { client } = await connect((db) => {
     insertEvent(db, pageView({ sessionId: "s1", url: "https://example.com/" }));
@@ -683,8 +666,8 @@ test("a host segment names the hosts in the period when its own has no session",
   await client.close();
 });
 
-// A browser sends an umlaut domain as punycode, and the stored url keeps
-// it that way; the owner types it with the umlaut.
+// A browser sends a domain with an umlaut as punycode, and it is stored
+// that way; the owner types it with the umlaut.
 test("a host segment matches an umlaut domain as typed", async () => {
   const { client } = await connect((db) => {
     insertEvent(
@@ -705,8 +688,7 @@ test("a host segment matches an umlaut domain as typed", async () => {
   await client.close();
 });
 
-// Anyone can post an event with any url, so a stranger can fill the
-// period with hosts; the error must not grow with them.
+// Stored rows may have many hosts, so the error lists only a few.
 test("a host segment's error lists only the busiest hosts", async () => {
   const { client } = await connect((db) => {
     for (let i = 0; i < 12; i++) {
@@ -724,7 +706,8 @@ test("a host segment's error lists only the busiest hosts", async () => {
   await client.close();
 });
 
-// An empty period's zeros are true of every site, so it is not refused.
+// Zero is correct for every site in an empty period, so it isn't
+// refused.
 test("a host segment over a period with no sessions answers with zeros", async () => {
   const { client } = await connect();
   const summary = await call(client, "get_traffic_summary", {
@@ -779,12 +762,11 @@ test("a segment narrows a ranked tool", async () => {
   await client.close();
 });
 
-// The test above proves one tool. This one catches a handler that
-// declares `segment` and then never passes resolved.clause on — the lib
-// queries all default to NO_SEGMENT, so that compiles and returns
-// whole-site numbers. Mobile is one quiet session; desktop is two busier
-// ones with different consent, entry, referrer and a download, so every
-// tool's answer changes when narrowed to mobile.
+// Catches a tool that takes `segment` but never passes the condition on
+// to its query: the queries default to NO_SEGMENT, so that compiles and
+// returns whole-site numbers. The data has one quiet mobile session and
+// two busier desktop ones that differ in every way, so every tool's
+// answer changes when limited to mobile.
 test("every segment-taking tool gives a different answer for a segment", async () => {
   const { client } = await connect((db) => {
     insertEvent(
@@ -840,8 +822,8 @@ test("every segment-taking tool gives a different answer for a segment", async (
     }
   });
 
-  // No built-in event has a numeric prop to sum; its segment splice is
-  // tested in lib/events.test.ts instead.
+  // No built-in event has a number prop to sum; its segment is tested in
+  // lib/events.test.ts instead.
   const skipped = new Set(["get_property_sum"]);
   const segmented = (await listTools(client)).filter(
     (tool) =>
@@ -868,9 +850,8 @@ test("every segment-taking tool gives a different answer for a segment", async (
   await client.close();
 });
 
-// Pins the exempt list in mcp/tools.ts from both sides: a new tool
-// cannot hide there, and a renamed one cannot leave a stale entry that
-// the startup check then silently never needs.
+// Checks the exception list in mcp/tools.ts both ways: no tool may be on
+// it without reason, and no entry may name a tool that no longer exists.
 test("only the tools over other tables take a period without a segment", async () => {
   const { client } = await connect();
   const unsegmented = (await listTools(client))
@@ -950,9 +931,9 @@ test("get_device_breakdown returns the two rankings", async () => {
   await client.close();
 });
 
-// Not asserted empty: run from a clone with no /data volume, the
-// registry legitimately reports that the events directory could not be
-// created — which is exactly the kind of thing this tool is for.
+// Not checked to be empty: in a git clone without /data, the registry
+// reports that the events folder couldn't be created, which is exactly
+// what this tool is for.
 test("get_schema_errors reports the events directory and each load error's file and messages", async () => {
   const { client } = await connect();
   const result = (await call(client, "get_schema_errors")) as {
@@ -967,8 +948,8 @@ test("get_schema_errors reports the events directory and each load error's file 
   await client.close();
 });
 
-// json_extract compares "5" and 5 as unequal, so a wrongly typed value
-// used to come back as zero sessions — "no data" for "wrong argument".
+// json_extract treats "5" and 5 as different, so a value of the wrong
+// type would give zero sessions, "no data" instead of "wrong argument".
 test("a segment value whose type differs from the prop's declaration is refused", async () => {
   const { client } = await connect();
   const result = await call(client, "get_traffic_summary", {
@@ -1019,7 +1000,7 @@ test("get_steps_funnel names every unknown step, not just the first", async () =
 
 // --- shape and wiring ---
 
-// A zero summary is ambiguous: quiet period, or tracking never installed?
+// All zeros can mean a quiet period or tracking that was never set up.
 test("get_traffic_summary flags a database that has never seen an event", async () => {
   const { client } = await connect();
   const empty = await call(client, "get_traffic_summary", PERIOD);
@@ -1041,7 +1022,7 @@ test("get_top_pages honours its limit and groups by path", async () => {
         pageView({
           sessionId: `s${i}`,
           ts: `2026-01-01T10:0${i}:00.000Z`,
-          // Same path, different query strings — one page, not four.
+          // Same path, different query strings: one page, not four.
           url: `https://example.com/pricing?utm_source=${i}`,
         }),
       );
@@ -1061,8 +1042,8 @@ test("get_top_pages honours its limit and groups by path", async () => {
   await client.close();
 });
 
-// The only tool that writes. MCP has no interactive confirmation, so the
-// two-step shape is the confirmation.
+// Deletes data. MCP has no "are you sure?" prompt, so the tool needs a
+// second call to confirm.
 test("delete_visitor_data previews before it deletes", async () => {
   const { db, client } = await connect((db) => {
     insertEvent(db, pageView());
@@ -1104,9 +1085,9 @@ test("the schema-registry resource exposes every registered event", async () => 
   await client.close();
 });
 
-// lib/context.test.ts covers what the document says in each state.
-// This covers the wiring only: that it is registered, reachable at the
-// URI the agent is given, and served as markdown rather than JSON.
+// lib/context.test.ts tests the document's content. This only checks
+// that it is registered at the URI the agent is given and served as
+// markdown.
 test("the deployment-context resource is reachable and is markdown", async () => {
   const { client } = await connect();
   const { contents } = await client.readResource({
@@ -1121,13 +1102,10 @@ test("the deployment-context resource is reachable and is markdown", async () =>
   await client.close();
 });
 
-// The protocol's own instructions field: sent at initialize, before the
-// agent has decided to call anything, so it is the one guaranteed path
-// (for clients that honor it) to "read deployment context first" — the
-// resource and the fallback tool below both still require the agent to
-// act. Only checks it mentions the two ways to reach that context, not
-// its exact wording, so this doesn't become the second place the
-// sentence has to be edited.
+// MCP's `instructions`, sent when the client connects, before the agent
+// calls anything. Only checks that it names the resource and the tool,
+// not the exact wording, so the text can change without editing this
+// test.
 test("server instructions point the agent at deployment context", async () => {
   const { client } = await connect();
 
@@ -1138,9 +1116,8 @@ test("server instructions point the agent at deployment context", async () => {
   await client.close();
 });
 
-// An agent connected to several installations tells them apart by
-// these two, and on one with several sites an unsegmented number is all
-// of them together.
+// An agent connected to several installations tells them apart by the
+// name and instructions, which also say that numbers cover all sites.
 test("the server's name and instructions name the sites it collects for", async () => {
   async function initialize(siteHosts: string[]) {
     const db = new Database(":memory:");
@@ -1171,8 +1148,8 @@ test("the server's name and instructions name the sites it collects for", async 
   assert.match(two.instructions, /deployment-context/);
 });
 
-// The tool fallback for clients that don't surface MCP resources to
-// the model — same content, reached a different way.
+// The tool for clients that don't show MCP resources to the agent: the
+// same content as the resource.
 test("get_deployment_context returns the same markdown as the resource", async () => {
   const { client } = await connect();
   const { contents } = await client.readResource({
@@ -1184,8 +1161,8 @@ test("get_deployment_context returns the same markdown as the resource", async (
   await client.close();
 });
 
-// Role tags are internal wiring for the client script; an agent seeing
-// them would only be distracted by a field it can't use.
+// Role tags are internal (for the client script); the agent can't use
+// them, so they are left out.
 test("role tags never reach the agent", async () => {
   const { client } = await connect();
   const { contents } = await client.readResource({
@@ -1196,17 +1173,12 @@ test("role tags never reach the agent", async () => {
   await client.close();
 });
 
-// Unlike a role tag, conversion is meant to reach the agent — it marks
-// a business goal, not client/server wiring, and no query resolves
-// through it the way pageView does.
+// Unlike role tags, conversion is shown to the agent: it marks a
+// business goal.
 //
-// Only proves the field is present and false for an unflagged event —
-// none of the shipped built-ins set _conversion, so this can't prove a
-// true value makes it through this handler's own mapping. That case is
-// proven once, at registry.ts's serializeRegistry (see its test file):
-// this handler's own mapping is the same one-line `definition.
-// conversion` read, so a second fixture here would duplicate that
-// proof rather than add to it.
+// No built-in event sets _conversion, so this only checks that the field
+// is there and false. That `true` is passed through is tested for
+// serializeRegistry in registry.test.ts.
 test("list_event_types reports the conversion field for an unflagged event", async () => {
   const { client } = await connect();
   const types = (await call(client, "list_event_types")) as unknown as {
@@ -1220,10 +1192,9 @@ test("list_event_types reports the conversion field for an unflagged event", asy
   await client.close();
 });
 
-// Which tools hand the agent text a visitor wrote. Hand-maintained,
-// because nothing here can see what a given tool's rows actually
-// contain — but a named list at least makes dropping the warning from
-// one of them fail here, rather than in an agent's answer months later.
+// The tools that return text written by visitors. Kept by hand, since a
+// test can't see what a tool returns, but with the list, removing the
+// warning from one of them fails here.
 const TOOLS_RETURNING_VISITOR_TEXT = [
   "get_events_by_property",
   "get_top_entry_params",

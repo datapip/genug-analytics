@@ -22,9 +22,8 @@ function error(value: unknown): string {
   return result.error;
 }
 
-// The whole reason for the bare-word defaults: the common case — a
-// required, ordinary-length text prop — is written with no modifiers at
-// all, and every built-in prop is one.
+// The common case, a required text prop of normal length, needs no
+// modifiers: just "string".
 test("a bare type means required, and short for a string", () => {
   assert.deepEqual(ok("string"), {
     type: "string",
@@ -65,12 +64,12 @@ test("optional flips required, explicitly saying required changes nothing", () =
   assert.equal(ok("string.required").required, true);
 });
 
-// In any order, per the format: only the type's position is fixed.
+// Modifiers may come in any order; only the type must be first.
 test("modifiers may be written in either order", () => {
   assert.deepEqual(ok("string.long.optional"), ok("string.optional.long"));
 });
 
-// Rule 1.
+// An unknown type is named, with the valid ones.
 test("rejects an unknown type and lists the real ones", () => {
   const message = error("str");
   assert.match(message, /unknown type "str" — /, 'no redundant `in "str"`');
@@ -84,9 +83,8 @@ test("rejects an unknown type and lists the real ones", () => {
   assert.match(error(""), /unknown type/);
 });
 
-// Rule 2. A typo has to name itself — the point of the checker is that
-// someone hand-editing a file on a server learns what to fix from the
-// message alone.
+// An unknown type or modifier is named in the error, so someone editing
+// the file knows what to fix.
 test("rejects an unknown rule word, naming it and the valid ones", () => {
   const message = error("string.requried");
   assert.match(message, /unknown rule word "requried"/);
@@ -94,7 +92,7 @@ test("rejects an unknown rule word, naming it and the valid ones", () => {
   assert.match(message, /required, optional, short, long, list/);
 });
 
-// Rule 3.
+// Contradictory or repeated words are rejected.
 test("rejects contradictory and repeated words", () => {
   assert.match(
     error("string.required.optional"),
@@ -104,8 +102,8 @@ test("rejects contradictory and repeated words", () => {
   assert.match(error("string.long.long"), /repeats "long"/);
 });
 
-// Rule 4: rejected rather than ignored, so a misunderstanding surfaces
-// instead of silently doing nothing.
+// short and long only work with string; rejected rather than ignored,
+// so the mistake is noticed.
 test("rejects a length word on a type that has no length", () => {
   assert.match(error("number.long"), /sets a length on a number/);
   assert.match(error("boolean.short"), /sets a length on a boolean/);
@@ -118,16 +116,16 @@ test("rejects a rule that isn't a string at all", () => {
   assert.match(error(null), /got null/);
 });
 
-// `word in OPTIONALITY_WORDS` would find these on Object.prototype and
-// wave the rule through with a nonsense result.
+// With `in`, these built-in object keys would be accepted as valid
+// modifiers.
 test("inherited object properties are not rule words", () => {
   assert.match(error("string.constructor"), /unknown rule word/);
   assert.match(error("string.toString"), /unknown rule word/);
 });
 
-// A list holds several values of one kind — tags on a post, categories
-// on a product. The per-value length cap is unchanged; what changes is
-// how many values there may be.
+// A list holds several values of one type, such as tags on a post. The
+// length limit applies to each value; the list itself is limited in
+// how many values it holds.
 test("list marks the prop as holding several values", () => {
   assert.deepEqual(ok("string.list"), {
     type: "string",

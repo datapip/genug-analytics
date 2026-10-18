@@ -34,9 +34,9 @@ test("isBotUserAgent is true when the User-Agent header is missing", () => {
   assert.equal(isBotUserAgent(undefined), true);
 });
 
-// `bot` matches inside "CUBOT", a budget Android brand with real market
-// share in Europe. Dropping those visitors is silent data loss, which is
-// worse here than letting the occasional crawler through.
+// `bot` matches inside "CUBOT", an Android phone brand. Dropping those
+// visitors would lose data unnoticed, which is worse than letting an
+// occasional crawler through.
 test("isBotUserAgent is false for a device whose model contains a bot pattern", () => {
   assert.equal(
     isBotUserAgent(

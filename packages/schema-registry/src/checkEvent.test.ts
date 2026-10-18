@@ -16,9 +16,8 @@ function errors(value: unknown): string[] {
   return result.errors;
 }
 
-// A copy of VALID with one key removed. Destructuring-to-omit reads
-// fine but leaves a variable nothing uses, which the lint rule
-// (rightly) does not distinguish from a genuine leftover.
+// A copy of VALID with one key removed. (Removing it by destructuring
+// would leave an unused variable, which lint reports.)
 function without(key: string): Record<string, unknown> {
   const copy: Record<string, unknown> = { ...VALID };
   delete copy[key];
@@ -69,8 +68,7 @@ test("an event with no props at all is fine", () => {
   assert.deepEqual(event.props, {});
 });
 
-// `_note` is the format's comment. Plain JSON has none, and a JSONC
-// parser was not worth a dependency.
+// `_note` is for comments, since JSON has none.
 test("_note is allowed and never reaches the registry", () => {
   const event = pass({
     ...VALID,
@@ -81,7 +79,7 @@ test("_note is allowed and never reaches the registry", () => {
   assert.equal("_note" in event, false);
 });
 
-// Rule 7.
+// The event must have a description.
 test("requires a description on the event", () => {
   assert.match(
     errors(without("_description")).join(),
@@ -94,8 +92,8 @@ test("requires a description on the event", () => {
   );
 });
 
-// Rule 9: the case this exists for is a typo in a metadata name. Ignored
-// silently, the event registers without the thing its author wrote.
+// An unknown `_` key is usually a typo in a metadata name. Ignoring it
+// would register the event without what its author wrote.
 test("rejects an unknown underscore key and lists the valid ones", () => {
   const message = errors({ ...VALID, _categroy: "technical" }).join();
   assert.match(message, /unknown event key "_categroy"/);
@@ -109,7 +107,7 @@ test("rejects a role tag that isn't a boolean", () => {
   );
 });
 
-// Rule 5.
+// Every prop needs a description.
 test("requires a description and an example on every prop", () => {
   assert.match(
     errors(without("page_title_description")).join(),
@@ -126,8 +124,8 @@ test("requires a description and an example on every prop", () => {
   );
 });
 
-// Rule 6: the example is shown to the agent as representative, so one
-// the schema would itself reject is a lie about the data.
+// The example must follow the prop's rule: the agent takes it as typical
+// of the data.
 test("rejects an example that doesn't obey its own rule", () => {
   assert.match(
     errors({ ...VALID, page_title_example: 42 }).join(),
@@ -162,8 +160,8 @@ test("a long string prop accepts an example the short cap would reject", () => {
   });
 });
 
-// Rule 10. Guessing which of the two readings was meant is worse than
-// saying the name is unavailable.
+// A key ending in a reserved suffix can't be a prop of its own. Report it
+// instead of guessing what was meant.
 test("rejects metadata whose prop isn't declared", () => {
   const message = errors({ ...VALID, page_titel_example: "typo" }).join();
   assert.match(message, /"page_titel_example" describes a prop "page_titel"/);
@@ -182,8 +180,8 @@ test("rejects a prop name json_extract could not read back", () => {
   );
 });
 
-// The audience is someone editing a file on a server, who would
-// otherwise fix one typo per restart.
+// All errors at once, so someone editing a file on a server doesn't fix
+// one typo per restart.
 test("reports every problem at once, not just the first", () => {
   const found = errors({
     _categroy: "technical",
@@ -225,7 +223,7 @@ test("a list prop's example must be an array of matching values", () => {
     errors(withExample(["x".repeat(513)])).join(),
     /value 1 is 513 characters, over this prop's limit of 512/,
   );
-  // The prop itself may arrive empty; the example may not.
+  // The prop's value may be an empty list; the example may not.
   assert.match(errors(withExample([])).join(), /must have at least one value/);
   assert.match(
     errors(withExample(Array(51).fill("x"))).join(),
@@ -233,7 +231,7 @@ test("a list prop's example must be an array of matching values", () => {
   );
 });
 
-// The mirror of the list case: a scalar prop given an array.
+// The opposite of the list case: a single-value prop given an array.
 test("a non-list prop's example may not be an array", () => {
   assert.match(
     errors({ ...VALID, page_title_example: ["Pricing"] }).join(),

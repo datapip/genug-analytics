@@ -1,21 +1,18 @@
-// Best-effort only: catches crawlers/automation tools that identify
-// themselves honestly (the vast majority — most well-behaved bots and
-// headless-browser scrapers do), not a bot deliberately spoofing a real
-// browser's User-Agent. That's an accepted gap, not a bug — see "Bot/spam
-// filtering" in docs/decisions.md. A missing User-Agent header is treated as
-// bot-like too, since a real browser always sends one.
+// Catches crawlers and automation tools that name themselves in the
+// User-Agent, which most do. A bot pretending to be a real browser gets
+// through; that is a known limit (see "Bot/spam filtering" in
+// docs/decisions.md). A missing User-Agent counts as a bot too, since
+// real browsers always send one.
 const BOT_USER_AGENT_PATTERN =
   /bot|spider|crawl|slurp|facebookexternalhit|mediapartners|ia_archiver|headlesschrome|phantomjs|selenium/i;
 
-// Real devices whose model name happens to contain one of the patterns
-// above. CUBOT is a budget Android brand with real market share in
-// Europe, and `bot` matches inside "CUBOT NOTE 21" — so without this
-// exemption its owners are silently dropped as crawlers, which is the
-// quiet, invisible data loss this project cares most about avoiding.
+// Real devices whose model name contains one of the patterns above.
+// CUBOT is an Android phone brand, and `bot` matches inside
+// "CUBOT NOTE 21"; without this exception those visitors would be
+// dropped as crawlers without anyone noticing.
 //
-// Not fixable in the pattern itself: /\bbot\b/ stops matching
-// "bingbot/2.0", and /bot\b/ still matches "CUBOT NOTE". An explicit
-// exemption is the honest way to say "this one is a phone".
+// The pattern itself can't be tightened instead: /\bbot\b/ no longer
+// matches "bingbot/2.0", and /bot\b/ still matches "CUBOT NOTE".
 const NOT_A_BOT_PATTERN = /cubot/i;
 
 export function isBotUserAgent(userAgent: string | undefined): boolean {

@@ -1,8 +1,5 @@
-// Reading a Cookie header, which two unrelated parts of this server now
-// need: /events for the consentful visitor id, and /cockpit for its
-// session. Lifted here from routes/events.ts unchanged rather than
-// imported across — a lib module reaching into a route module is
-// backwards, and copying twenty lines would leave two of them to drift.
+// Parses a Cookie header into name → value. Used by /events (the
+// visitor id cookie) and by /cockpit (the sign-in session).
 export function parseCookies(
   header: string | undefined,
 ): Record<string, string> {

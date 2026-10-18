@@ -2,30 +2,23 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// Things that happened to the site or its tracking, written down by its
-// owner: an outage, a campaign, a redesign. The agent reads them as
-// part of the deployment-context document (lib/context.ts) so that
-// "traffic tripled on the 15th" can be answered with the reason rather
-// than a guess at one.
+// Things that happened to the site or its tracking, noted by its owner:
+// an outage, a campaign, a redesign. The agent reads them as part of the
+// deployment context (lib/context.ts), so "traffic tripled on the 15th"
+// can be answered with the real reason.
 //
-// JSON rather than the markdown its neighbour uses, because these are
-// records with a shape — a date has to be a date for entries to sort.
-// The cost is a malformed state that markdown does not have, which is
-// why every failure below is reported into the document rather than
-// swallowed.
+// Stored as JSON rather than markdown because each entry has fields: a
+// date must be a real date so entries can be sorted. JSON can be
+// malformed, so every problem below is reported in the document instead
+// of being ignored.
 
 export const HISTORY_FILE = "history.json";
 
-// ISO, like every other date this project accepts, and checked as a
-// real calendar day.
+// A YYYY-MM-DD date that really exists.
 //
-// The check is a round-trip, not `Date.parse`, because that function
-// does not reject a day that does not exist — it rolls it over
-// silently. `Date.parse("2026-02-31")` is a number, and the entry would
-// have been rendered to the agent carrying a date no calendar has,
-// which is the plausible-while-wrong shape this project treats as worse
-// than an obvious error. Round-tripping catches it: 2026-02-31 comes
-// back as 2026-03-03 and no longer matches what was written.
+// `Date.parse` alone isn't enough: it accepts "2026-02-31" and quietly
+// turns it into March 3rd. So the date is parsed and formatted again,
+// and must come back unchanged.
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date as YYYY-MM-DD")
@@ -40,10 +33,9 @@ const isoDate = z
 const entrySchema = z
   .object({
     from: isoDate,
-    // Absent means a single day rather than an open-ended range: an
-    // outage that is still going is written by giving it today's date
-    // and editing it when it ends, which keeps every entry a closed
-    // fact rather than something the reader has to interpret.
+    // Missing means a single day, not an open-ended range. For an
+    // outage that is still going on, use today's date and update it when
+    // it ends, so every entry has a clear end.
     to: isoDate.optional(),
     note: z.string().trim().min(1, "must say what happened").max(2000),
   })
@@ -55,29 +47,26 @@ const entrySchema = z
 
 export type HistoryEntry = z.infer<typeof entrySchema>;
 
-// Generous: a deployment that logs a line a week takes decades to reach
-// it. Capped at all because this text is pasted into an agent's context
-// whole, and an unbounded log would eventually crowd out the
-// conversation it exists to inform.
+// Generous: at one entry a week it takes decades to reach. There is a
+// limit because the whole log is put into the agent's context, and an
+// endless log would eventually crowd out the conversation.
 const MAX_ENTRIES = 200;
 
 export type HistoryResult =
-  // `skipped` carries the entries that failed validation, so the
-  // document can name them. A file is never all-or-nothing unless it
-  // fails to parse: one bad entry costs that entry, exactly as one bad
-  // event file costs that event rather than the registry.
+  // The entries that failed validation, so the document can list them.
+  // One bad entry only drops that entry; only a file that isn't valid
+  // JSON drops everything.
   | { ok: true; entries: HistoryEntry[]; skipped: string[]; dropped: number }
   | { ok: false; error: string };
 
-// The file as it is on disk, with nothing validated, sorted or dropped.
-// Both readers below start here, but for opposite reasons: the formatter
-// wants only the entries it can trust, and the writer must not lose the
-// ones it cannot.
+// The file as it is on disk, without checking, sorting or dropping
+// anything. The reader then keeps only valid entries, while the writer
+// keeps all of them so nothing is lost.
 //
-// A missing file reads as an empty list — the seeder normally puts one
-// there, so this is the deleted-it case, and the writer recreating it is
-// better than refusing. Every other failure is reported: a file that is
-// there and cannot be understood is a file with someone's entries in it.
+// A missing file reads as an empty list (normally one is created at
+// first start, so someone deleted it), and the writer creates it again.
+// Any other problem is reported, because a file that exists but can't be
+// read still holds someone's entries.
 type RawHistory = { ok: true; items: unknown[] } | { ok: false; error: string };
 
 function readRawEntries(path: string): RawHistory {
@@ -128,10 +117,9 @@ export function readHistory(path: string): HistoryResult {
     );
   }
 
-  // Newest first, because the question this answers is nearly always
-  // about something recent. Sorting here rather than asking the owner
-  // to keep the file in order — an appended entry is the natural way to
-  // add one, and the writing tool will append too.
+  // Newest first, because questions are nearly always about something
+  // recent. Sorted here, so the file can stay in the order entries
+  // were added.
   entries.sort((a, b) => b.from.localeCompare(a.from));
 
   const dropped = Math.max(0, entries.length - MAX_ENTRIES);
@@ -142,22 +130,18 @@ export type AppendResult =
   | { ok: true; entry: HistoryEntry; total: number }
   | { ok: false; error: string };
 
-// Adds one entry to the end of the file. The only writer; the cockpit
-// has no surface for this and the owner's own editor is the other way in.
+// Adds one entry to the end of the file. Used by the add_history_note
+// tool, the cockpit and lib/autoHistory.ts; otherwise the owner edits the
+// file by hand.
 //
-// Three rules, all of them about not losing what is already there:
+// Three rules, all to avoid losing existing entries:
 //
-// - A file that cannot be parsed is left alone. Appending to it would
-//   mean writing a fresh array over entries nobody can currently read
-//   but that are still in the file, recoverable by hand. Refusing keeps
-//   them.
+// - A file that isn't valid JSON is left alone. Adding to it would mean
+//   writing a new list over entries that can still be fixed by hand.
 // - Entries that fail validation are written back unchanged. The reader
-//   skips them and says so; a write must not turn "skipped in the
-//   document" into "gone from the disk".
-// - The new array goes to a temporary file first and is renamed over
-//   the old one, which the filesystem does in one step. Without it a
-//   crash mid-write leaves a half-written file, and this is the one file
-//   in a deployment that nothing can re-create.
+//   skips them and says so; a write must not delete them.
+// - The new list is written atomically (lib/atomicWrite.ts), so a crash
+//   can't leave a half-written file. Nothing could re-create this file.
 export function appendHistoryEntry(
   path: string,
   candidate: unknown,
@@ -193,8 +177,8 @@ export function appendHistoryEntry(
   return { ok: true, entry: checked.data, total: items.length };
 }
 
-// One line per entry, dated, so the agent can match an entry to a period
-// it is already looking at without being taught a format.
+// One line per entry, starting with the date, so the agent can match an
+// entry to the period it is looking at.
 export function formatHistory(result: HistoryResult, path: string): string {
   if (!result.ok) {
     return (
@@ -237,19 +221,16 @@ export function formatHistory(result: HistoryResult, path: string): string {
   return [...lines, ...notes].join("\n\n");
 }
 
-// A note is rendered as one item of a list inside a document whose own
-// first paragraph tells the agent this text is instruction it may act
-// on. A blank line ends that item, so a note containing
-// "\n\n## Ground rules\n\n..." stops being a note at all and becomes a
-// section — one that sits outside the "these are records, not
-// instructions" line the History section carries, with nothing after it
-// to give it away. That is the whole reachable version of the injection
-// this feature worries about, and it survives any amount of wording.
+// Puts a note on one line. Each note is one list item in the agent's
+// document, and a blank line would end the item: a note containing
+// "\n\n## Ground rules\n\n..." would become a new section of the
+// document, outside the History section's "these are records, not
+// instructions" warning. That is how someone could slip instructions to
+// the agent.
 //
-// Collapsed rather than rejected. Line breaks in a note are formatting,
-// not content, so reflowing costs nothing, while refusing would throw
-// away an entry someone wrote down — and this runs on every entry, so a
-// file edited by hand is covered too, not just what the tool writes.
+// Line breaks are replaced rather than rejected: they are only
+// formatting, and rejecting would lose an entry. This runs on every
+// entry, so it covers files edited by hand too.
 function oneLine(note: string): string {
   return note.replace(/\s+/g, " ").trim();
 }

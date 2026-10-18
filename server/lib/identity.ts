@@ -1,14 +1,16 @@
 import { createHmac } from "node:crypto";
 
-// Consentless visitor_id: a hash of site + IP + User-Agent, keyed by the
-// daily salt (lib/dailySalt.ts). Also used to compute the "frozen" value on the consentless →
-// consentful transition (see Data model docs) — same inputs, same hash.
+// The visitor_id without consent: a hash of site + shortened IP address
+// + User-Agent, keyed with the daily salt (lib/dailySalt.ts). When a
+// visitor gives consent, the same hash becomes their cookie id, so they
+// keep the same id (see "Consentless → consentful transition" in
+// docs/decisions.md).
 //
-// The site (siteHost in lib/url.ts) is in the hash so that one person
-// reading two sites this installation collects for is two visitors, as
-// in every other privacy-first tool: without it the hash links them
-// across sites, which is the cross-site tracking it exists to avoid.
-// Joined with newlines, which none of the three can contain.
+// The site (siteHost in lib/url.ts) is part of the hash so one person on
+// two of the installation's sites is two visitors. Without it, the hash
+// would link them across sites, which is the cross-site tracking this
+// mode exists to avoid. The parts are joined with newlines, which none
+// of them can contain.
 export function consentlessVisitorId(
   site: string,
   ip: string,
@@ -20,31 +22,26 @@ export function consentlessVisitorId(
     .digest("hex");
 }
 
-// Exactly the shape consentlessVisitorId produces above: a SHA-256 HMAC
-// as lowercase hex.
+// The format consentlessVisitorId produces: a SHA-256 HMAC as 64
+// lowercase hex characters.
 const ISSUED_VISITOR_ID = /^[a-f0-9]{64}$/;
 
-// Whether a value looks like a visitor_id this server actually issued.
+// Whether a value looks like a visitor_id this server issued.
 //
-// The consentful path reads visitor_id back from a cookie, and that
-// cookie used to be trusted verbatim. It's httpOnly, so page JS can't
-// set it — but any HTTP client can put whatever it likes in a Cookie
-// header, and the value went straight into the database. Guessing a
-// real visitor's id is impractical (it's an HMAC keyed by the daily salt),
-// but sending a fresh random value per request was a free way to
-// manufacture unlimited distinct "visitors" and sessions, at unbounded
-// string length per row. A value that fails this check is ignored and
-// the request falls through to the derived hash, exactly as if no
-// cookie had been sent.
+// With consent, the visitor_id comes from a cookie. The cookie is
+// httpOnly, so the page's JavaScript can't set it, but any HTTP client
+// can send any Cookie header. Without this check, a script could send a
+// new random value with every request to create unlimited fake visitors,
+// with values of any length. A value that fails the check is ignored, as
+// if no cookie had been sent.
 export function isIssuedVisitorId(value: string): boolean {
   return ISSUED_VISITOR_ID.test(value);
 }
 
-// What the response must do with the visitor cookie once the identity is
-// decided. Returned rather than done here, because this module knows
-// nothing about the cookie's name, its lifetime or the response — and a
-// unit test can read a decision, where it would have to fake express to
-// watch a side effect.
+// What the response must do with the visitor cookie. This module only
+// returns the decision; routes/events.ts sets or clears the cookie. That
+// keeps this module free of Express, so tests can check the decision
+// directly.
 export type VisitorCookieAction = "set" | "clear" | "none";
 
 export type VisitorIdentity = {
@@ -53,16 +50,15 @@ export type VisitorIdentity = {
   cookie: VisitorCookieAction;
 };
 
-// Who this request belongs to, and whether they are identified by a
-// cookie they consented to or by the day's ephemeral hash. The only
-// inputs are the request's own consent signal, whatever visitor cookie
-// it carried, and what the consentless hash is made of — so the whole
-// decision is one pure function with no express in it.
+// Decides who sent this request, and whether they are identified by
+// their consent cookie or by today's hash. It only uses the request's
+// consent value, its visitor cookie and the inputs of the hash, so it
+// is a pure function.
 export function resolveVisitorIdentity(input: {
-  // Explicitly true, explicitly false, or not sent at all — three
-  // states, and the difference between the last two is load-bearing below.
+  // true, false, or not sent (undefined). False and not sent are
+  // treated differently below.
   consent: boolean | undefined;
-  // The raw cookie value exactly as the request sent it, unvalidated.
+  // The cookie value exactly as the request sent it, not yet checked.
   visitorCookie: string | undefined;
   site: string;
   ip: string;
@@ -72,20 +68,19 @@ export function resolveVisitorIdentity(input: {
   const { consent, visitorCookie, site, ip, userAgent, salt } = input;
 
   // A cookie that doesn't look like one this server issued is ignored
-  // rather than trusted — see isIssuedVisitorId.
+  // (see isIssuedVisitorId).
   const existingCookie =
     visitorCookie && isIssuedVisitorId(visitorCookie)
       ? visitorCookie
       : undefined;
 
   if (consent === false) {
-    // An explicit "no" — not merely absent. A cookie is never trusted
-    // here even if one was sent, and is removed if present: Art. 7(3)
-    // ("as easy to withdraw as to give") requires actually removing the
-    // identifier, and since the cookie is httpOnly, the tracked site's
-    // own JavaScript cannot delete it — only this response can. The
-    // clear is keyed on the raw value, not the validated one: a
-    // malformed cookie is still an identifier sitting on the device.
+    // The visitor said no. Any cookie is ignored and deleted: GDPR
+    // Art. 7(3) says withdrawing consent must be as easy as giving it,
+    // which means removing the identifier. The cookie is httpOnly, so
+    // the site's JavaScript can't delete it; only this response can. It
+    // is deleted even if invalid, since it is still stored on the
+    // device.
     return {
       visitorId: consentlessVisitorId(site, ip, userAgent ?? "", salt),
       consentful: false,
@@ -93,30 +88,27 @@ export function resolveVisitorIdentity(input: {
     };
   }
 
-  // consent === true, or not sent at all (a consent manager that
-  // hasn't answered yet on this particular request, or a deployment
-  // with no banner). Either way, a cookie already on the request
-  // wins: its mere presence already proves this browser consented
-  // before, and only an explicit `false` above removes that trust.
-  // This is what closes the race an unanswered auto page-view used to
-  // lose — it no longer clears a returning, already-consented
-  // visitor's cookie just because this one request doesn't (yet)
-  // confirm it. See "Visitor identification" in docs/decisions.md.
+  // Consent is true, or not sent (the consent banner hasn't answered
+  // yet on this request, or the site has no banner). Either way an
+  // existing cookie is used: it exists only because this browser
+  // consented before, and only an explicit `false` removes it. So a
+  // returning visitor's first page view, sent before the banner has
+  // loaded, still counts under their id. See "Visitor identification"
+  // in docs/decisions.md.
   const visitorId =
     existingCookie ?? consentlessVisitorId(site, ip, userAgent ?? "", salt);
-  // A visitor with no cookie who also hasn't answered gets the
-  // ordinary ephemeral hash and nothing is set below. One who just
-  // said yes gets a fresh persistent cookie frozen from today's hash
-  // rather than a random UUID (see "Consentless → consentful
-  // transition").
+  // A visitor with no cookie and no answer gets today's hash, and no
+  // cookie is set. One who just said yes gets a cookie holding today's
+  // hash, not a random id (see "Consentless → consentful transition" in
+  // docs/decisions.md).
   //
-  // Only an explicit yes writes the cookie, so only an explicit yes
-  // extends its 13 months. An unanswered request still reads it — that
-  // is the race above — but setting it again would store an identifier
-  // on the device again with nothing on this request consenting to it
-  // (§ 25(1) TDDDG). A consent manager that replays stored consent on
-  // every page load keeps a regular visitor's cookie alive; one that
-  // reports only the accept click lets it run out 13 months later.
+  // Only an explicit yes writes the cookie, so only a yes extends its 13
+  // months. A request without an answer reads the cookie (see above) but
+  // doesn't set it again: that would store an identifier on the device
+  // without consent on this request (§ 25(1) TDDDG). A consent banner
+  // that repeats the stored consent on every page load keeps a regular
+  // visitor's cookie alive; one that only reports the accept click lets
+  // it expire 13 months later.
   const consentful = existingCookie !== undefined || consent === true;
   return {
     visitorId,

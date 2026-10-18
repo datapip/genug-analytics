@@ -51,8 +51,8 @@ test("an empty database is never_seen, not a normal zero", () => {
 
 test("a deployment under three days old says too_little_to_tell", () => {
   const db = setupDb();
-  // Hourly for two days, then silent for ten hours: a long silence for
-  // this history, but two days teach nothing about what is usual.
+  // Hourly for two days, then ten hours without events: long for this
+  // site, but two days are too few to know what is usual.
   seed(db, "page_view", 1, 10, 2);
   const health = getCollectionHealth(db, NOW, "page_view");
   assert.equal(health.events.verdict, "too_little_to_tell");
@@ -69,9 +69,9 @@ test("a single event in the window leaves no gap to learn from", () => {
 
 test("a site silent for longer than the lookback is longer_than_usual", () => {
   const db = setupDb();
-  // Hourly for two months, then nothing for fifteen days. Learned from
-  // the two weeks before now, there would be no events at all and the
-  // answer would be too_little_to_tell for the worst outage there is.
+  // Hourly for two months, then nothing for fifteen days. Looking only at
+  // the last two weeks would find no events and answer
+  // too_little_to_tell during the worst outage.
   seed(db, "page_view", 1, 15 * 24, 60);
   const health = getCollectionHealth(db, NOW, "page_view");
   assert.equal(health.events.longestEarlierGapHours, 1);
@@ -81,9 +81,9 @@ test("a site silent for longer than the lookback is longer_than_usual", () => {
 
 test("a quiet site is judged on the gaps before its last event", () => {
   const db = setupDb();
-  // One event every four days, the last ten days ago: only one of them
-  // falls in the two weeks before now, but several in the two weeks
-  // before the last one.
+  // One event every four days, the last ten days ago: only one is in the
+  // last two weeks, but several are in the two weeks before the last
+  // event.
   seed(db, "page_view", 96, 10 * 24, 30);
   const { events } = getCollectionHealth(db, NOW, "page_view");
   assert.equal(events.longestEarlierGapHours, 96);
@@ -111,15 +111,15 @@ test("the silence that is still going on does not count as a past gap", () => {
   const db = setupDb();
   seed(db, "page_view", 12, 40, 10);
   const { events } = getCollectionHealth(db, NOW, "page_view");
-  // If the trailing 40 hours leaked into the gap, hoursSince could never
-  // exceed it and an outage would always read as normal.
+  // If the current 40-hour gap were counted as a usual gap, the silence
+  // could never be longer than it, and an outage would look normal.
   assert.equal(events.longestEarlierGapHours, 12);
 });
 
 test("a lull under an hour is not flagged on a busy site", () => {
   const db = setupDb();
-  // Every six minutes for four days: the longest gap is six minutes,
-  // and forty minutes without an event is well past it.
+  // Every six minutes for four days: the longest gap is six minutes, so
+  // forty minutes without an event is unusual.
   seed(db, "page_view", 0.1, 40 / 60, 4);
   const { events } = getCollectionHealth(db, NOW, "page_view");
   assert.ok(events.hoursSince! > events.longestEarlierGapHours!);

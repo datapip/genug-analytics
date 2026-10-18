@@ -21,8 +21,8 @@ const PERIOD = {
 
 test("getTopRejectedEvents groups by reason and event, ranked by count descending", () => {
   const db = setupDb();
-  // Distinct counts per group (3, 2, 1) — SQL doesn't guarantee a stable
-  // order among ties, so equal counts would make this test flaky.
+  // Different counts per group (3, 2, 1), because SQL doesn't promise an
+  // order for ties.
   for (let i = 0; i < 3; i++) {
     insertRejectedEvent(
       db,

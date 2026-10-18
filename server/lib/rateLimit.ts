@@ -3,39 +3,30 @@ import { logInfo } from "./logger.js";
 import { limiterKey } from "./ip.js";
 
 const WINDOW_MS = 60 * 1000; // 1 minute
-// Events allowed per IP per window. Generous on purpose: this exists to
-// stop a runaway loop or a basic scraper, both of which fire thousands a
-// minute and trip it just as fast at this ceiling as at a tenth of it.
-// A low ceiling costs real data instead, because one address is not one
-// visitor — an office, a school or a mobile carrier's NAT puts hundreds
-// of people behind a single one, and a refusal is invisible to
-// sendBeacon, so the loss leaves no trace on either side. The log line
-// below is what makes the number safe to tune: if legitimate traffic
-// ever does trip it, you see that rather than guessing.
+// Events allowed per address per minute. Generous on purpose: it is
+// meant to stop a runaway loop or a simple scraper, which send thousands
+// a minute and hit this limit as quickly as a lower one. A low limit
+// would lose real data, because one address can be hundreds of people (an
+// office, a school, a mobile carrier), and sendBeacon never sees the
+// refusal. The log line below shows when real traffic hits the limit.
 const EVENTS_MAX_PER_WINDOW = 600;
-// MCP calls allowed per IP per window. A tenth of the events ceiling,
-// because the two ends are not alike: one address on /events can be a
-// whole office, while one address on /mcp is one agent, and an agent
-// working through a question makes a handful of calls, not hundreds.
-// The cost of a call is also not alike — a segment on an entry
-// condition materialises every entry row of its period — and a key that
-// is public (READ_ONLY, see env.ts) invites exactly the loop this
-// bounds. Only requests carrying the right key count here
-// (lib/mcpAuth.ts): hosted agents call from addresses shared with the
-// vendor's other customers, and a stranger there must not be able to
-// spend the owner's budget.
+// MCP calls allowed per address per minute, for requests with the right
+// key. A tenth of the events limit: one address on /mcp is one agent,
+// which makes a handful of calls per question, and a call can be much
+// more expensive than storing an event. A public key (READ_ONLY, see
+// env.ts) invites loops. Only requests with the right key count here
+// (lib/mcpAuth.ts), because hosted agents share addresses with the
+// vendor's other customers.
 export const MCP_MAX_PER_WINDOW = 60;
-// Everything else on /mcp, per address: no key, a wrong one. This is
-// what bounds guessing the key now, so it is low — a real client sends
-// the key on every call, and only an auth-discovery probe arrives
-// without one.
+// All other /mcp requests per address (no key or a wrong one). This
+// limits guessing the key, so it is low: a real client sends the key on
+// every call.
 export const MCP_KEYLESS_MAX_PER_WINDOW = 10;
-// Cockpit requests per address per window: the page, its scripts and
-// styles and one data load are about six, so this is twenty reloads a
-// minute. It is not there for the owner. The data route runs its
-// queries synchronously, and on a deployment whose password is public
-// (READ_ONLY, the demo) a stranger holding refresh would otherwise
-// stall collection behind them.
+// Cockpit requests per address per minute. One page load is about six
+// requests, so this allows twenty reloads a minute. It protects the
+// public demo (READ_ONLY, with a public password): the data route
+// blocks Node while it runs, so someone reloading constantly would delay
+// event collection.
 export const COCKPIT_MAX_PER_WINDOW = 120;
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -46,23 +37,17 @@ interface WindowState {
 
 export interface RateLimitDecision {
   allowed: boolean;
-  // Seconds until this key's window rolls over, so a refusal can say
-  // how long to wait instead of leaving the caller to guess. Zero when
-  // the call was allowed.
+  // Seconds until this key's minute is over, so a refusal can say how
+  // long to wait. Zero when the request was allowed.
   retryAfterSeconds: number;
-  // True only on the one request that first crosses the limit in a given
-  // window, so the caller can log once per window per IP instead of once
-  // per refused request — a runaway loop would otherwise write log lines
-  // exactly as fast as it writes requests, which is the scaling problem
-  // the hourly bot counter exists to avoid.
+  // True only for the first request over the limit in a minute, so the
+  // caller logs once per minute per address rather than once per refused
+  // request.
   firstRefusal: boolean;
 }
 
-// Exported (and taking `hits` as a parameter, rather than reading a
-// module-level map directly) purely so tests can hand it a throwaway
-// map and an explicit `now`, the same reasoning as session.ts's
-// resolveSessionId, without state leaking between test cases or
-// needing to fake the system clock.
+// `hits` and `now` are parameters so tests can pass their own map and
+// time.
 export function checkRateLimit(
   hits: Map<string, WindowState>,
   ip: string,
@@ -87,21 +72,17 @@ export function checkRateLimit(
   };
 }
 
-// At least 1: a Retry-After of 0 invites an immediate retry, which is
-// the opposite of what a refusal is asking for.
+// At least 1, because Retry-After: 0 means "try again now".
 function secondsUntil(deadline: number, now: number): number {
   return Math.max(1, Math.ceil((deadline - now) / 1000));
 }
 
-// One limiter per route, each with its own map, so a burst on one
-// never spends the other's budget. In-memory, per-process — fine here
-// since this is deliberately a single Express process with no
-// horizontal scaling (see "Repo structure" in docs/decisions.md); a
-// shared store (e.g. Redis) would only be needed if that changed. Not
-// meant to stop a determined, distributed attacker — that's a job for a
-// layer in front of this app (a CDN/WAF) — just to stop an accidental
-// runaway loop or a basic scraper from writing unbounded rows, or
-// running unbounded queries.
+// One limiter per route, each with its own map, so traffic on one route
+// doesn't use up another's limit. Kept in memory, which is fine because
+// this is always a single process (see "Repo structure" in
+// docs/decisions.md). It won't stop a determined attack from many
+// addresses (that needs a CDN or firewall in front); it stops runaway
+// loops and simple scrapers.
 export function createRequestLimiter(
   maxPerWindow: number,
   route: string,
@@ -110,8 +91,8 @@ export function createRequestLimiter(
   sweepPeriodically(hits, WINDOW_MS);
 
   return (req, res, next) => {
-    // Not req.ip directly: an IPv6 client holds a whole block and would
-    // otherwise get one budget per address in it. See lib/ip.ts.
+    // Not req.ip: an IPv6 client has a whole block of addresses and
+    // would get a limit for each one. See lib/ip.ts.
     const ip = limiterKey(req.ip ?? "");
     const { allowed, firstRefusal, retryAfterSeconds } = checkRateLimit(
       hits,
@@ -120,11 +101,9 @@ export function createRequestLimiter(
       maxPerWindow,
     );
     if (!allowed) {
-      // A refusal on /events is invisible to the client: sendBeacon
-      // surfaces no response, and a 429 never becomes a stored row, so
-      // without this line a deployment losing real traffic to the
-      // limiter has nothing anywhere to tell it. Logged once per
-      // window, not per request.
+      // Nobody sees a refusal on /events: sendBeacon ignores the
+      // response, and nothing is stored. This log line, once per minute,
+      // is the only sign that real traffic is being lost.
       if (firstRefusal) {
         logInfo("rate limit reached", {
           route,
@@ -133,10 +112,8 @@ export function createRequestLimiter(
           windowSeconds: WINDOW_MS / 1000,
         });
       }
-      // A body and a Retry-After, not a bare 429: an agent that is
-      // not told how long to wait reports an outage to its human,
-      // which is this project's worst failure — plausible, and wrong.
-      // The /events client never reads either, which costs nothing.
+      // A message and Retry-After, not a bare 429: an agent that isn't
+      // told how long to wait may report an outage to its user.
       res.set("Retry-After", String(retryAfterSeconds));
       res.status(429).json({
         error: "rate limit reached",
@@ -158,12 +135,10 @@ export const rateLimitCockpit = createRequestLimiter(
   "/cockpit",
 );
 
-// Without this, a map would grow by one entry per distinct IP ever seen
-// and never shrink. Runs independently of the request path so it keeps
-// sweeping even during a quiet period. unref()'d so this timer alone
-// doesn't keep the process (or, importantly, `node --test`) alive —
-// same reasoning importing this module for its tests shouldn't start a
-// server.
+// Removes old entries; otherwise each map would keep one entry for every
+// address ever seen. Runs on a timer, so it also cleans up during quiet
+// times. unref() lets the process (and `node --test`) exit while the
+// timer waits.
 function sweepPeriodically(
   entries: Map<string, WindowState>,
   windowMs: number,
@@ -179,21 +154,18 @@ function sweepPeriodically(
 export interface FailedAttemptLimiter {
   isBlocked(ip: string, now?: number): boolean;
   recordFailure(ip: string, now?: number): void;
-  // How long the current block still has to run, for the caller's
-  // Retry-After. Zero when the key is not blocked.
+  // How long the current block still lasts, for Retry-After. Zero when
+  // the key isn't blocked.
   retryAfterSeconds(ip: string, now?: number): number;
 }
 
-// Counts *failed* sign-ins to the cockpit, not requests. A successful
-// one consumes no budget at all. /mcp used this too until its callers
-// moved to shared vendor addresses; see lib/mcpAuth.ts.
+// Counts failed cockpit sign-ins, not requests. A successful sign-in
+// doesn't count.
 //
-// A blocked IP is refused without its credentials being checked, which
-// necessarily locks out the real password until the window lapses.
-// That is the point: checking a blocked IP's guess anyway would let it
+// A blocked address is refused without checking its password, so even
+// the right password is refused until the block ends. Otherwise it could
 // keep guessing at full speed. See "Brute-force protection" in
-// docs/decisions.md for the tradeoff that accepts. Same in-memory, per-process
-// caveat as the limiter above.
+// docs/decisions.md. Kept in memory, like the limiter above.
 export function createFailedAttemptLimiter(
   maxFailures: number,
   windowMs: number,
@@ -201,9 +173,9 @@ export function createFailedAttemptLimiter(
   const failures = new Map<string, WindowState>();
   sweepPeriodically(failures, windowMs);
 
-  // Every method narrows first, for the same reason the request
-  // limiter does: without it an IPv6 attacker has as many guessing
-  // budgets as they have addresses, which is all of them.
+  // Every method shortens the address first, as the request limiter
+  // does; otherwise an IPv6 attacker would get a separate limit for
+  // every address in their block.
   return {
     isBlocked(ip: string, now = Date.now()): boolean {
       const entry = failures.get(limiterKey(ip));

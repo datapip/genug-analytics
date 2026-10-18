@@ -11,25 +11,26 @@ import {
 import { NO_SEGMENT, queryParam, type SegmentClause } from "./segment.js";
 import { IN_SESSION_STARTED_IN_PERIOD } from "./sessionScope.js";
 
-// "Which pages, and where visitors came from" — every query here is
-// scoped to the page-view event, which is why each takes it as an
-// argument rather than assuming a name. Pairs with mcp/content.ts.
+// Queries about pages and where visitors came from. They all count the
+// page-view event, whose name is passed in rather than assumed. Used by
+// mcp/content.ts.
 //
 // Every query takes an optional segment (lib/segment.ts): "where did
-// buyers of X come from" is getTopReferrers narrowed to those sessions.
+// buyers of X come from" is getTopReferrers limited to those sessions.
 
-// A page is a path on a site: one installation may collect for several
-// sites (lib/url.ts, siteHost), and "/" on two of them is two pages.
-// Every row carries its host, even on an installation with one site, so
-// a row's shape never depends on how the deployment is configured.
+// A page is a path on a site. One installation may collect for several
+// sites (siteHost in lib/url.ts), and "/" on two of them is two pages.
+// Every row has its host, even with only one site, so rows always have
+// the same fields.
 interface PageKey {
   host: string;
   path: string;
 }
 
-// One string per page, for grouping in a Map. The host is siteHost's
-// (www folded), and a parsed host holds no newline, so the first one
-// splits the key back whatever an unparseable url left in the path.
+// One string per page, used as a Map key. The host comes from siteHost
+// (www removed) and never contains a newline, so splitting at the first
+// newline gets host and path back, even when the path is an unparseable
+// url that contains newlines.
 function pageKey(url: string): string {
   const { host, path } = parseUrl(url);
   return `${bareHost(host)}\n${path}`;
@@ -44,14 +45,11 @@ export interface TopPage extends PageKey {
   views: number;
 }
 
-// Grouped by host and path, not the raw url — two URLs differing only by
-// query string or hash (e.g. ?utm_source=... or a same-page anchor link) are
-// the same page and shouldn't be counted, or shown, separately.
-// Grouping happens in JS rather than SQL because SQLite has no URL
-// parser — the SQL step still does the (cheap, indexed) per-url count,
-// this just re-aggregates that small distinct-url set by page, which is
-// fine at this project's moderate-traffic scale (see "Target user" in
-// docs/decisions.md).
+// Grouped by host and path, not the full url: two URLs that differ only
+// in query string or fragment (?utm_source=... or #section) are the same
+// page. SQLite can't parse URLs, so SQL counts views per url and this
+// code then adds them up per page. That is fast enough for the sites
+// this project is for (see "Target user" in docs/decisions.md).
 export function getTopPages(
   db: Database.Database,
   period: Period,
@@ -97,11 +95,11 @@ interface EntryPageView {
   referrer: string | null;
 }
 
-// The page view that started each session that started in the period.
-// MIN(ts) with bare columns alongside: SQLite takes them from the row
-// that produced the minimum, so this is each session's entry page view
-// and its referrer — no subquery or window function needed. Shared by
-// every "where did they land / come from" query below.
+// The first page view of each session that started in the period. When
+// a query has MIN(ts), SQLite takes the other plain columns from the row
+// with that minimum, so this returns each session's first page view and
+// its referrer without a subquery. Used by the entry and referrer
+// queries below.
 function entryPageViews(
   db: Database.Database,
   period: Period,
@@ -129,36 +127,30 @@ export interface TopReferrer {
   sessions: number;
 }
 
-// A link from the apex to www (or back) is internal navigation rather
-// than a traffic source — see bareHost in lib/url.ts for why only `www`
-// folds.
+// A link from example.com to www.example.com (or back) is the visitor
+// moving within the site, not a traffic source. See bareHost in
+// lib/url.ts for why only `www` is removed.
 function isSelfReferral(referrerHost: string, ownHost: string): boolean {
   return bareHost(referrerHost) === bareHost(ownHost);
 }
 
-// One row per session, keyed on the referrer of the page view that
-// started it, grouped by hostname rather than full URL — a single
-// source like Google Search would otherwise fragment into one row per
-// distinct search-result URL. Scoped to the page-view event, whichever
-// event a deployment tagged "_pageView": true.
+// Counts sessions by the referrer of their first page view, grouped by
+// hostname rather than full URL; otherwise Google Search would be one row
+// per search-results URL.
 //
-// **Counted per session, not per page view.** A traffic source is a way
-// in, and a visit arrives through exactly one of them however many
-// pages it goes on to read. Counting views made engagement look like
-// acquisition, and on a single-page app it did so dramatically:
-// `document.referrer` does not change on a route change (see "Client
-// script embedding contract" in docs/decisions.md), so a visitor who
-// arrived from Google and clicked through five routes was five Google
-// page views. The busier the visit, the more it inflated whatever
-// brought it.
+// **Counted per session, not per page view.** A visit arrives through
+// one source, however many pages it then reads. Counting page views
+// would make busy visits inflate their source. On a single-page app
+// `document.referrer` doesn't change between routes (see "Client script
+// embedding contract" in docs/decisions.md), so one visitor from Google
+// who clicked through five routes would count as five.
 //
-// Self-referrals are still excluded. Session-scoping removes most of
-// them by construction — the site's own previous page is only ever the
-// referrer of a page view that isn't the first — but not all: a session
-// ends after 30 minutes idle (see lib/session.ts), so a visitor who
-// pauses and carries on starts a new session whose entry page view
-// carries the previous page. That is the same visit continuing, not a
-// new source, so it is dropped rather than counted as direct.
+// Referrals from the site itself are left out. Counting per session
+// removes most of them, but not all: a session ends after 30 minutes
+// without activity (lib/session.ts), so a visitor who pauses and goes on
+// starts a new session whose first page view has the previous page as
+// referrer. That is the same visit continuing, so it is dropped rather
+// than counted as direct.
 export function getTopReferrers(
   db: Database.Database,
   period: Period,
@@ -168,10 +160,9 @@ export function getTopReferrers(
 ): Ranked<TopReferrer> {
   const sessionsByHost = new Map<string | null, number>();
   for (const row of entryPageViews(db, period, pageViewEvent, segment)) {
-    // The client always sends document.referrer, "" for direct traffic
-    // — so "" (falsy) and SQL NULL (no referrer field sent at all, an
-    // atypical caller bypassing the client script) both mean "direct"
-    // and must merge into the same bucket, not two separate ones.
+    // The client sends "" as the referrer for direct traffic. A request
+    // sent without the client script may have no referrer at all (NULL).
+    // Both mean "direct" and are counted together.
     const host = row.referrer ? parseUrl(row.referrer).host || null : null;
     if (host !== null && isSelfReferral(host, parseUrl(row.url).host)) continue;
     sessionsByHost.set(host, (sessionsByHost.get(host) ?? 0) + 1);
@@ -192,14 +183,11 @@ export interface EntryParamValue {
   sessions: number;
 }
 
-// Sessions ranked by the value of one query parameter on their entry
-// page view — `utm_campaign`, `gclid`, whatever the site owner tags
-// links with. Ingestion keeps the campaign and click-id parameters and
-// strips everything else (lib/url.ts), so this is the read side of
-// that decision: still no attribution model, no opinion about which
-// parameter matters or how to combine them — the caller names one.
-// Sessions whose entry page carried no such parameter are not a row;
-// `groups` and `total` therefore describe tagged sessions only.
+// Ranks sessions by the value of one query parameter on their first page
+// view, such as `utm_campaign`. Only the kept parameters are stored
+// (lib/url.ts). There is no attribution model: the caller names one
+// parameter. Sessions whose first page had no such parameter are left
+// out, so `groups` and `total` only cover tagged sessions.
 export function getTopEntryParams(
   db: Database.Database,
   param: string,
@@ -243,9 +231,7 @@ export interface ExitPage extends PageKey {
   sessions: number;
 }
 
-// Same as getEntryPages, but the page-view event with the latest ts per
-// session — only meaningful in retrospect, once a session is over (see
-// getSessionSummary), so this is necessarily query-time.
+// Same as getEntryPages, but for the last page view of each session.
 export function getExitPages(
   db: Database.Database,
   period: Period,
@@ -282,10 +268,9 @@ export interface BouncePage extends PageKey {
   bounceRate: number; // bounced / sessions, 0-1
 }
 
-// "Bounced" = a session's only page-view event was this one — i.e. the
-// visitor left without viewing a second page. Grouped by each session's
-// entry page, same as getEntryPages, carrying along how many page-view
-// events that session had in total.
+// A session "bounced" when this was its only page view: the visitor left
+// without viewing a second page. Grouped by each session's first page,
+// like getEntryPages, with the number of page views each session had.
 export function getBouncePages(
   db: Database.Database,
   period: Period,
@@ -320,13 +305,12 @@ export function getBouncePages(
     byPage.set(key, entry);
   }
 
-  // Ranked by bounced sessions, not by rate: sorted on the rate, a page
-  // with one session and one bounce sat above one with 500 sessions
-  // and 400 bounces, and the description had to warn about it instead
-  // of the ranking meaning something. "Which pages lose the most
-  // visitors" is the question; the rate stays on the row for reading —
-  // and breaks ties, since rank() sorts stably: of two pages losing the
-  // same number, the one losing a larger share comes first.
+  // Ranked by the number of bounced sessions, not by rate: by rate, a
+  // page with 1 session and 1 bounce would rank above one with 500
+  // sessions and 400 bounces. The question is "which pages lose the most
+  // visitors". The rate is still on each row, and it breaks ties: rank()
+  // keeps the input order for equal counts, so of two pages losing the
+  // same number, the one with the higher rate comes first.
   const pages = [...byPage.entries()]
     .map(([key, { sessions, bounced }]) => ({
       ...fromPageKey(key),

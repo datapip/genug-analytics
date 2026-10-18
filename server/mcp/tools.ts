@@ -19,14 +19,8 @@ import {
 import { registerAdminTools } from "./admin.js";
 import { VERSION } from "../lib/version.js";
 
-// The tools themselves live in the modules below, grouped by the kind of
-// question they answer. This file had grown to ~900 lines with all of
-// them inlined in one function, which made it by far the largest source
-// file in the project and buried the wiring below in the middle of it.
-//
-// Adding a tool means editing whichever module it belongs to — or adding
-// a new one to this list, which is the only place that needs to know a
-// module exists.
+// The tool modules, grouped by the kind of question they answer. To add
+// a tool, add it to the right module, or add a new module to this list.
 const toolModules: ToolRegistrar[] = [
   registerRegistryTools, // what this deployment tracks at all
   registerContextResources, // what its owner wants the agent to know
@@ -37,46 +31,40 @@ const toolModules: ToolRegistrar[] = [
   registerDiagnosticTools, // is tracking actually working
 ];
 
-// Kept apart from the list above rather than filtered out of it: a
-// read-only deployment (READ_ONLY=true, see lib/env.ts) is one whose
-// MCP key is public, and the whole promise there is that nothing behind
-// the key can write. That is easier to believe of a module that was
-// never registered than of a tool that checks a flag inside its
-// handler. mcp/admin.ts is the only module that writes anything, so
-// this is the one line read-only mode has to know about.
+// A separate list, because READ_ONLY=true (see lib/env.ts) doesn't
+// register these at all: with a public MCP key nothing may write, and a
+// module that isn't registered can't. mcp/admin.ts is the only module
+// that writes.
 const writingToolModules: ToolRegistrar[] = [
   registerAdminTools, // the two tools that write
 ];
 
-// Same treatment, different reason: get_recent_events doesn't write,
-// but it is the one tool that hands the agent raw, unaggregated visitor
-// data (see diagnostics.ts and docs/decisions.md, "the agent reads
-// attacker-controlled text"). A public MCP key shouldn't double as a
-// raw event export any more than it should double as a write key.
-// The cockpit's #tools-read-only-note counts the tools these two lists
-// drop, in plain HTML nothing checks — change it when they change.
+// Also left out under READ_ONLY: get_recent_events writes nothing, but it
+// returns raw visitor data rather than totals (see diagnostics.ts and
+// "the agent reads attacker-controlled text" in docs/decisions.md), and
+// a public key shouldn't allow exporting it.
+// The cockpit's #tools-read-only-note (plain HTML) counts the tools these
+// two lists leave out. Update it when they change.
 const rawDataToolModules: ToolRegistrar[] = [registerRecentEventsTool];
 
 export interface McpServerOptions {
-  // Skips every tool that writes. The routes read it from the
-  // environment; tests pass it directly.
+  // Leaves out every tool that writes.
   readOnly?: boolean;
-  // The site's zone (TIMEZONE). Required: the tools' descriptions name
-  // it, and a bare date in a period means a day in it.
+  // The site's time zone (TIMEZONE). Required: tool descriptions name it,
+  // and a plain date means a day in that zone.
   timezone: string;
-  // The sites ALLOWED_ORIGIN lists (config.siteHosts), named in the
-  // server's name and instructions. Only /mcp needs them: no tool
-  // description does, so the cockpit's manifest is built without.
+  // The sites ALLOWED_ORIGIN lists (config.siteHosts), used in the
+  // server's name and instructions. No tool description uses them, so
+  // the cockpit's tool list is built without them.
   siteHosts?: readonly string[];
 }
 
-// Rejects an inverted period before the handler runs, for every tool
-// that takes one — the ~25 of them are found by their input shape rather
-// than by a hand-kept list, so a new period-taking tool is covered the
-// day it's written. Tools without both bounds (get_recent_events,
-// get_orphaned_events, get_schema_errors, list_event_types,
-// delete_visitor_data, and get_cohort_return with its two named pairs)
-// are handed back untouched.
+// Rejects a period whose start is after its end, before the tool runs.
+// Tools with a period are recognised by having both `from` and `to`, so
+// a new tool is covered automatically. Tools without them
+// (get_recent_events, get_orphaned_events, get_schema_errors,
+// list_event_types, delete_visitor_data, and get_cohort_return with its
+// differently named periods) are left unchanged.
 function guardPeriod(
   config: { inputSchema?: Record<string, unknown> },
   handler: (args: Record<string, unknown>, extra: unknown) => Promise<unknown>,
@@ -90,12 +78,11 @@ function guardPeriod(
   };
 }
 
-// Every period-taking query over `events` takes a segment (AGENTS.md),
-// and a tool that leaves it out does not fail: the SDK drops the unknown
-// argument, and the agent gets whole-site numbers it reads as the
-// segment's. Two tools slipped through that way, so this fails the
-// server at startup instead. The exempt ones read tables with no
-// session_id to narrow by.
+// Every tool with a period over `events` must take a segment (see
+// AGENTS.md). A tool without one doesn't fail: the SDK ignores the
+// unknown argument, and the agent gets numbers for the whole site while
+// believing they are for the segment. So the server refuses to start
+// instead. The tools listed here read tables without a session_id.
 const PERIOD_WITHOUT_SEGMENT = new Set([
   "get_top_rejected_events", // rejected_events
   "get_bot_activity", // bot_activity
@@ -113,14 +100,13 @@ function requireSegment(
   );
 }
 
-// What a tool tells the client about itself, so a client that asks
+// Hints a tool gives the client about itself, so a client that asks
 // before a write (Claude does) knows which calls to ask about. Visitor
-// text reaches the agent through most of these tools, and text that
-// talks it into erasing a visitor is exactly the call a client should
-// stop for. The read side is filled in below rather than written into
-// thirty-odd configs; the write side must be spelled out in admin.ts,
-// because a writing tool that inherited "read-only" would be told to
-// the client as safe to call unasked.
+// text reaches the agent through most tools, and text that talks it into
+// deleting a visitor's data is exactly what a client should stop for.
+// Read-only tools get their hints added below. Writing tools must state
+// theirs in admin.ts, because a writing tool marked read-only would be
+// shown to the client as safe to call without asking.
 const READ_TOOL_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: true,
   // Every tool answers from this deployment's own database and files.
@@ -154,13 +140,10 @@ export interface ToolSummary {
   description: string;
 }
 
-// Populated as a side effect of createMcpServer below (via the
-// registerTool wrapper), not hand-maintained — so a deployment that adds
-// its own custom tool shows up in the cockpit's tool overview for free,
-// with no second list to keep in sync. One manifest per mode: a
-// read-only server registers fewer tools, and the cockpit must list
-// what the agent can actually call, not what the image ships. Keyed by
-// the zone too, since descriptions name it.
+// The list of tools for the cockpit, filled in by createMcpServer below
+// as tools are registered, so a deployment's own tools show up without a
+// second list. One list per mode, because read-only mode has fewer
+// tools, and per time zone, because descriptions name it.
 const manifests = new Map<string, ToolSummary[]>();
 
 function manifestKey(readOnly: boolean, timezone: string): string {
@@ -178,8 +161,8 @@ export function getToolManifest(
   return manifests.get(key) ?? [];
 }
 
-// What a client shows when it lists its servers, so three connected
-// installations are not three entries called "genug".
+// The name a client shows in its list of servers, so three connected
+// installations aren't three entries called "genug".
 function serverName(siteHosts: readonly string[]): string {
   return siteHosts.length > 0 ? `genug (${siteHosts.join(", ")})` : "genug";
 }
@@ -196,18 +179,14 @@ export function createMcpServer(
     { instructions: serverInstructions(siteHosts) },
   );
 
-  // Wraps registerTool once, before any module runs, so every tool they
-  // register (unchanged) is both recorded in the manifest and given the
-  // period guard above — capturing exactly what's actually registered
-  // rather than a separately hand-written list that could drift from it.
-  // TypeScript can't carry the specific overload through a reassignment
-  // like this, so the cast is a deliberate, narrow escape hatch: the
-  // wrapper only reads `name`/`description`/`inputSchema` and forwards
-  // name and config unchanged, so it's correct by construction even
-  // though the type system can't see that.
+  // Wrap registerTool before any module runs, so every tool is added to
+  // the list above and gets the period check. TypeScript can't keep the
+  // method's overloads through this reassignment, hence the cast. It is
+  // safe: the wrapper only reads `name`, `description` and `inputSchema`
+  // and passes everything on unchanged.
   const manifest: ToolSummary[] = [];
-  // Which group the loop below is registering, read by the wrapper so a
-  // module's tools are annotated by where they live (see annotate).
+  // The group the loop below is registering, so the wrapper can give
+  // each tool the hints for its module (see annotate).
   let registeringWrites = false;
   const originalRegisterTool = server.registerTool.bind(server);
   server.registerTool = ((

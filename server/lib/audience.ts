@@ -8,54 +8,33 @@ import {
 } from "./aggregate.js";
 import { NO_SEGMENT, type SegmentClause } from "./segment.js";
 
-// "Who is visiting" — the visitor-shaped questions, as opposed to how
-// much traffic there was (traffic.ts) or what they looked at
-// (content.ts). Pairs with mcp/audience.ts.
-//
-// getTopLanguages and getConsentBreakdown read two columns that were
-// being written on every event row and queried by nothing — the same
-// gap `referrer` had before get_top_referrers existed: collected
-// faithfully, impossible to ask about.
+// Queries about who is visiting: languages, countries, devices, consent,
+// new and returning visitors. Traffic volume is in traffic.ts, pages in
+// content.ts. Used by mcp/audience.ts.
 
 export interface LanguageCount {
-  // null = the request carried no Accept-Language header at all, so the
-  // visitor's locale is genuinely unknown rather than being some
-  // "unknown" locale. Same explicit-null convention as
-  // getTopReferrers' direct-traffic bucket.
+  // null = the request had no Accept-Language header, so the visitor's
+  // language is unknown.
   language: string | null;
   sessions: number;
 }
 
-// The visitor's browser/device locale (parsed from Accept-Language at
-// ingestion), NOT the page's own declared language — an event may carry
-// a document_language prop, which answers a different question.
+// The language of the visitor's browser (from the Accept-Language
+// header), not the page's language, which a document_language prop may
+// record.
 //
-// Counted in sessions, like every other audience breakdown. Not
-// events, since one chatty visitor firing many events shouldn't
-// outrank a genuinely larger audience speaking another language — and
-// not visitors either, which this used to count: a consentless
-// visitor_id rotates daily, so over a month one German reader became
-// up to thirty "visitors" while the device breakdown next to it
-// counted sessions. One unit across the family, and one that survives
-// the rotation.
-// One row per session, the same shape sessionDevices uses, rather than
-// COUNT(DISTINCT session_id) grouped by language.
+// Counted in sessions, like the other audience breakdowns. Not in
+// events, since one busy visitor shouldn't outweigh a larger audience
+// speaking another language. Not in visitors either: without consent a
+// visitor_id changes daily, so over a month one reader could count up to
+// thirty times.
 //
-// The two are not equivalent, and the difference showed up the first
-// time this was pointed at real traffic. Accept-Language is stored per
-// event, not per session, so a session whose events carried two
-// different locales was counted once under each — four language rows
-// totalling four, against three sessions that actually existed. A
-// reader taking shares off that gets more than 100%, and this tool's
-// own description promises it is "the same unit as
-// get_device_breakdown, so the two can be read side by side", which
-// was then untrue.
-//
-// It is not only an artefact of hand-made requests: one consentless
-// visitor_id can cover several people behind one address sharing a
-// User-Agent, and they do not share a locale. Attributing the session
-// to the locale it began with is the same rule entry pages and
-// referrers already use.
+// Each session counts once, under the language of its first event, as
+// entry pages and referrers do. The language is stored per event, and
+// one session can have several (one visitor id can cover several people
+// behind one address with the same User-Agent). Grouping with
+// COUNT(DISTINCT session_id) would count such a session under each
+// language, so the shares would add up to more than 100%.
 export function getTopLanguages(
   db: Database.Database,
   period: Period,
@@ -75,9 +54,8 @@ export function getTopLanguages(
       ...segment.params,
     }) as { language: string | null }[];
 
-  // A null locale is a real answer — the request carried no
-  // Accept-Language header — so it needs a key of its own that cannot
-  // collide with a locale string.
+  // A null language (no Accept-Language header) needs its own key that
+  // can't be mistaken for a language code.
   const NO_LANGUAGE = "\u0000none";
   return mapRanked(
     rankSessionsBy(rows, (row) => row.language ?? NO_LANGUAGE, limit),
@@ -89,22 +67,19 @@ export function getTopLanguages(
 }
 
 export interface CountryCount {
-  // A two-letter code; "ZZ" when the lookup ran and found none (see
+  // A two-letter code; "ZZ" when the lookup ran and found nothing (see
   // lib/country.ts).
   country: string;
   sessions: number;
 }
 
 // Where visitors are, by the country of their shortened address
-// (lib/country.ts). Counted in sessions, attributed to the session's
-// first event, for the same reasons as getTopLanguages above: one
-// consentless visitor_id can cover several people behind one address,
-// and a session must land in exactly one row or the shares overrun.
+// (lib/country.ts). Counted in sessions, each under its first event's
+// country, for the same reasons as getTopLanguages above.
 //
-// Sessions no lookup ran for (stored before COUNTRY_LOOKUP was on, or
-// with it off) are counted beside the ranking, not in it: as a row they
-// could be cut by the limit while still inside `total`, and then no
-// share read off the result would be right.
+// Sessions without a lookup (stored while COUNTRY_LOOKUP was off) are
+// counted separately, not as a row: a row could be cut off by the limit
+// while still counting in `total`, which would make every share wrong.
 export function getTopCountries(
   db: Database.Database,
   period: Period,
@@ -134,8 +109,8 @@ export function getTopCountries(
   };
 }
 
-// Whether any row in the period has a country, which tells a country
-// that really had no sessions from a lookup that never ran.
+// Whether any row in the period has a country. That tells "no sessions
+// from this country" apart from "the lookup never ran".
 export function periodHasCountries(
   db: Database.Database,
   period: Period,
@@ -162,15 +137,13 @@ export interface ConsentBreakdown {
 }
 
 // How much of the stored data was collected with the visitor's consent.
-// Worth having beyond curiosity: get_new_vs_returning_visitors is only
-// meaningful for consentful visitors (consentless ids rotate daily), and
-// until now there was no way to find out what that mix actually is.
+// This matters because get_new_vs_returning_visitors only works for
+// visitors with consent (without it, ids change daily).
 //
-// Counted per event, which is unambiguous — every row carries exactly
-// one mode. Visitors are also reported, but a visitor who accepts a
-// cookie banner mid-period legitimately appears under both modes, so
-// the two visitor counts can sum to more than the real total (the tool
-// description says so).
+// Counted per event, since every row has exactly one mode. Visitors are
+// reported too, but a visitor who accepts the cookie banner during the
+// period appears under both modes, so the two visitor counts can add up
+// to more than the real total (the tool description says so).
 export function getConsentBreakdown(
   db: Database.Database,
   period: Period,
@@ -203,24 +176,18 @@ export function getConsentBreakdown(
   };
 }
 
-// The row set both device breakdowns start from: one row per session,
-// holding the device columns of its earliest event. MIN(ts) with bare
-// columns alongside takes them from the row producing the minimum —
-// the same SQLite guarantee getEntryPages relies on.
+// The rows both device breakdowns start from: one per session, with the
+// device of its first event. With MIN(ts), SQLite takes the other plain
+// columns from the row with the minimum, as in getEntryPages.
 //
-// A session happens in one browser on one device, so the session is
-// the honest unit here — and the only one that doesn't let engagement
-// masquerade as reach. Counted per event, a single desktop visitor
-// reading twenty pages outweighed ten phone visitors reading two, and
-// "most of my traffic is desktop" meant nothing more than "my desktop
-// visitors click around more". Same reasoning as getTopReferrers and
-// getTopLanguages counting sessions.
+// A session happens in one browser on one device, so sessions are the
+// right unit. Counted per event, one desktop visitor reading twenty
+// pages would outweigh ten phone visitors reading two.
 //
-// The columns hold what lib/userAgent.ts classified the header to at
-// write time; the header itself is not stored (see db/migrations.ts).
-// So a classifier fix applies to rows from then on, not to history —
-// the trade accepted for not keeping a string that can single a
-// visitor out on a quiet site.
+// The columns hold what lib/userAgent.ts made of the header when the
+// event arrived; the header itself isn't stored, because on a small site
+// it could identify a visitor. So a fix to lib/userAgent.ts only affects
+// new rows.
 interface SessionDevice {
   device_type: string | null;
   browser: string | null;
@@ -245,10 +212,9 @@ function sessionDevices(
     }) as SessionDevice[];
 }
 
-// A row whose request carried no User-Agent at all has NULL in both
-// columns. It is reported under the same unclassified bucket an
-// unrecognised header lands in, rather than as a separate "none" row:
-// the answer to "which device" is unknown either way.
+// A row from a request without a User-Agent has NULL in both columns.
+// It is counted with the unrecognised ones rather than as a separate
+// "none" row: either way the device is unknown.
 function classified(row: SessionDevice): {
   browser: string;
   deviceType: string;
@@ -264,14 +230,11 @@ export interface DeviceTypeCount {
   sessions: number;
 }
 
-// Device type alone, not crossed with the browser. The crossed version
-// this replaced fragmented one real answer across several rows — with
-// a limit applied, Chrome/desktop, Chrome/mobile and Chrome/tablet were
-// three entries competing for the slots, so a site that is mostly
-// Chrome could push every other browser off the list while never
-// stating either plain fact. "Is my traffic mobile?" and "do I still
-// need to test Safari?" are two questions; getBrowserBreakdown below
-// answers the second.
+// Device type only, not combined with the browser: combined and cut to a
+// limit, Chrome/desktop, Chrome/mobile and Chrome/tablet could fill the
+// list and push every other browser off it. "Is my traffic mobile?" and
+// "do I still need to test Safari?" are separate questions;
+// getBrowserBreakdown below answers the second.
 export function getDeviceTypeBreakdown(
   db: Database.Database,
   period: Period,
@@ -314,25 +277,21 @@ export interface NewVsReturningVisitors {
   returningVisitors: number;
 }
 
-// A visitor counts as "returning" if their all-time earliest event
-// predates this period's start, "new" otherwise — only visitors active
-// *within* the period are counted at all (a visitor who came before and
-// never came back isn't part of either bucket for this period).
+// A visitor active in the period is "returning" if their first event
+// ever was before the period, and "new" otherwise. Visitors not active
+// in the period aren't counted at all.
 //
-// Important caveat, not fixable here: consentless visitor_ids rotate
-// daily (see "Visitor identification" in docs/decisions.md) — a consentless
-// visitor who returns tomorrow gets a brand-new hash and looks "new"
-// again here, every time. This is genuinely meaningful for consentful
-// visitors (a persistent id) and for same-day returns either way; for a
-// mostly-consentless deployment, treat it as a soft signal, not a hard
-// retention number.
+// Caveat: without consent a visitor_id changes daily (see "Visitor
+// identification" in docs/decisions.md), so a visitor returning the next
+// day looks "new" again. The numbers are meaningful for visitors with
+// consent and for returns on the same day; on a site with mostly
+// consentless visitors, treat them as a rough signal.
 //
-// The segment narrows who is active in the period, never the earlier
-// events that decide "returning": a visitor who arrives from a campaign
-// today returns because of any earlier visit, not an earlier one from
-// that campaign. The lookback is one index seek per active visitor
-// (idx_events_visitor_ts), not a pass over every visitor ever stored —
-// that shape grew with the whole table, not with the period asked about.
+// The segment only limits who is active in the period, not the earlier
+// visits: a visitor who came from a campaign today is returning because
+// of any earlier visit. Finding the first event is one index lookup per
+// active visitor (idx_events_visitor_ts), so the cost grows with the
+// period, not with the whole table.
 export function getNewVsReturningVisitors(
   db: Database.Database,
   period: Period,
@@ -367,13 +326,12 @@ export function getNewVsReturningVisitors(
 }
 
 export interface CohortReturn {
-  // Distinct visitors active in the cohort period (and matching the
-  // segment, if one was given).
+  // Distinct visitors active in the cohort period (and in the segment,
+  // if one was given).
   cohortVisitors: number;
-  // Of those, how many had a persistent (consentful) id on at least one
-  // cohort event — the only ones that can be recognised again on a
-  // later day. The rest are consentless, rotate daily, and can only
-  // show up as "returned" within the cohort's own day.
+  // How many of those had a consent id on at least one cohort event.
+  // Only they can be recognised on a later day; the others' ids change
+  // daily, so they can only count as "returned" on the same day.
   consentfulVisitors: number;
   // Cohort visitors with at least one event in the return period.
   returnedVisitors: number;
@@ -381,17 +339,15 @@ export interface CohortReturn {
   returnRate: number;
 }
 
-// "Did last week's campaign visitors come back this week" — a set
-// intersection across two periods, which no count-shaped tool can be
-// combined into. The honest half of the answer is consentfulVisitors:
-// a consentless visitor_id is a new hash every day, so for them
-// returning on a later day is unobservable by design, and the result
-// says how much of the cohort that applies to instead of reporting a
-// return rate that is really a consent rate.
+// "Did last week's campaign visitors come back this week?": the
+// visitors two periods have in common, which no counting tool can
+// answer. consentfulVisitors says how many could be recognised at all:
+// without consent a visitor gets a new id every day, so a later return
+// can't be seen. Without it, the return rate would really be a consent
+// rate.
 //
-// The segment is bound to the cohort period: its @from/@to are the
-// cohort bounds, which is what "entered via utm_campaign=x last week"
-// means.
+// The segment applies to the cohort period (its @from/@to are the
+// cohort's), which is what "came via utm_campaign=x last week" means.
 export function getCohortReturn(
   db: Database.Database,
   cohort: Period,

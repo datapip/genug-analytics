@@ -5,12 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Genug Analytics — Cockpit</title>
-    <!-- Blocking, not deferred: this has to set the theme attribute
-         before the first paint, or the page flashes the wrong theme
-         on load. Same-origin and tiny, so the extra request costs
-         nothing meaningful. It lives in its own file rather than
-         inline so the page needs no inline <script> at all, which is
-         what lets the CSP drop 'unsafe-inline' from script-src. -->
+    <!-- Not deferred: it must set the theme before the page is drawn, or
+         the wrong theme flashes. A separate file rather than inline, so
+         the CSP doesn't need 'unsafe-inline' for scripts. -->
     <script src="theme.js"></script>
     <link rel="stylesheet" href="cockpit.css" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -221,20 +218,18 @@
         </div>
 
         <p class="strip-note" id="consent-note" hidden></p>
-        <!-- Orphaned rows make the numbers above wrong while looking
-             right. The card that lists them starts closed, far down the
-             page, so the warning sits beside the numbers it affects. -->
+        <!-- Orphaned rows make the numbers above wrong while they look
+             right. The card listing them is closed and far down the
+             page, so the warning is shown here, next to the numbers. -->
         <p class="strip-note is-critical" id="orphan-note" hidden>
           <span id="orphan-note-text"></span>
           <a href="#orphaned-events" id="orphan-note-link"
             >See them in the schema registry</a
           >
         </p>
-        <!-- Read-only is the only deployment state that removes a whole
-             card further down the page (the danger zone). Said here, on
-             the first screen, because the operator who set READ_ONLY by
-             accident goes looking for the button that vanished, not for
-             the explanation inside a collapsed card. -->
+        <!-- Read-only mode hides a whole card further down (the danger
+             zone). Said here, on the first screen, so an owner who turned
+             on READ_ONLY by mistake sees why buttons are missing. -->
         <p class="strip-note" id="read-only-note" hidden>
           Read-only deployment: nothing can be changed from this cockpit. No
           editing, creating, reloading or resetting events, and no resetting the
@@ -261,8 +256,8 @@
               <button type="button" data-mode="weekday" aria-pressed="false">
                 Weekday
               </button>
-              <!-- Selected to match the default range, Today; the
-                   window picker switches it (see selectTrendMode). -->
+              <!-- Selected to match the default period, Today; the
+                   period picker changes it (see selectTrendMode). -->
               <button
                 type="button"
                 data-mode="hour"
@@ -289,10 +284,9 @@
                 ></span>
                 Events
               </span>
-              <!-- Buckets are in the site's zone (TIMEZONE), which the
-                   viewer's browser may not share. Hidden in the table
-                   caption alone, a reader elsewhere would take a peak
-                   at "14" for their own 14:00 — plausible while wrong. -->
+              <!-- Days and hours are in the site's time zone (TIMEZONE),
+                   which may differ from the viewer's. Shown visibly, so a
+                   viewer elsewhere doesn't read "14" as their own 14:00. -->
               <span class="card-note" id="trend-caption"></span>
             </div>
             <div class="chart-wrap">
@@ -333,19 +327,17 @@
         <section class="card" id="recent-card">
           <div class="card-head">
             <h3 class="card-title">Recent events</h3>
-            <!-- Says "latest overall" because this card deliberately
-                 ignores the period picker: it answers "is data arriving
-                 right now", which a window filter would defeat (pick
-                 24h on a quiet site and the card empties, implying
-                 breakage). Every other card on the page does follow the
-                 picker, so the exception has to be stated. -->
+            <!-- This card ignores the period picker on purpose: it
+                 answers "is data arriving right now?", and on a quiet
+                 site a short period would empty it and look broken. All
+                 other cards follow the picker, so this says so. -->
             <span class="card-note" id="recent-period-note"
               >Latest 5 overall — not filtered by the selected period</span
             >
           </div>
-          <!-- The server sends no rows in this mode (routes/cockpit.ts),
-               so without this the table would read "No events recorded
-               yet" — a plausible statement about the site, and false. -->
+          <!-- The server sends no rows in read-only mode
+               (routes/cockpit.ts), so without this the table would wrongly
+               say "No events recorded yet". -->
           <div class="card-body" id="recent-read-only-note" hidden>
             <p class="schema-reload-note is-note">
               Read-only: single events are not listed here, because each one
@@ -373,12 +365,10 @@
           </div>
         </section>
 
-        <!-- Present only when something was actually rejected. A card
-             reading "nothing was rejected" every day is noise that
-             trains the eye to skip the spot where the real warning
-             will one day appear. Collapsed by default, same as the
-             reference cards below it, since it's a drill-down rather
-             than the first thing to check. -->
+        <!-- Only shown when something was rejected: a card saying
+             "nothing rejected" every day teaches people to skip the spot
+             where a real warning will appear. Closed by default, like the
+             cards below, because it is for details. -->
         <details class="card" id="rejected-card" hidden>
           <summary>
             <svg
@@ -665,14 +655,12 @@
                 meant for clearing out test traffic before going live — it
                 cannot be undone.
               </p>
-              <!-- The password is typed again so that resetting is a
-                   deliberate act. Filled in by the browser, it is one click
-                   away, so neither field may be autofilled. "off" is
-                   ignored for passwords, and "new-password" makes Safari
-                   and Chrome offer a generated one, which they then save
-                   as the cockpit's password. "one-time-code" is filled by
-                   neither. The data attributes ask the common password
-                   managers the same. -->
+              <!-- The password is typed again so a reset is deliberate, so
+                   the browser must not fill it in. "off" is ignored for
+                   passwords, and "new-password" makes Safari and Chrome
+                   suggest and then save a new password. "one-time-code" is
+                   filled by neither. The data attributes ask common
+                   password managers not to fill it either. -->
               <form id="reset-form" class="danger-zone-form">
                 <label for="reset-password" class="visually-hidden"
                   >Password to reset the database</label

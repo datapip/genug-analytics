@@ -4,57 +4,43 @@ import { appendHistoryEntry, HISTORY_FILE } from "./history.js";
 import { logError } from "./logger.js";
 import { localDate } from "./timezone.js";
 
-// The history log's second writer. `add_history_note` records what a
-// person says happened to the site; this records the handful of things
-// the cockpit itself does that can move a number.
+// Adds history entries automatically. `add_history_note` records what a
+// person says happened to the site; this records cockpit actions that
+// can change the numbers.
 //
-// Only three: renaming an event, deleting one, and Reset events. Those
-// strand stored rows — the rows keep counting toward totals while
-// matching no question asked by name (lib/orphanedEvents.ts) — so a
-// chart that drops on the 12th may have a cause in this file rather
-// than on the website. Creating an event and editing its wording change
-// no number, and are deliberately not logged: a log of everything is a
-// log nobody reads.
-//
-// This is also what replaced the `_createdAt`/`_updatedAt` fields that
-// were planned for each event definition. Those would have been written
-// by the cockpit only, so a file edited by hand over SSH — an ordinary
-// thing to do here — would have carried a date that was quietly wrong.
-// A dated line saying what happened is both true and more use than a
-// date saying only when.
+// There are three: renaming an event, deleting one, and Reset events.
+// They leave stored rows that no longer match any event
+// (lib/orphanedEvents.ts), so a chart that drops on the 12th may be
+// explained here rather than by something on the website. Creating an
+// event or editing its wording changes no number, so those aren't logged:
+// a log of everything is a log nobody reads.
 
-// Every entry says so, in the text, where the agent reading the
-// document sees it. The file is described to the agent as the owner's
-// own record, and most of it is; an entry nobody typed should not be
-// able to pass for one that someone did.
+// Every automatic entry says so in its text. The agent is told the file
+// is the owner's own record, so an entry nobody typed must not look like
+// one someone did.
 const PREFIX = "Recorded automatically: ";
 
-// An entry's note is capped at 2000 characters (lib/history.ts), and a
-// reset can strand more events than fit. Naming the biggest few and
-// counting the rest keeps the entry inside the cap without the cap
-// deciding where the sentence stops.
+// An entry is limited to 2000 characters (lib/history.ts), and a reset
+// can affect more events than fit. So only the biggest few are named and
+// the rest are counted, rather than cutting the sentence off.
 const MAX_NAMED_EVENTS = 5;
 
-// What the owner typed in the optional "why?" box, if they typed
-// anything. Their words, not the server's, so the entry says whose they
-// are — the rest of the sentence is a fact this code observed, and a
-// reason is a claim someone is making.
-//
-// It is also the moment the reason is actually known: a week later
-// nobody writes the note, which is the whole argument for asking in the
-// form rather than hoping for a separate history entry afterwards.
+// What the owner typed in the optional "why?" box. The entry marks it as
+// their words: the rest of the entry is what the server observed, while
+// the reason is someone's claim. It is asked for in the form because
+// that is when the reason is known; a week later nobody writes it down.
 export interface WithReason {
   reason?: string;
 }
 
 export interface RenamedRows extends WithReason {
-  // Carried to the new name, because the owner asked for it.
+  // Rows moved to the new name, because the owner asked for it.
   movedRows: number;
-  // Left under the old name with nothing able to ask about them. Not
-  // simply "the ones that did not move": deleting or renaming away from
-  // `page_view` hands that name back to the built-in stand-in, and rows
-  // under a name that is registered again are not stranded at all. The
-  // caller works that out; this module only writes down what it is told.
+  // Rows left under the old name that no event matches any more. This is
+  // not always "the rows that weren't moved": after deleting or renaming
+  // `page_view`, the built-in stand-in takes that name again, so its rows
+  // still match. The caller works this out; this module just writes it
+  // down.
   strandedRows: number;
 }
 
@@ -74,10 +60,10 @@ export function recordEventRenamed(
 }
 
 export interface DeletedRows extends WithReason {
-  // What the event had collected, whatever became of it.
+  // How many rows the event had collected.
   storedRows: number;
-  // How many of those nothing can ask about any more — zero when the
-  // name is still registered afterwards (the stand-in case above).
+  // How many of those no event matches any more. Zero when the name is
+  // still registered afterwards (the stand-in case above).
   strandedRows: number;
 }
 
@@ -101,11 +87,9 @@ export function recordEventDeleted(
   );
 }
 
-// Both numbers, when both happened, and neither sentence when neither
-// did. The failure worth avoiding is a confident "these rows no longer
-// match anything" about an event that never collected a row — a cause
-// invented for a drop that did not happen, in the file that exists to
-// stop exactly that.
+// Mentions each number only when it isn't zero. Saying "these rows no
+// longer match anything" about an event that never collected a row
+// would give the agent a cause for a drop that never happened.
 function rowsClause(rows: RenamedRows): string {
   const parts: string[] = [];
   if (rows.movedRows > 0) {
@@ -122,8 +106,8 @@ function rowsClause(rows: RenamedRows): string {
   return `${parts.join(", and ")}.`;
 }
 
-// Absent, empty, or whitespace only: all the same thing, and none of
-// them should produce a dangling "Reason given:" with nothing after it.
+// Missing, empty or only spaces all mean no reason, so the entry never
+// ends in an empty "Reason given:".
 function given(reason: string | undefined): string {
   const trimmed = reason?.trim();
   return trimmed ? ` Reason given: ${trimmed}` : "";
@@ -133,15 +117,12 @@ function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-// The other half of counting: one event *stays* and *matches*, several
-// *stay* and *match*. Worth the four lines — these sentences are read
-// by a model that is being asked to explain a number, and "1 stored
-// event stay" is the kind of wrongness that makes a reader discount
-// everything around it.
+// Verb agreement: one event "stays" and "matches", several "stay" and
+// "match". Grammar mistakes like "1 stored event stay" make a reader
+// trust the rest of the text less.
 function verb(n: number, base: "stay" | "match"): string {
   if (n !== 1) return base;
-  // Spelled out rather than built by adding an "s": "match" takes "es",
-  // and a rule with one exception in a set of two is just two words.
+  // Written out rather than adding an "s", because "match" takes "es".
   return base === "match" ? "matches" : "stays";
 }
 
@@ -171,13 +152,12 @@ export function recordEventsReset(
   );
 }
 
-// Dated today in the site's zone: the history is the owner's calendar,
-// and the dates they write in it by hand are their own days too.
+// Dated today in the site's time zone, like the dates the owner writes
+// by hand.
 //
-// Never throws, and never reports failure to the caller. The caller has
-// already renamed the event: a note that could not be written is worth
-// a line in the log an operator can read, not an error telling someone
-// their rename failed when it did not.
+// Never throws or reports failure. The caller has already renamed the
+// event, so a failed note is only logged; it must not look as if the
+// rename failed.
 function record(note: string, timezone: string, directory: string): void {
   const entry = {
     from: localDate(new Date(), timezone),

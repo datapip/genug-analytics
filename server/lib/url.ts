@@ -5,11 +5,11 @@ export interface ParsedUrl {
   host: string; // hostname only, no port; "" on a parse failure
 }
 
-// What survives on a stored URL: which query parameters, and which
-// fragments. "*" keeps every one; a list keeps only those. Parameter
-// names are held lowercased and matched case-insensitively, as a
-// hand-typed utm_Source is plainly the same parameter. Fragments are
-// matched exactly, as the id an anchor points at is case-sensitive.
+// Which query parameters and fragments are kept on a stored URL. "*"
+// keeps all of them; a list keeps only those. Parameter names are stored
+// lowercase and matched ignoring case, since a hand-typed utm_Source is
+// the same parameter. Fragments must match exactly, because anchor ids
+// are case-sensitive.
 export type KeptValues = "*" | readonly string[];
 
 export interface KeptUrlParts {
@@ -17,10 +17,10 @@ export interface KeptUrlParts {
   hashes: KeptValues;
 }
 
-// Campaign parameters only. Click ids (gclid, fbclid, ...) are left out:
-// each one ties a visit to a single ad click on the ad platform's side,
-// which is more than ranking campaigns needs. A deployment that wants
-// them names them in KEPT_QUERY_PARAMS.
+// Only the campaign parameters by default. Click ids (gclid, fbclid, ...)
+// are left out: each one links a visit to one specific ad click at the
+// ad platform, which is more than comparing campaigns needs. A deployment
+// that wants them adds them to KEPT_QUERY_PARAMS.
 export const DEFAULT_KEPT_QUERY_PARAMS = [
   "utm_source",
   "utm_medium",
@@ -30,18 +30,17 @@ export const DEFAULT_KEPT_QUERY_PARAMS = [
   "utm_id",
 ] as const;
 
-// Whole values only, no globs. "utm_*" reads as convenient, but it
-// would also keep utm_email= and utm_token=, which a real newsletter
-// tool will happily generate — the allowlist is only safe because every
-// name on it was written down by someone. "*" alone is the one wildcard,
-// and it means everything, on purpose.
+// Exact names only, no patterns. "utm_*" would be convenient but would
+// also keep utm_email= or utm_token=, which some newsletter tools add.
+// The list is only safe because someone wrote down every name on it. A
+// lone "*" is the only wildcard, and it means "keep everything".
 function parseKeptList(
   name: string,
   value: string | undefined,
   fallback: KeptValues,
   normalize: (entry: string) => string,
 ): KeptValues {
-  // Bare `NAME=` in a compose file means unset, same as TRUST_PROXY.
+  // An empty `NAME=` in a compose file means unset, as for TRUST_PROXY.
   if (value === undefined || value.trim() === "") return fallback;
   const entries = value.split(",").map((entry) => normalize(entry.trim()));
   if (entries.length === 1 && entries[0] === "*") return "*";
@@ -64,18 +63,17 @@ export function parseKeptQueryParams(value: string | undefined): KeptValues {
   );
 }
 
-// Unset keeps no fragment, as before this was configurable: an OAuth
-// implicit response puts access_token and id_token in the fragment
-// precisely so they stay out of server logs, and some reset and
-// unsubscribe flows do the same. A leading "#" is accepted and dropped,
-// since that is how an anchor is usually written down.
+// Unset keeps no fragment. Some login flows (OAuth) put access tokens in
+// the fragment precisely to keep them out of server logs, and some
+// password-reset and unsubscribe links do the same. A leading "#" is
+// accepted and removed, since anchors are often written that way.
 //
-// Each entry goes through the URL parser, because that is what encoded
-// the fragment it is compared against: #über arrives as #%C3%BCber, so a
-// hand-written "über" would otherwise never match. The parser leaves an
-// existing %XX alone, so an entry already written encoded still works.
-// Whitespace is left raw so the list check still refuses it: "pricing
-// faq" is a missing comma, not a fragment to encode as pricing%20faq.
+// Each entry is encoded by the URL parser, the same way the fragment it
+// is compared with was encoded: #über arrives as #%C3%BCber, so a
+// hand-written "über" would otherwise never match. An entry that is
+// already encoded stays as it is. Spaces are not encoded, so the list
+// check still rejects them: "pricing faq" is a missing comma, not a
+// fragment.
 export function parseKeptHashValues(value: string | undefined): KeptValues {
   return parseKeptList("KEPT_HASH_VALUES", value, [], (e) => {
     const bare = e.startsWith("#") ? e.slice(1) : e;
@@ -84,8 +82,8 @@ export function parseKeptHashValues(value: string | undefined): KeptValues {
   });
 }
 
-// Read once at startup: a bad value throws on import, which stops the
-// server before it stores a single URL under a list nobody meant.
+// Read once at startup. A bad value throws when this module loads, so
+// the server stops before storing any URL with the wrong list.
 export const keptUrlParts: KeptUrlParts = {
   params: parseKeptQueryParams(process.env.KEPT_QUERY_PARAMS),
   hashes: parseKeptHashValues(process.env.KEPT_HASH_VALUES),
@@ -102,9 +100,9 @@ export function isKeptQueryParam(
   return keeps(parts.params, name.toLowerCase());
 }
 
-// The read side of the allowlist, for tool descriptions and refusals: a
-// query over a parameter that was never stored would silently match
-// nothing, so the MCP layer refuses it by name and lists these instead.
+// The kept parameters, for tool descriptions and error messages. A
+// query about a parameter that is never stored would match nothing, so
+// the MCP tools refuse it and list these instead.
 export function describeKeptQueryParams(
   parts: KeptUrlParts = keptUrlParts,
 ): string {
@@ -114,26 +112,24 @@ export function describeKeptQueryParams(
   return parts.params.length === 0 ? "none" : parts.params.join(", ");
 }
 
-// Drops every query parameter and fragment the lists above don't keep.
+// Removes every query parameter and fragment the lists above don't keep.
 //
-// A stored URL is read back verbatim by get_recent_events and shown in
-// the cockpit, so whatever sits in a query string ends up in front of
-// whoever asks — and for a hosted assistant, inside that vendor's API.
-// Real sites put things there that have no business being collected: a
-// newsletter link carries ?email=, a password reset or magic link
-// carries a single-use token, a search page carries whatever the visitor
-// typed. None of it is needed to rank pages, which group by path anyway.
+// Stored URLs are shown as they are, by get_recent_events and in the
+// cockpit, and for a hosted AI assistant they are sent to its vendor.
+// Real sites put things in query strings that shouldn't be collected: a
+// newsletter link has ?email=, a password-reset link has a one-time
+// token, a search page has whatever the visitor typed. Pages are grouped
+// by path anyway, so none of it is needed.
 //
-// An allowlist, not a denylist of known-dangerous names, because the two
-// fail in opposite directions. Forgetting to allow a parameter loses
-// analytics data, which is visible the moment you look for it and
-// fixable from then on. Forgetting to deny one leaks a token silently
-// and irreversibly, because it is already stored and already sent.
+// It keeps a list of allowed names instead of removing known-dangerous
+// ones, because the mistakes differ. Forgetting to allow a parameter
+// loses some analytics data, which is easy to notice and fix. Forgetting
+// to block one stores a secret, and that can't be undone.
 //
-// The client strips with the same lists before sending — the server
-// writes them into client.js as it serves it (lib/clientScript.ts) — so
-// this is the backstop for anything POSTing to /events directly, and for
-// a browser still running a cached copy from before the lists changed.
+// The client script already removes them with the same lists (the
+// server writes the lists into client.js, see lib/clientScript.ts).
+// This is the safety net for requests sent to /events directly and for
+// browsers with an old cached copy of the script.
 export function stripUnknownParams(
   rawUrl: string,
   parts: KeptUrlParts = keptUrlParts,
@@ -142,33 +138,28 @@ export function stripUnknownParams(
   try {
     url = new URL(rawUrl);
   } catch {
-    // Same fallback as parseUrl below. The envelope lets `referrer`
-    // through as "", the normal value for a direct visitor, and that
-    // passes through untouched.
+    // Same fallback as parseUrl below. `referrer` is "" for a direct
+    // visitor, which is returned unchanged.
     return rawUrl;
   }
-  // Snapshotted before deleting, since deleting mutates what keys()
-  // iterates. Deleting a key removes all of its values at once, so a
-  // repeated parameter is handled by the first pass.
+  // Copy the keys first, because deleting while looping over keys()
+  // would skip some. Deleting a key removes all its values, so a
+  // repeated parameter is handled at once.
   for (const key of [...url.searchParams.keys()]) {
     if (!isKeptQueryParam(key, parts)) url.searchParams.delete(key);
   }
   if (!keeps(parts.hashes, url.hash.slice(1))) url.hash = "";
-  // A `user:pass@` part is a credential, not a page. Browsers strip it
-  // from document.referrer and rarely leave it in location.href, but a
-  // direct POST can carry one, and nothing reads it back.
+  // A `user:pass@` part is a login, not part of the page. Browsers
+  // usually remove it, but a request sent directly could contain one.
   url.username = "";
   url.password = "";
   return url.toString();
 }
 
-// The fallback is not dead code, even though envelope.url is validated
-// as a real URL at ingestion (see schema-registry/envelope.ts): this is
-// also called on `referrer`, which is deliberately NOT URL-validated,
-// because document.referrer is "" for a direct visitor — the common
-// case, not an error. getTopReferrers relies on an unparseable referrer
-// landing in the direct-traffic bucket rather than throwing, so on a
-// parse failure the raw value becomes the "path" as-is.
+// The fallback is needed: `url` is checked when an event arrives, but
+// `referrer` isn't, because it is "" for every direct visitor. So when
+// parsing fails, the raw value becomes the "path", and getTopReferrers
+// counts an unparseable referrer as direct traffic instead of throwing.
 export function parseUrl(rawUrl: string): ParsedUrl {
   try {
     const url = new URL(rawUrl);
@@ -183,20 +174,19 @@ export function parseUrl(rawUrl: string): ParsedUrl {
   }
 }
 
-// Apex and www fold together: a site reachable at both is one site
-// served twice. Only `www` is folded — anything more (blog.example.com
-// and shop.example.com as one site) needs a public suffix list to tell
-// a subdomain from a separate registrable domain, and that is a
-// dependency this project won't take.
+// example.com and www.example.com count as one site. Only `www` is
+// removed: treating blog.example.com and shop.example.com as one site
+// would need the public suffix list (to tell subdomains from separate
+// domains), and that would be a new dependency.
 export function bareHost(host: string): string {
   return host.replace(/^www\./i, "").toLowerCase();
 }
 
 // The site a page belongs to. One installation may collect for several
-// sites of one owner (ALLOWED_ORIGIN), and the page's host is what tells
-// them apart — in the visitor hash, in where a session ends and in the
-// host segment, which must all agree or a session would sit under one
-// site and be counted under another. An unparseable url gives "".
+// sites of one owner (ALLOWED_ORIGIN), and the page's host tells them
+// apart. The visitor hash, the session and the host segment all use this
+// function, so they always agree on a session's site. An unparseable url
+// gives "".
 export function siteHost(rawUrl: string): string {
   return bareHost(parseUrl(rawUrl).host);
 }

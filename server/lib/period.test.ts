@@ -16,8 +16,8 @@ test("normalizePeriodBound expands a bare date to the start of the day for `from
   );
 });
 
-// The bug this whole module exists for: a bare date as an upper bound
-// used to sort below every real timestamp on that day, dropping all of it.
+// A plain date as the upper bound must include that whole day; compared
+// as text it would sort before every timestamp of the day.
 test("normalizePeriodBound expands a bare date to the END of the day for `to`", () => {
   assert.equal(
     normalizePeriodBound("2026-09-30", "to", "UTC"),
@@ -53,8 +53,8 @@ test("normalizePeriodBound throws on an unparseable value", () => {
   );
 });
 
-// JS would roll this over to March 2nd rather than rejecting it, which
-// would silently widen the requested window by two days.
+// JavaScript would turn this into March 2nd instead of rejecting it,
+// making the period two days longer.
 test("normalizePeriodBound throws on a day that rolls over into the next month", () => {
   assert.throws(
     () => normalizePeriodBound("2026-02-30", "from", "UTC"),
@@ -69,8 +69,7 @@ test("normalizePeriodBound throws on an out-of-range month", () => {
   );
 });
 
-// A genuine leap day must still be accepted — the round-trip check
-// above must not be so strict that it rejects real dates.
+// A real leap day must still be accepted.
 test("normalizePeriodBound accepts a real leap day", () => {
   assert.equal(
     normalizePeriodBound("2028-02-29", "from", "UTC"),
@@ -78,8 +77,8 @@ test("normalizePeriodBound accepts a real leap day", () => {
   );
 });
 
-// An offset timestamp legitimately lands on a different UTC calendar
-// day than the one written, so the round-trip check must not apply here.
+// A timestamp with an offset can fall on another day in UTC, so the
+// date check must not apply to it.
 test("normalizePeriodBound accepts an offset timestamp that shifts to the previous UTC day", () => {
   assert.equal(
     normalizePeriodBound("2026-09-30T01:00:00+02:00", "from", "UTC"),
@@ -94,16 +93,17 @@ test("normalizePeriodBound throws on an empty string", () => {
   );
 });
 
-// The end-of-day expansion must not leak into the next day, since `to`
-// is an inclusive bound in every query that consumes it.
+// The end of the day must not reach into the next day, since `to` is
+// included in every query.
 test("normalizePeriodBound's end-of-day bound stays inside the same day", () => {
   const to = normalizePeriodBound("2026-09-30", "to", "UTC");
   assert.equal(to.slice(0, 10), "2026-09-30");
   assert.ok(to < "2026-10-01T00:00:00.000Z");
 });
 
-// A bare date is a day in the site's zone. In Berlin summer time the
-// 30th starts at 22:00 UTC on the 29th and ends at 22:00 UTC on the 30th.
+// A plain date is a day in the site's time zone. In Berlin summer time
+// the 30th starts at 22:00 UTC on the 29th and ends at 22:00 UTC on the
+// 30th.
 test("normalizePeriodBound reads a bare date as a day in the site's zone", () => {
   assert.equal(
     normalizePeriodBound("2026-09-30", "from", "Europe/Berlin"),
@@ -128,8 +128,8 @@ test("normalizePeriodBound's day with a clock change runs to the next local midn
   );
 });
 
-// The zone decides what a date means, never what a timestamp means:
-// that carries its own offset.
+// The time zone only affects plain dates; a timestamp has its own
+// offset.
 test("normalizePeriodBound leaves a full timestamp alone whatever the zone", () => {
   assert.equal(
     normalizePeriodBound("2026-09-30T14:00:00Z", "from", "Europe/Berlin"),

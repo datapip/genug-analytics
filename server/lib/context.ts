@@ -9,74 +9,58 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatHistory, readHistory, HISTORY_FILE } from "./history.js";
 
-// The deployment's own words for the agent: how it should answer, and
-// later what this site is for and what has happened to it. Served as
-// one MCP resource (mcp/context.ts).
+// What the site owner writes for the agent: how to answer, what the site
+// is for and what has happened to it. Served as one MCP resource
+// (mcp/context.ts).
 //
-// A directory of its own, beside the events directory rather than
-// inside it. Everything that reads EVENTS_PATH filters for ".json" —
-// loadEvents, seedEvents's hasEventFiles, and resetEventFiles's removal
-// list — so a .md dropped in there would be skipped by the seeder and
-// survive the cockpit's Reset events, which is working by accident.
-// Keeping the vocabulary the collector validates against apart from
-// prose the agent reads is worth one more path.
-//
-// Overridable exactly like DB_PATH and EVENTS_PATH, and for the same
-// reason: it is a filesystem path, not a secret.
+// It has its own folder, next to the events folder rather than inside
+// it. Everything that reads EVENTS_PATH only looks at ".json" files, so a
+// .md file there would only keep working by accident. Can be changed
+// with CONTEXT_PATH, like DB_PATH and EVENTS_PATH.
 export const contextPath: string = process.env.CONTEXT_PATH ?? "/data/context";
 
-// Exported so the cockpit's writer (lib/writeGroundRules.ts) and reader
-// (readGroundRulesRaw below) name the same file as this module's own
-// seeder and renderer, rather than a second literal that could drift.
+// Exported so the cockpit's writer (lib/writeGroundRules.ts) uses the
+// same file name as this module.
 export const GROUND_RULES_FILE = "ground-rules.md";
 
-// The site's own purpose, in the owner's words — unlike ground rules,
-// there is no universal default to ship, so this file is never seeded
-// (see seedContextFiles below) and simply doesn't exist until someone
-// writes to it.
+// What the site is for, in the owner's words. Unlike the ground rules
+// there is no sensible default, so this file isn't created at first
+// start (see seedContextFiles below) and only exists once someone writes
+// to it.
 export const BUSINESS_CONTEXT_FILE = "about.md";
 
-// The default shipped inside the image. Resolved relative to this
-// module rather than the working directory, because the server is
-// started from wherever a deployment puts it — same as the built-in
-// events directory.
+// The default ground rules that ship with the image. Found relative to
+// this file, not the working directory, which may be anywhere.
 const BUILT_IN_GROUND_RULES = fileURLToPath(
   new URL(`../../context/${GROUND_RULES_FILE}`, import.meta.url),
 );
 
-// Generous for prose — the shipped ground-rules default is under 2 KB.
-// The cap exists because this text is pasted into an agent's context
-// whole, so an accidentally huge file (a log pasted in, an editor's
-// backup) would otherwise crowd out the conversation it is supposed to
-// inform. Shared by both prose fields (ground rules and business
-// context) rather than named after either one specifically — exported
-// so each field's cockpit writer can refuse a save over the limit
-// instead of silently truncating what render time would.
+// Generous: the default ground rules are under 2 KB. There is a limit
+// because the whole text goes into the agent's context, and an
+// accidentally huge file (a pasted log, say) would crowd out the
+// conversation. Applies to both the ground rules and the business
+// context; the cockpit writers use it to refuse text that is too long.
 export const MAX_PROSE_FIELD_BYTES = 32 * 1024;
 
 export type SeedResult =
-  // `created` names the files this call actually wrote, so startup can
-  // say so once and stay quiet on every restart afterwards.
+  // The files this call created, so startup can log them once and stay
+  // quiet on later restarts.
   { ok: true; created: string[] } | { ok: false; error: string };
 
-// Puts both files on the volume, once each. A file that is already
-// there is left alone — present means the deployment owns it, edits
-// included, and a restart must never hand back the default.
+// Creates the ground-rules and history files on the volume if they
+// don't exist. An existing file is never touched: it belongs to the
+// owner, and a restart must never bring back the default.
 //
-// The exclusive flags below make that the filesystem's job rather than
-// a check-then-write that can lose a race with itself. Never throws: a
-// volume that cannot be prepared is a reason to serve the built-in text
-// and say so (see groundRulesSection), not to stop the server.
+// The exclusive flags below (COPYFILE_EXCL, "wx") make the write fail if
+// the file exists, which is safer than checking first and writing after. Never throws: if the volume
+// can't be prepared, the built-in text is served with a note saying so
+// (see groundRulesSection), rather than stopping the server.
 //
-// history.json is seeded empty rather than left absent. An empty array
-// is a file the owner can find and add a line to, and the writing tool
-// that will append to it has one less state to handle.
+// history.json starts as an empty list rather than missing, so the
+// owner can find it and add a line.
 //
-// `directory` is a parameter defaulting to the module constant for the
-// same reason resetEventFiles and serializeRegistry take theirs: the
-// path is fixed at import from the environment, so a test that could
-// not pass its own would have to write into whatever CONTEXT_PATH
-// happens to be on the machine running it.
+// `directory` is a parameter so tests can use their own folder instead
+// of CONTEXT_PATH.
 export function seedContextFiles(directory: string = contextPath): SeedResult {
   try {
     mkdirSync(directory, { recursive: true });
@@ -106,9 +90,9 @@ export function seedContextFiles(directory: string = contextPath): SeedResult {
   }
 }
 
-// Runs `write`, and reports whether it wrote. An EEXIST is the expected
-// outcome on every start after the first, so it is the one error that
-// is not an error; anything else is rethrown for the caller to report.
+// Runs `write` and reports whether it created the file. EEXIST (file
+// already there) is normal on every start after the first; any other
+// error is thrown for the caller to report.
 function writeIfAbsent(write: () => void): boolean {
   try {
     write();
@@ -119,16 +103,11 @@ function writeIfAbsent(write: () => void): boolean {
   }
 }
 
-// The whole document the agent reads. Composed under fixed headings —
-// Ground rules, About this site, History, in that order, settled when
-// the feature was scoped as one resource rather than three — so an
-// agent that knows the URI needs no retraining as pieces are added.
+// The whole document the agent reads, with three sections in a fixed
+// order: Ground rules, About this site, History.
 //
-// Read from disk on every call, deliberately. It is a few KB beside
-// synchronous SQLite queries, and holding it in a module-level constant
-// is the one shape that would make an edit on the volume silently
-// require a restart — the same footgun the registry's live bindings
-// exist to avoid, here simply not created.
+// Read from disk on every call on purpose. It is only a few KB, and
+// keeping it in memory would mean an edited file needs a restart.
 export function readDeploymentContext(directory: string = contextPath): string {
   const historyPath = join(directory, HISTORY_FILE);
   return [
@@ -161,9 +140,8 @@ function groundRulesSection(directory: string): string {
   }
 
   if (raw.trim() === "") {
-    // Honoured rather than replaced: emptying the file is the documented
-    // way to say "no rules of my own". Said out loud all the same, so an
-    // empty section can't read as something having gone wrong.
+    // An empty file is respected: it is the documented way to say "no
+    // rules". The section says so, so it doesn't look like an error.
     return heading(
       `This deployment's ground-rules file (${target}) is empty, so no ` +
         `owner-supplied rules are in force.`,
@@ -172,9 +150,8 @@ function groundRulesSection(directory: string): string {
 
   const bytes = Buffer.byteLength(raw, "utf8");
   if (bytes > MAX_PROSE_FIELD_BYTES) {
-    // Named, never silent. Cutting instructions off mid-sentence and
-    // saying nothing is exactly the "plausible while wrong" failure this
-    // project treats as worse than an obvious one.
+    // Say that the text was cut, so the agent doesn't follow
+    // instructions that stop mid-sentence without knowing it.
     const kept = Buffer.from(raw, "utf8")
       .subarray(0, MAX_PROSE_FIELD_BYTES)
       .toString("utf8");
@@ -192,12 +169,9 @@ function groundRulesSection(directory: string): string {
 export type BusinessContextRaw =
   { ok: true; text: string } | { ok: false; error: string };
 
-// The plain text behind the "## About this site" section below, for the
-// cockpit's editor — same shape as readGroundRulesRaw, minus the
-// default-fallback branch: there is no universal default for what a
-// site is for, so an absent file is just absent, not "using the
-// built-in" — the caller renders that as an empty editor, not as a
-// pre-filled one.
+// The plain text of the "## About this site" section, for the cockpit's
+// editor. Like readGroundRulesRaw, but without a default: a missing file
+// shows as an empty editor.
 export function readBusinessContextRaw(
   directory: string = contextPath,
 ): BusinessContextRaw {
@@ -212,15 +186,12 @@ export function readBusinessContextRaw(
   }
 }
 
-// Unlike ground rules, an empty business-context file is not a
-// deliberate opt-out — there's no "rule" to turn off, just prose nobody
-// has written yet — so "absent" and "empty" collapse into one case with
-// wording that names what it is (nothing recorded) without implying
-// anything about the site itself. Getting this wrong the ground-rules
-// way ("no context applies") would read as evidence the site has no
-// purpose; getting it wrong the silent way would have the agent invent
-// one. Oversized and unreadable stay separate, real failure states,
-// same as ground rules.
+// Unlike the ground rules, an empty business context isn't a choice;
+// nobody has written it yet. So missing and empty are treated the same,
+// with a sentence saying nothing is recorded, without suggesting
+// anything about the site. Saying nothing at all might make the agent
+// guess what the site is for. Too long and unreadable are reported as
+// errors, as for the ground rules.
 function businessContextSection(directory: string): string {
   const target = join(directory, BUSINESS_CONTEXT_FILE);
 
@@ -274,13 +245,11 @@ export type GroundRulesRaw =
   | { ok: true; text: string; usingDefault: boolean }
   | { ok: false; error: string };
 
-// The plain text behind the "## Ground rules" section above, for the
-// cockpit's editor rather than the agent's document: no heading, no
-// prose about a degraded state wrapped around it. When the owner has no
-// file of their own, this returns the built-in default — the text
-// actually in force (see fallbackSection above) — so opening the editor
-// and saving unchanged is how an owner without shell access adopts it as
-// their own.
+// The plain text of the "## Ground rules" section, for the cockpit's
+// editor: no heading, no notes around it. Without the owner's own file,
+// it returns the built-in default, which is what is in effect (see
+// fallbackSection above). Saving it unchanged makes it the owner's own
+// file.
 export function readGroundRulesRaw(
   directory: string = contextPath,
 ): GroundRulesRaw {
@@ -308,10 +277,9 @@ export function readGroundRulesRaw(
   }
 }
 
-// Serving the default while the owner's own file sits unread would be
-// plausible and wrong — the agent would follow rules nobody currently
-// intends. So the reason travels with the text, in the same document,
-// where whoever asked the question can see it.
+// When the owner's file can't be read, the default is served with the
+// reason, in the same document. Otherwise the agent would follow rules
+// the owner may not want, without anyone knowing.
 function fallbackSection(target: string, cause: unknown): string {
   const missing = (cause as NodeJS.ErrnoException).code === "ENOENT";
   const why = missing
@@ -325,10 +293,8 @@ function fallbackSection(target: string, cause: unknown): string {
   try {
     builtIn = readFileSync(BUILT_IN_GROUND_RULES, "utf8").trim();
   } catch (builtInCause) {
-    // Both gone is not a state a built image can reach, so there is
-    // nothing useful to fall back to — but an agent must still be told
-    // it is operating without any rules rather than handed a section
-    // that merely looks thin.
+    // Both files missing can't happen in a built image, but if it does,
+    // tell the agent it has no rules at all.
     return heading(
       `${why}\n\nThe built-in defaults could not be read either ` +
         `(${describe(builtInCause)}), so no ground rules are in force at all.`,

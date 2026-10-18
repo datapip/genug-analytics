@@ -9,25 +9,22 @@ import {
 import { countStored } from "./events.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// Creates one event file from the cockpit's New event form.
+// Creates one event file from the cockpit's "New event" form.
 //
-// Editing an existing event is words-only (lib/editEvent.ts) because a
-// changed rule string can start rejecting events that are already
-// arriving. Creating one is different in the way that matters: a name
-// nothing has sent yet has no traffic to break and no history to
-// strand, so the worst a wrong shape costs is a file you fix before
-// pointing anything at it.
+// Editing an existing event can only change its wording
+// (lib/editEvent.ts), because a changed rule string could start rejecting
+// events that are already arriving. A new event can define props: nothing
+// sends it yet, so a mistake can be fixed before any traffic arrives.
 //
-// The browser still never sends a rule string. It sends a type picked
-// from a fixed list plus two checkboxes, and this composes
-// "string.long.optional" itself — so a malformed rule is unreachable
-// from a browser rather than merely rejected by the checker.
+// The browser never sends a rule string. It sends a type from a fixed
+// list plus two checkboxes, and this function builds the rule (such as
+// "string.long.optional") itself, so a browser can't produce an invalid
+// one.
 //
-// Role tags are not offered at all. Only one event may carry each, and
-// when two do the winner is decided by name order — so a form that
-// could tick "_pageView" would be a one-click way to displace the
-// deployment's real page-view event and strand its history. Moving a
-// role stays a file edit, where it is a deliberate act.
+// Role tags (like `_pageView`) aren't offered. Only one event may have
+// each, so ticking one in a form could take the role away from the real
+// page-view event and strand its history. Moving a role is done by
+// editing the files.
 
 export type PropTypeChoice = "text" | "longText" | "number" | "boolean";
 
@@ -37,9 +34,8 @@ export interface PropSpec {
   optional: boolean;
   list: boolean;
   description: string;
-  // One entry for an ordinary prop, several for a list. Text either
-  // way: the controls are typed, but an input's value is a string, and
-  // the declared type is what says how to read it back.
+  // One entry for a normal prop, several for a list. Always text, since
+  // form inputs give strings; the declared type says how to read it.
   example: string[];
 }
 
@@ -53,10 +49,9 @@ export type CreateResult =
   | { ok: true; name: string; adoptedRows: number }
   | { ok: false; error: string };
 
-// The closed set of shapes the form can express. `long` is a type
-// choice rather than a modifier checkbox on purpose: parseRule rejects
-// "number.long", and an option that is invalid in three of four
-// combinations is better not offered than validated.
+// The types the form offers. "Long text" is its own type rather than a
+// checkbox, because `long` only works with strings (parseRule rejects
+// "number.long").
 const RULE_TYPE: Readonly<Record<PropTypeChoice, string>> = {
   text: "string",
   longText: "string.long",
@@ -68,8 +63,7 @@ function failed(error: string): CreateResult {
   return { ok: false, error };
 }
 
-// Exported for lib/addEventProp.ts, which composes a rule string the
-// same way for the one prop it adds to an already-live event.
+// Also used by lib/addEventProp.ts to build the rule for a new prop.
 export function composeRule(spec: PropSpec): string {
   let rule = RULE_TYPE[spec.type];
   if (spec.optional) rule += ".optional";
@@ -101,8 +95,8 @@ export function createEventFile(
 
   const seen = new Set<string>();
   for (const spec of create.props) {
-    // Two props of one name would silently collapse into one key, and
-    // the event would register missing a prop its author wrote down.
+    // Two props with one name would become one key, and one of them
+    // would be silently lost.
     if (seen.has(spec.name)) {
       return failed(
         `"${spec.name}" is declared twice. Each prop needs its own name.`,
@@ -120,11 +114,10 @@ export function createEventFile(
     file[`${spec.name}_example`] = example.value;
   }
 
-  // The loader's own checker, before anything reaches disk rather than
-  // after — the same rule the editor follows, so a file this wrote is
-  // always a file that loads. It catches what this function cannot know
-  // to look for: a prop named `page_title_description`, an example
-  // longer than its own cap.
+  // Run the loader's check before writing, so every file written here
+  // loads. It catches things this function doesn't look for, such as a
+  // prop named `page_title_description` or an example over its length
+  // limit.
   const checked = checkEvent(file);
   if (!checked.ok) {
     return failed(`Not created — ${checked.errors.join("; ")}`);
@@ -132,10 +125,9 @@ export function createEventFile(
 
   writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
 
-  // Rows may already be stored under this name, orphaned by an earlier
-  // rename or deletion. Creating the event hands them back to it, which
-  // is usually the point — but it is disclosed rather than discovered,
-  // the same way a rename discloses it.
+  // Rows may already be stored under this name, left over from an
+  // earlier rename or deletion. The new event takes them over, which is
+  // usually wanted, but the response says so, as a rename does.
   return {
     ok: true,
     name: create.name,
@@ -146,12 +138,11 @@ export function createEventFile(
 export type ParsedExample =
   { ok: true; value: unknown } | { ok: false; error: string };
 
-// Typed controls hand back text, so the declared type decides how to
-// read it. Rejecting here rather than letting checkEvent's
-// exampleMismatch do it buys a message about what was typed instead of
-// one about what the file ended up containing.
+// Form inputs give text, so the declared type decides how to read it.
+// Checking here gives an error about what was typed, rather than a later
+// one from checkEvent about the file's contents.
 //
-// Exported for lib/addEventProp.ts — same controls, same reading.
+// Also used by lib/addEventProp.ts.
 export function parseExample(spec: PropSpec): ParsedExample {
   const values: (string | number | boolean)[] = [];
 
@@ -178,8 +169,8 @@ export function parseExample(spec: PropSpec): ParsedExample {
 
   if (spec.list) return { ok: true, value: values };
 
-  // The form only ever renders one control for a prop that is not a
-  // list, so this is a malformed request rather than a typo.
+  // The form shows one input for a prop that isn't a list, so several
+  // values mean a malformed request, not a typo.
   if (values.length !== 1) {
     return { ok: false, error: `needs exactly one value.` };
   }

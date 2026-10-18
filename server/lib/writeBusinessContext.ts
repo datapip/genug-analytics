@@ -7,13 +7,9 @@ import {
 } from "./context.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// The cockpit's only write to about.md — same shape as
-// lib/writeGroundRules.ts (whole-file overwrite, refused rather than
-// truncated over the cap) because the two fields are the same kind of
-// thing: free prose with no shape to merge against. Kept as its own
-// small module rather than a shared helper with the ground-rules
-// writer — two call sites is not yet a pattern worth extracting, and
-// each field's writer stays simple enough to read on its own.
+// Saves the cockpit's business-context text to about.md, replacing the
+// whole file. Works like lib/writeGroundRules.ts: text over the size cap
+// is refused, not cut short, so the owner can shorten it themselves.
 export type WriteBusinessContextResult =
   { ok: true } | { ok: false; error: string };
 

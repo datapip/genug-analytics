@@ -15,9 +15,9 @@ const VALID = {
   props: { page_title: "Pricing" },
 };
 
-// No default: omitting consent must leave it genuinely undefined, not
-// coerce it to false — the server treats "not yet answered" and "no"
-// differently (see events.ts).
+// No default: a missing consent must stay undefined, not become false.
+// The server treats "not answered yet" and "no" differently (see
+// events.ts).
 test("accepts a normal envelope and leaves an omitted consent undefined", () => {
   const result = envelopeSchema.parse(VALID);
   assert.equal(result.consent, undefined);
@@ -37,10 +37,9 @@ test("props stay open — any keys, any scalar values", () => {
   });
 });
 
-// The client always sends location.href, so a non-URL only ever arrives
-// from something already misconfigured — and letting it through means
-// parseUrl falls back to using the raw value as the "path", quietly
-// polluting get_top_pages with entries like "not-a-url".
+// The client always sends location.href, so a non-URL means something is
+// misconfigured. Stored, it would show up in get_top_pages as a page
+// called "not-a-url".
 test("rejects a url that isn't an absolute URL", () => {
   for (const url of ["not-a-url", "/pricing", "", "example.com"]) {
     assert.equal(
@@ -59,8 +58,8 @@ test("rejects a url past the length cap", () => {
   );
 });
 
-// Nothing capped any string before this: a single request could store
-// ~90KB of junk in one row.
+// Every string has a length limit, so one request can't store large
+// amounts of junk.
 test("rejects an over-long referrer, event name and idempotency key", () => {
   const huge = "x".repeat(30_000);
   assert.equal(
@@ -77,8 +76,8 @@ test("rejects an over-long referrer, event name and idempotency key", () => {
   );
 });
 
-// document.referrer is "" for a visitor arriving directly, which is the
-// common case — so unlike `url`, "" must pass.
+// document.referrer is "" for a direct visit, the common case, so unlike
+// `url`, "" must pass.
 test("accepts an empty referrer, and an omitted one", () => {
   assert.equal(
     envelopeSchema.safeParse({ ...VALID, referrer: "" }).success,
@@ -89,8 +88,8 @@ test("accepts an empty referrer, and an omitted one", () => {
   assert.equal(envelopeSchema.safeParse(withoutReferrer).success, true);
 });
 
-// An Android app hands its package as the referrer. A real visit, so
-// it must not be rejected the way a non-http `url` is.
+// An Android app sends its package name as the referrer. That is a real
+// visit, so it must not be rejected.
 test("accepts an app referrer from Android", () => {
   assert.equal(
     envelopeSchema.safeParse({
@@ -101,12 +100,12 @@ test("accepts an app referrer from Android", () => {
   );
 });
 
-// Read back to the agent verbatim, so nothing that is not a place a
-// visitor came from gets stored.
+// The agent sees the referrer as stored, so only real origins are
+// accepted.
 test("rejects a referrer that is not a URL", () => {
   for (const referrer of [
     "javascript:alert(1)",
-    // Fits a "scheme://" pattern, and still runs as code in a link.
+    // Matches "scheme://", but runs as code in a link.
     "javascript://%0aalert(1)",
     "file:///etc/passwd",
     "data:text/html,<b>x</b>",
@@ -133,9 +132,9 @@ test("keeps an explicit consent: false — distinct from omitting it", () => {
   );
 });
 
-// The bundled client sends a role for the three events it fires itself,
-// because it does not know what this deployment calls them. Everything
-// else — track(), data-genug-on-click — sends a name.
+// The client sends a role for the three events it sends by itself,
+// because it doesn't know what this deployment calls them. Everything
+// else (track(), data-genug-on-click) sends a name.
 test("accepts a role instead of an event name", () => {
   const withoutEvent = omitEvent();
   const result = envelopeSchema.parse({ ...withoutEvent, auto: "pageView" });
@@ -154,8 +153,8 @@ test("rejects a role that isn't one of the three", () => {
   }
 });
 
-// Both would make the stored event name depend on which the server read
-// first; neither leaves nothing to store.
+// With both, it would be unclear which name to store; with neither,
+// there is nothing to store.
 test("requires exactly one of event and auto", () => {
   const withoutEvent = omitEvent();
   assert.equal(envelopeSchema.safeParse(withoutEvent).success, false);

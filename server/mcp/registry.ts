@@ -5,9 +5,9 @@ import {
   type ToolRegistrar,
 } from "./shared.js";
 
-// What this deployment's event vocabulary actually is. The agent is
-// meant to read this before calling anything else, so it grounds itself
-// in real event/prop names instead of guessing them.
+// The events this deployment accepts and their props. The agent should
+// read this first, so it uses real event and prop names instead of
+// guessing them.
 export const registerRegistryTools: ToolRegistrar = (server) => {
   server.registerResource(
     "schema-registry",

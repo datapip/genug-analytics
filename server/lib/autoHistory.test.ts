@@ -10,8 +10,8 @@ import {
 } from "./autoHistory.js";
 import { readHistory, formatHistory } from "./history.js";
 
-// Each test writes into its own directory, passed in — the module
-// default is CONTEXT_PATH, which on this machine is /data/context.
+// Each test passes its own folder; the default would be CONTEXT_PATH
+// (/data/context).
 function emptyContext(): string {
   const dir = mkdtempSync(join(tmpdir(), "genug-auto-history-"));
   writeFileSync(join(dir, "history.json"), "[]\n");
@@ -45,9 +45,8 @@ test("a rename is logged with both names, dated today", () => {
   assert.doesNotMatch(entry!.note, /no longer match/);
 });
 
-// The whole reason these lines exist: rows left under the old name keep
-// counting toward totals while matching no question asked by name, so
-// the entry has to say that happened, not just that a rename did.
+// Rows left under the old name still count in totals but match no
+// event, so the entry must say so, not only that a rename happened.
 test("a rename that left rows behind says what that costs", () => {
   const dir = emptyContext();
 
@@ -65,11 +64,10 @@ test("a rename that left rows behind says what that costs", () => {
   );
 });
 
-// "Nothing moved" and "nothing was there" are different facts, and the
-// route has to tell them apart before this module can. An event renamed
-// the day it was created never stranded anything, and a line claiming
-// its rows stopped matching would invent a cause for a drop that never
-// happened — in the file the agent reads to explain drops.
+// "Nothing moved" and "there was nothing" are different. An event
+// renamed on the day it was created had no rows, and saying its rows
+// stopped matching would give the agent a cause for a drop that never
+// happened.
 test("a rename of an event that never collected anything claims nothing", () => {
   const dir = emptyContext();
 
@@ -86,8 +84,8 @@ test("a rename of an event that never collected anything claims nothing", () => 
   assert.doesNotMatch(note, /no longer match/);
 });
 
-// An entry nobody typed sits in a file the agent is told is the owner's
-// own record. It has to be able to tell them apart.
+// The agent is told the file is the owner's own record, so automatic
+// entries must be recognisable.
 test("every entry says it was written automatically", () => {
   const dir = emptyContext();
 
@@ -161,9 +159,8 @@ test("a reset lists what it stranded", () => {
   assert.match(note, /checkout \(128\), signup \(12\)\./);
 });
 
-// A note is capped at 2000 characters and a reset can strand more
-// events than fit. Cut deliberately, with a count for the rest — a note
-// the schema refuses is a note that is silently never written.
+// A note is limited to 2000 characters, and a reset can affect more
+// events than fit. The rest are counted, so the note isn't refused.
 test("a reset that stranded many events still fits, and counts the rest", () => {
   const dir = emptyContext();
   const stranded = Array.from({ length: 60 }, (_, index) => ({
@@ -178,9 +175,8 @@ test("a reset that stranded many events still fits, and counts the rest", () => 
   assert.match(note, /, and 55 more\./);
 });
 
-// The caller has already renamed the event by the time this runs.
-// Refusing to write a note is a line in the server log, never an
-// exception that turns a completed rename into a failed request.
+// The event is already renamed when this runs. A note that can't be
+// written is only logged; it must not turn the rename into an error.
 test("a history file it cannot write is not an exception", () => {
   const dir = mkdtempSync(join(tmpdir(), "genug-auto-history-"));
   writeFileSync(join(dir, "history.json"), "{ not json");
@@ -188,12 +184,11 @@ test("a history file it cannot write is not an exception", () => {
   assert.doesNotThrow(() =>
     recordEventRenamed("a", "b", { movedRows: 0, strandedRows: 0 }, "UTC", dir),
   );
-  // And the unreadable file is left exactly as it was, not replaced.
+  // And the unreadable file is left unchanged.
   assert.equal(readFileSync(join(dir, "history.json"), "utf8"), "{ not json");
 });
 
-// It is only worth writing if the agent reads it as an ordinary line of
-// history beside the owner's own.
+// The entry must reach the agent like any other history line.
 test("the entry renders into the document like any other", () => {
   const dir = emptyContext();
   recordEventRenamed(
@@ -213,10 +208,9 @@ test("the entry renders into the document like any other", () => {
   );
 });
 
-// Deleting the event tagged _pageView hands the name back to the
-// built-in stand-in, so the rows under it match a registered event
-// again. The route works that out; what matters here is that nothing
-// claims a stranding when it is told there was none.
+// After deleting the page-view event, the built-in stand-in takes the
+// name again, so its rows still match. The route works that out; here
+// the entry must not claim orphaned rows when told there are none.
 test("a delete whose name came back says nothing was stranded", () => {
   const dir = emptyContext();
 
@@ -232,10 +226,8 @@ test("a delete whose name came back says nothing was stranded", () => {
   assert.doesNotMatch(note, /no longer match/);
 });
 
-// The malformed-file case above is the refusal path. This is the other
-// one — a CONTEXT_PATH that cannot be written at all, which is what a
-// misconfigured volume actually produces, and which seedContextFiles
-// already tolerates at startup.
+// A CONTEXT_PATH that can't be written at all, as with a misconfigured
+// volume, must not cause an error either.
 test("a directory it cannot write to is not an exception either", () => {
   const missing = join(
     mkdtempSync(join(tmpdir(), "genug-auto-history-")),
@@ -253,8 +245,7 @@ test("a directory it cannot write to is not an exception either", () => {
   );
 });
 
-// The optional "why?" box in the rename and delete forms. Asked at the
-// moment anyone knows the answer; a week later nobody writes it down.
+// The optional "why?" box in the rename and delete forms.
 test("a reason is added as the owner's own words", () => {
   const dir = emptyContext();
 
@@ -271,8 +262,8 @@ test("a reason is added as the owner's own words", () => {
   );
 
   const note = entries(dir)[0]!.note;
-  // "given" and not stated as fact: the sentence before it is something
-  // this code observed, and the reason is a claim a person is making.
+  // "given", not stated as fact: the reason is someone's claim, while
+  // the rest of the entry is what the server observed.
   assert.match(
     note,
     /Reason given: German relaunch, the old name confused the team$/,
@@ -293,9 +284,8 @@ test("a delete carries a reason too", () => {
   assert.match(entries(dir)[0]!.note, /Reason given: Replaced by signup$/);
 });
 
-// The box is optional, and an empty one has to leave no trace: a
-// dangling "Reason given:" with nothing after it reads as a reason
-// somebody deleted.
+// An empty box leaves no trace; an empty "Reason given:" would look
+// like a deleted reason.
 test("an empty or blank reason adds nothing", () => {
   const dir = emptyContext();
 
@@ -320,11 +310,9 @@ test("an empty or blank reason adds nothing", () => {
   }
 });
 
-// A reason is free text from a person, and a note is one line of a
-// markdown list in a document an agent is told it may act on. The
-// formatter collapses whitespace for exactly this reason — pinned here
-// too, because this is the field that invites someone to paste a
-// paragraph.
+// A reason is free text, and each note is one line of a markdown list
+// the agent reads. Line breaks are removed, which matters here because
+// people may paste a paragraph.
 test("a reason spanning lines cannot break out of its entry", () => {
   const dir = emptyContext();
   const path = join(dir, "history.json");

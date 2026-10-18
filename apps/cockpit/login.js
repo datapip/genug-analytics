@@ -1,5 +1,5 @@
-// The cockpit's sign-in page. Posts the password once; everything
-// afterwards rides on the session cookie the server sets.
+// The cockpit's sign-in page. Sends the password once; after that the
+// session cookie the server sets is used.
 (function () {
   "use strict";
 
@@ -8,20 +8,18 @@
   var button = document.getElementById("submit");
   var message = document.getElementById("message");
 
-  // Why the browser is here, left behind by whoever sent it. Arriving
-  // with nothing is the ordinary case — someone opened the cockpit — and
-  // gets no message at all.
+  // Why the browser was sent here, saved by the page that sent it.
+  // Usually there is nothing, and no message is shown.
   //
-  // Read through sessionStorage rather than a query string on purpose:
-  // this page never reads its own URL, so there is nothing for a link
-  // someone else wrote to put on the screen above a password field.
+  // Read from sessionStorage, not from the URL, on purpose: then a link
+  // written by someone else can't put text above the password field.
   var NOTICE = "genug-cockpit-notice";
 
   var NOTICES = {
-    // Set just below, before leaving for the cockpit. cockpit.js clears
-    // it the moment it runs — so finding it still here means the browser
-    // was sent back without ever loading that page, which is what a
-    // refused cookie looks like and nothing else does.
+    // Set below, just before going to the cockpit, and cleared by
+    // cockpit.js as soon as it runs. Finding it still here means the
+    // browser came back without loading the cockpit, which means the
+    // session cookie was refused.
     "cookie-refused": {
       critical: true,
       text: "That password was accepted, but your browser did not keep the session cookie. The cockpit needs https — or http on localhost. A plain http address on your network will not work.",
@@ -51,7 +49,7 @@
       sessionStorage.removeItem(NOTICE);
       return value;
     } catch {
-      // Private mode, or storage blocked. Nothing here needs it.
+      // Private mode or blocked storage. Not needed to sign in.
       return null;
     }
   }
@@ -60,7 +58,7 @@
     try {
       sessionStorage.setItem(NOTICE, value);
     } catch {
-      // See above — this only ever improves a message.
+      // As above: only a message is lost.
     }
   }
 
@@ -76,8 +74,8 @@
       method: "POST",
       headers: {
         "content-type": "application/json",
-        // Required by the server, like every other cockpit write: a
-        // header no cross-site form can set.
+        // Required by the server, as for every cockpit write: a plain
+        // form on another site can't set this header.
         "x-genug-cockpit": "1",
       },
       body: JSON.stringify({ password: input.value }),
@@ -91,9 +89,9 @@
           .then(function (body) {
             if (response.ok) {
               leaveNotice("cookie-refused");
-              // A fixed destination. Never a value from the URL: a
-              // sign-in page that forwards wherever it is told is how
-              // someone else's page ends up collecting this password.
+              // A fixed address, never one from the URL: a sign-in page
+              // that redirects wherever a link says can send the owner to
+              // a fake page.
               window.location.replace("index.html");
               return;
             }

@@ -54,9 +54,8 @@ test("rankSessionsBy returns nothing for no rows", () => {
   );
 });
 
-// The key function is what makes this shared: content.ts derives a url
-// path, events.ts reads an event name. Rows that differ but key the
-// same have to merge, or top pages would fragment by query string.
+// Rows with the same key are merged (content.ts uses the page, events.ts
+// the event name), or top pages would be split by query string.
 test("rankSessionsBy merges rows whose derived key matches", () => {
   const rows = [
     { url: "https://example.com/a?utm=x" },
@@ -76,8 +75,8 @@ test("roundTo rounds to the requested number of decimals", () => {
   assert.equal(roundTo(10, 2), 10);
 });
 
-// A rate of exactly 0 or 1 must stay exactly that — a bounce rate
-// rendered as 0.9999999 would read as "not quite everyone".
+// A rate of exactly 0 or 1 must stay exact; 0.9999999 would read as
+// "not quite everyone".
 test("roundTo leaves whole values exact", () => {
   assert.equal(roundTo(0, 4), 0);
   assert.equal(roundTo(1, 4), 1);

@@ -2,32 +2,27 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SchemaFileError } from "./loadEvents.js";
 
-// Puts the events shipped in the image onto the volume, so that the
+// Copies the built-in events from the image onto the volume, so the
 // volume can be the registry's only source.
 //
-// It has to be the only source, because a deployment must be able to
-// rename a built-in — `page_view` to `seitenaufruf`, say. While the
-// image's own copy is still loaded, the renamed file is a second event
-// carrying "_pageView", and `/app` is root-owned while the server runs
-// as uid 1000, so the image copy cannot be edited or deleted from
-// inside the container. Copying it out once removes the problem instead
-// of adding an exception to it.
+// It has to be the only source so a deployment can rename a built-in
+// (`page_view` to `seitenaufruf`, say). If the image's copy were still
+// loaded, the renamed file would be a second event with "_pageView", and
+// the image's files can't be changed from inside the container (`/app`
+// belongs to root; the server runs as uid 1000).
 //
-// Seeding happens once: when EVENTS_PATH holds no event files at all.
-// Copying whatever the volume happens to be *missing* sounds friendlier
-// and breaks the very thing this exists for — renaming page_view.json
-// to seitenaufruf.json leaves no page_view.json on the volume, so the
-// next restart would copy it straight back and two events would carry
-// the tag.
+// It copies only when EVENTS_PATH has no event files at all. Copying
+// whatever is missing would break renaming: after renaming
+// page_view.json to seitenaufruf.json, the next restart would copy
+// page_view.json back, and two events would have the tag.
 //
-// The cost is the fork case: an event added to your own image does not
-// appear on a volume that is already populated. Put it on the volume
-// too, exactly as you would with a stock image.
+// The downside: an event added to your own image doesn't appear on a
+// volume that already has files. Add it to the volume too.
 
 export interface SeedResult {
-  // The directory the registry should actually read. The volume, unless
-  // it could not be prepared — running from a clone with no /data is
-  // the ordinary reason, and then the image's own directory serves.
+  // The folder the registry should read: the volume, or the image's own
+  // folder when the volume couldn't be prepared (usually a git clone
+  // without /data).
   source: string;
   errors: SchemaFileError[];
 }
@@ -37,11 +32,10 @@ const isEventFile = (name: string): boolean => name.endsWith(".json");
 export function seedEvents(imageDir: string, eventsPath: string): SeedResult {
   if (hasEventFiles(eventsPath)) return { source: eventsPath, errors: [] };
 
-  // Only ever seeds into a directory whose parent is already there. In
-  // a container /data is the mounted volume and always exists; on a
-  // development machine it does not, and creating one would scatter a
-  // stray /data/events across laptops and CI to hold a copy of files
-  // the clone already has.
+  // Only copies into a folder whose parent exists. In a container /data
+  // is the mounted volume and always exists; on a development machine it
+  // usually doesn't, and creating it would leave stray /data/events
+  // folders on laptops and in CI.
   const parent = dirname(eventsPath);
   if (!existsSync(parent)) {
     return {
@@ -90,10 +84,8 @@ export function seedEvents(imageDir: string, eventsPath: string): SeedResult {
   return { source: eventsPath, errors: [] };
 }
 
-// Missing is the normal first-run case. Present but unreadable lands
-// here too and is treated the same way: the copy below then fails on
-// its own and says so, which is a better message than anything guessed
-// from here.
+// Missing is normal on the first start. An unreadable folder is treated
+// the same way; the copy below then fails with its own, clearer error.
 function hasEventFiles(directory: string): boolean {
   try {
     return readdirSync(directory).some(isEventFile);

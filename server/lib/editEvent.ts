@@ -11,30 +11,28 @@ import {
 import { countStored } from "./events.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 
-// Applies an edit made in the cockpit to one event file.
+// Saves an edit made in the cockpit to one event file.
 //
-// Only the words change: the event's name, its description, and each
-// prop's description and example. Prop names, types
-// and role tags are read back out of the file and written again
-// untouched, which is what makes this safe to expose in a browser —
-// nothing here can alter whether an incoming event is accepted, so the
-// worst a mistake costs is prose an agent reads.
+// Only the wording can change: the event's name, its description, and
+// each prop's description and example. Prop names, types and role tags
+// are copied from the file unchanged. That makes it safe to offer in a
+// browser: nothing here can change whether an incoming event is
+// accepted, so a mistake only affects text the agent reads.
 //
-// Nothing is written until the whole edited file has passed the same
-// checker the loader uses. A file this wrote is a file that loads.
+// Nothing is written until the edited file passes the loader's own
+// check, so every file this writes will load.
 
 export interface EventEdit {
-  // The event's name after the edit. Different from the current name
-  // means a rename, which is also a file rename.
+  // The event's name after the edit. If it differs from the current
+  // name, the event (and its file) is renamed.
   name: string;
   description: string;
-  // Keyed by prop name. Every key must already be a prop of this event;
-  // the values are the two pieces of prose attached to it. Examples
-  // arrive as text because they come from a text input — see
-  // parseExample for how a non-string prop's is read back.
+  // Keyed by prop name; every key must be an existing prop of this
+  // event. Examples arrive as text from a text input; parseExample
+  // converts them for props that aren't strings.
   props: Record<string, { description: string; example: string }>;
-  // Whether to carry the rows already stored under the old name over to
-  // the new one. Ignored unless the name actually changed.
+  // Whether to move the rows stored under the old name to the new one.
+  // Ignored unless the name changed.
   renameStoredEvents: boolean;
 }
 
@@ -51,9 +49,9 @@ export function editEventFile(
   currentName: string,
   edit: EventEdit,
 ): EditResult {
-  // The event's file is named after it, so an unchecked name here is a
-  // path, not a label: PUT /cockpit/events/..%2F..%2Fsecret reaches a
-  // file outside EVENTS_PATH, and a rename unlinks it.
+  // The file is named after the event, so the name must be checked: an
+  // unchecked name like ..%2F..%2Fsecret would point at a file outside
+  // EVENTS_PATH, and a rename would delete it.
   if (!isValidEventName(currentName)) {
     return failed(
       `"${currentName}" cannot be an event name, so there is no file it ` +
@@ -68,10 +66,9 @@ export function editEventFile(
     );
   }
 
-  // A file that does not load has something wrong with it that this
-  // editor cannot reach — a bad rule string, a missing example, a
-  // malformed tag. Rewriting two of its fields would leave it just as
-  // broken while implying it had been fixed.
+  // A file that doesn't load has a problem this editor can't fix (a bad
+  // rule string, a missing example, a malformed tag). Saving new wording
+  // would leave it just as broken while looking fixed.
   const loaded = readLoadableEventFile(
     directory,
     currentName,
@@ -102,9 +99,8 @@ export function editEventFile(
     updated[`${propName}_example`] = example.value;
   }
 
-  // The same check the loader runs, before anything reaches disk rather
-  // than after — so a rejected edit costs nothing at all, instead of
-  // leaving a file the next reload refuses.
+  // Run the loader's check before writing, so a rejected edit changes
+  // nothing instead of leaving a file the next reload refuses.
   const after = checkEvent(updated);
   if (!after.ok) {
     return failed(`Not saved — ${after.errors.join("; ")}`);
@@ -119,12 +115,10 @@ export function editEventFile(
     );
   }
 
-  // Checked before the write, so declining leaves nothing half-done.
-  // Rows under the target name belong to some earlier event of that
-  // name — orphaned, since a file of that name would have been caught
-  // just above. Merging one event's history into another's is not
-  // something a checkbox should do quietly, and nothing can separate
-  // them again afterwards.
+  // Checked before writing, so refusing leaves nothing half-done. Rows
+  // already under the new name belong to an earlier event of that name
+  // (orphaned rows). Moving more rows onto them would merge two events'
+  // history for good, which a checkbox shouldn't do.
   if (renaming && edit.renameStoredEvents) {
     const existing = countStored(db, edit.name);
     if (existing > 0) {
@@ -140,11 +134,10 @@ export function editEventFile(
   writeFileAtomic(targetPath, `${JSON.stringify(updated, null, 2)}\n`);
   if (renaming) unlinkSync(currentPath);
 
-  // After the file, never before. A rename that moved the rows and then
-  // failed to write would leave every row pointing at a name nothing
-  // defines; this way round the worst case is rows left under the old
-  // name, which is the ordinary stranded-data case the orphaned-events
-  // panel already reports.
+  // Move the rows after writing the file, never before. If the file
+  // write failed after the rows moved, every row would have a name no
+  // event defines. This way the worst case is rows left under the old
+  // name, which the orphaned-events panel reports.
   const movedRows =
     renaming && edit.renameStoredEvents
       ? db
@@ -158,11 +151,10 @@ export function editEventFile(
 type ParsedExample =
   { ok: true; value: unknown } | { ok: false; error: string };
 
-// Examples come from a text input, and most of them are strings, where
-// the text is the value. For anything else the text is read as JSON —
-// asking someone to type quotes around a page title to edit it would be
-// absurd, and there is no way to tell 49.9 from "49.9" without knowing
-// the declared type.
+// Examples come from a text input. For a string prop the text is the
+// value, so nobody has to type quotes around a page title. For any other
+// type the text is read as JSON: only the declared type says whether
+// 49.9 is a number or a string.
 function parseExample(text: string, rule: PropRule): ParsedExample {
   if (rule.type === "string" && !rule.list) return { ok: true, value: text };
 

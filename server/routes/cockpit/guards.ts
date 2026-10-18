@@ -1,29 +1,26 @@
 import { json, type Request, type Response } from "express";
 import { eventsPath, eventsSource } from "@genug/schema-registry";
 
-// The checks the cockpit's write routes share, kept in one place so the
-// routes in data, events, context and danger cannot drift apart on them.
+// Checks shared by the cockpit's write routes, kept in one place so
+// every route does them the same way.
 
-// Long enough for a sentence explaining a rename, short enough that the
-// entry it lands in stays inside the history log's own 2000-character
-// note cap with both event names in front of it.
+// Long enough for a sentence explaining a rename, and short enough that
+// the history entry (with both event names added) stays under the
+// history log's 2000-character limit.
 export const REASON_MAX_LENGTH = 500;
 
 // The body limit for every write except the two prose fields
 // (cockpit/context.ts), which can be much longer.
 export const parseEditBody = json({ limit: "64kb" });
 
-// Half the CSRF defence for every write on the cockpit router. The
-// other half is the session cookie, which is SameSite=Lax, so a browser
-// will not send it on a cross-site POST at all. Both, because the two
-// fail differently: a header no plain form can set forces a preflight,
-// and /cockpit answers no CORS preflight.
+// One of two protections against cross-site request forgery (CSRF) for
+// every cockpit write. The other is the session cookie's SameSite=Lax,
+// which stops the browser sending it on a cross-site POST. This one
+// requires a custom header: a plain HTML form can't set one, and another
+// site's script would need a CORS preflight, which /cockpit never
+// allows. Two protections, because they can fail in different ways.
 //
-// Shared by every write route — including reload and the resets,
-// which need nothing else refusesWrite checks — so the comparison and
-// the response shape can't drift out of step between them. `message`
-// keeps each call site's own wording; only the check and the 400
-// itself are shared.
+// `message` lets each route word its own error.
 export function refusesCockpitOrigin(
   req: Request,
   res: Response,
@@ -36,11 +33,10 @@ export function refusesCockpitOrigin(
   return false;
 }
 
-// The two gates every write to an event *file* passes (on top of the
-// CSRF check above, which every write on the router passes), kept in
-// one place so they cannot drift apart: a route that forgot the second
-// would accept a save that the next deploy throws away. Returns true
-// when it has already answered the request.
+// The two checks every write to an event file needs, on top of the CSRF
+// check above. A route that skipped the second would accept a change
+// that the next deploy throws away. Returns true when it has already
+// sent the response.
 export function refusesWrite(
   req: Request,
   res: Response,

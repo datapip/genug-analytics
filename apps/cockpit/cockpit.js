@@ -1,21 +1,21 @@
 (function () {
-  // Why the sign-in page might be showing a message, and what this page
-  // has to say to it. One key, read and cleared by whichever side
-  // arrives next (see login.js).
+  // A note for the sign-in page about why it is being shown. One
+  // sessionStorage key, read and cleared by whichever page loads next
+  // (see login.js).
   const NOTICE = "genug-cockpit-notice";
   function leaveNotice(value) {
     try {
       if (value === null) sessionStorage.removeItem(NOTICE);
       else sessionStorage.setItem(NOTICE, value);
     } catch {
-      // Private mode, or storage blocked. Only ever costs a message.
+      // Private mode or blocked storage. Only a message is lost.
     }
   }
 
-  // Reaching this file at all means the browser kept the session cookie,
-  // so the login page's "it was refused" note is retired here. Without
-  // this it survives the whole tab, and every ordinary log out lands on
-  // a red warning about an https problem the deployment does not have.
+  // If this script runs, the browser kept the session cookie, so the
+  // sign-in page's "cookie refused" note is removed here. Otherwise it
+  // would stay for the whole tab, and every normal sign-out would show a
+  // red warning about an https problem that doesn't exist.
   leaveNotice(null);
 
   const compactNumber = new Intl.NumberFormat("en", {
@@ -23,19 +23,18 @@
     maximumFractionDigits: 1,
   });
   const fullNumber = new Intl.NumberFormat("en");
-  // Every date and time on the page uses this, never the browser's
-  // locale: the UI's own words are English, so a German browser would
-  // otherwise put "vor 1 Minute" beside "just now". en-GB rather than
-  // "en" for the 24-hour clock and day-first dates.
+  // Every date and time on the page uses this, not the browser's
+  // language: the page is in English, so a German browser would otherwise
+  // show "vor 1 Minute" next to "just now". en-GB for the 24-hour clock
+  // and day-first dates.
   const DATE_LOCALE = "en-GB";
 
-  // Every request this page makes goes through here, so a session that
-  // ran out has one place to be noticed. Without it a 401 arrives as
-  // "HTTP 401" in the error banner — technically true, and no help at
-  // all to someone who just needs to sign in again.
+  // Every request this page makes goes through here, so an expired
+  // session is handled in one place: a 401 sends the owner to the sign-in
+  // page instead of showing "HTTP 401".
   //
-  // The page is navigating away by the time the thrown error is caught,
-  // so the banner it causes is gone before it can be read.
+  // The page is already leaving when the thrown error is caught, so the
+  // error banner it causes is never seen.
   async function cockpitFetch(url, options) {
     const res = await fetch(url, options);
     if (res.status === 401) {
@@ -46,16 +45,16 @@
     return res;
   }
 
-  // A reverse proxy answers a timeout, an oversized body or a stopped
-  // server with its own HTML page. Parsing that as JSON throws
-  // "Unexpected token '<'", which tells the owner nothing. Say what
-  // happened instead, with the status that came back.
+  // A reverse proxy answers a timeout, a body that is too large or a
+  // stopped server with its own HTML page. Parsing that as JSON would
+  // throw "Unexpected token '<'", so say what happened instead, with the
+  // status code.
   async function readJson(res) {
     try {
       return await res.json();
     } catch {
-      // Retrying a body the proxy refuses as too large fails the same
-      // way every time, so that one case says what to change instead.
+      // Retrying a body that is too large always fails again, so this
+      // case says what to change.
       if (res.status === 413) {
         throw new Error(
           "The text is larger than the proxy in front of the server " +
@@ -71,29 +70,19 @@
     }
   }
 
-  // The shape every write on the schema registry card shares: save,
-  // add a prop, delete, create. Disable the button, show a pending
-  // message, send the request, and — only on a genuine success, never
-  // on a server-side refusal or a network failure, both of which land
-  // on `message` instead — hand the parsed result to `onSuccess`, then
-  // reload the page's data and write what `onSuccess` returned into the
-  // persistent header note.
+  // The steps shared by the schema registry card's writes (save, add a
+  // prop, delete, create): disable the button, show a "working" message
+  // and send the request. Only on success (errors go to `message`), pass
+  // the result to `onSuccess`, reload the page's data, and show what
+  // `onSuccess` returned in the card's note.
   //
-  // `onSuccess` runs *before* the reload, not after: it closes this call
-  // site's own open form (editing = null and its three siblings), and
-  // that has to happen first — reloading first would re-render the card
-  // while a module-level variable still points at a form the fresh
-  // render has nothing to reopen, leaving orphaned form elements behind
-  // rather than a closed one. Caught live, not by inspection: the
-  // add-prop path left a hidden <select> in the DOM until this was
-  // fixed.
+  // `onSuccess` runs before the reload: it closes the open form (sets
+  // `editing` or a similar variable to null). Reloading first would
+  // render the card while that variable still points at the old form,
+  // leaving stray form elements in the page.
   //
-  // Reload and both danger-zone resets are deliberately not folded in
-  // here: each writes straight to its own persistent element rather
-  // than a local one, and reload sets its note's text before calling
-  // load() where these four call load() after — a real difference, not
-  // a stylistic one, since which order is safe depends on whether
-  // load() replaces the element being written to.
+  // Reload and the two danger-zone resets don't use this, because they
+  // write their message at a different point relative to load().
   async function submitEventWrite(
     button,
     message,
@@ -124,12 +113,9 @@
     }
   }
 
-  // The same shape as submitEventWrite above, but for the deployment
-  // context card: the success text lands in this call's own `message`
-  // rather than in the schema card's #reload-note, which is what
-  // submitEventWrite always writes to — this card has nothing
-  // module-level to close on success, so there is no onSuccess step
-  // either.
+  // Like submitEventWrite above, for the deployment context card. The
+  // success text goes to this form's own `message`, not to the schema
+  // card's #reload-note, and there is no form to close, so no onSuccess.
   async function submitContextWrite(button, message, pending, url, init) {
     button.disabled = true;
     message.hidden = false;
@@ -153,12 +139,10 @@
     }
   }
 
-  // Disabling the button that triggered the request drops focus to
-  // <body> in Chrome and Firefox, so without this an error is silent to
-  // a keyboard or screen-reader user: nothing is announced, and nothing
-  // is focused to read. message already carries aria-live="polite" for
-  // the announcement; tabIndex makes it a valid focus target so the text
-  // is also reachable, not just spoken once and gone.
+  // Disabling the button that was clicked moves focus to <body> in Chrome
+  // and Firefox, so keyboard and screen-reader users would miss the
+  // error. `message` has aria-live="polite", so the error is announced;
+  // tabIndex lets it receive focus, so it can be read again.
   function failWith(message, text) {
     message.classList.add("is-critical");
     message.textContent = text;
@@ -177,10 +161,9 @@
     return node;
   }
 
-  // A label is only a label to a browser or a screen reader once it
-  // points at its control: without this pairing, clicking the text does
-  // nothing and the input is announced as unlabelled. The id is
-  // generated because these forms are built more than once per page.
+  // Connects a label to its input. Without that, clicking the label does
+  // nothing and screen readers announce the input without a name. The id
+  // is generated because these forms can appear more than once.
   let fieldSeq = 0;
   function field(labelText, control) {
     if (!control.id) control.id = "field-" + ++fieldSeq;
@@ -192,9 +175,8 @@
 
   const SVG_NS = "http://www.w3.org/2000/svg";
 
-  // SVG elements need createElementNS, unlike el() above (a plain
-  // document.createElement("svg") produces an unrendered unknown
-  // HTML element, not the SVG namespace's <svg>).
+  // SVG elements need createElementNS. document.createElement("svg")
+  // would create an unknown HTML element that isn't drawn.
   function svgEl(tag, attrs, children) {
     const node = document.createElementNS(SVG_NS, tag);
     for (const [key, value] of Object.entries(attrs || {})) {
@@ -206,8 +188,8 @@
     return node;
   }
 
-  // The disclosure triangle for a summary row. Shared by the registry
-  // and the tool list, which are the same control twice.
+  // The open/close triangle for a summary row, used by the registry and
+  // the tool list.
   function summaryChevron() {
     return svgEl(
       "svg",
@@ -235,41 +217,35 @@
     node.replaceChildren();
   }
 
-  // Total activity for a period/bucket — same additive
-  // interactionEvents + viewEvents shape get_traffic_summary uses.
+  // All events in a period or bucket: interactions plus page views, as
+  // in get_traffic_summary.
   function totalEvents(row) {
     return row.interactionEvents + row.viewEvents;
   }
 
-  // Printed verbatim: the release tag already carries its own "v"
-  // (v0.2.0), and a clone reports "dev", which prefixing would turn
-  // into "vdev". Its own line under the product name, so an older
-  // server that doesn't send the field leaves an empty line rather
-  // than a dangling separator.
+  // Shown as it is: the release tag already has its "v" (v0.2.0), and a
+  // git clone reports "dev", which would become "vdev" with a prefix.
   function renderVersion(version, latestVersion) {
     document.getElementById("version").textContent = version || "";
-    // The header's own version line is deliberately the quietest thing
-    // up there (looked up when filing a bug, not read every time) — so
-    // it's repeated here, with real visual weight, at the one place on
-    // the page an operator with more than one Genug tab open could
-    // otherwise reset the wrong one without noticing.
+    // The version in the header is small on purpose. It is repeated in
+    // the danger zone, more visibly, so an owner with several Genug tabs
+    // open doesn't reset the wrong one.
     document.getElementById("danger-zone-instance").textContent = version
       ? `You are about to act on ${location.host}, running ${version}.`
       : "";
-    // null covers both "no newer tag" and "the server hasn't checked
-    // yet" (see lib/updateCheck.ts) — same hidden state either way,
-    // rather than a pill that flickers in on a later refresh.
+    // null means "no newer version" or "not checked yet" (see
+    // lib/updateCheck.ts); the hint stays hidden in both cases.
     document.getElementById("version-pill").hidden = !latestVersion;
   }
 
-  // Formatted in the site's zone (TIMEZONE on the server), not the
-  // browser's: 7d/30d are fixed local calendar days there (see
-  // windowPeriod), so a viewer travelling elsewhere would otherwise see
-  // a date the chart directly underneath disagrees with.
+  // Dates are shown in the site's time zone (TIMEZONE on the server), not
+  // the browser's: 7d and 30d are whole days in that zone (see
+  // windowPeriod), so a viewer elsewhere would otherwise see dates that
+  // don't match the chart below.
   //
-  // What each range counts is said here, beside the dates, and not only
-  // in the picker's tooltips: a tooltip needs a mouse, and "7d" leaving
-  // out today is the one thing about these numbers nobody would guess.
+  // What each period covers is written next to the dates, not only in
+  // tooltips: tooltips need a mouse, and nobody would guess that "7d"
+  // leaves out today.
   function renderPeriod(period, timezone, range) {
     const opts = { timeZone: timezone };
     const date = (iso) => new Date(iso).toLocaleDateString(DATE_LOCALE, opts);
@@ -287,47 +263,41 @@
       "30d": "30 full days before today: " + span,
     }[range];
     document.getElementById("period").textContent = text || span;
-    // A span of its own so a phone can drop it: the sticky header has
-    // no line to spare there, and the chart caption names the zone too.
+    // Its own span, so it can be hidden on a phone: the sticky header has
+    // no room there, and the chart caption names the time zone too.
     document.getElementById("period-zone").textContent =
       " (" + zoneLabel(timezone) + ")";
   }
 
-  // The name exactly as the owner set it, which is the label they will
-  // recognise, minus the underscores: "Buenos_Aires" reads as a config
-  // key. Intl's long names ("Central European Summer Time") change with
-  // the season and the viewer's locale, so they are not used.
+  // The time zone name as the owner set it, with spaces instead of
+  // underscores ("Buenos_Aires" looks like a setting). Intl's long names
+  // ("Central European Summer Time") change with the season and the
+  // viewer's language, so they aren't used.
   function zoneLabel(timezone) {
     return timezone.replace(/_/g, " ");
   }
 
-  // Read-only mode hides every write control rather than disabling it:
-  // a disabled button asks "why?", and a disabled Reset database with a
-  // password field beside it is bait on a cockpit whose credentials are
-  // printed on a public page. The server refuses the writes regardless;
-  // this only stops the page offering them.
+  // Read-only mode hides every editing control instead of disabling it:
+  // a disabled button makes people ask why, and on the public demo a
+  // disabled Reset database button with a password field invites trying.
+  // The server refuses writes anyway; this only stops the page offering
+  // them.
   //
-  // Every element here is toggled, never written to. The explanatory
-  // copy is authored in index.html, so it cannot go stale when the flag
-  // turns off — the earlier version wrote the text and never unwrote
-  // it, leaving "this deployment is read-only" beside a working Reload
-  // button — and it cannot re-announce, since #reload-note is a live
-  // region and this state is permanent rather than a result.
+  // Elements are only shown or hidden here, never given text. The
+  // explanations are written in index.html, so they can't be left behind
+  // when the mode is turned off, and aren't announced by the live region
+  // #reload-note.
   function renderReadOnly(readOnly) {
     document.getElementById("read-only-note").hidden = !readOnly;
     document.getElementById("schema-read-only-note").hidden = !readOnly;
     document.getElementById("tools-read-only-note").hidden = !readOnly;
     document.getElementById("reload-schemas").hidden = readOnly;
     document.getElementById("danger-zone").hidden = readOnly;
-    // Its subject is the button above it, which is gone.
+    // It is about the button above it, which is hidden.
     document.getElementById("reload-note").hidden = readOnly;
     document.getElementById("context-read-only-note").hidden = !readOnly;
-    // Unlike every other write control this toggles, the two prose
-    // textareas also carry content someone came here to read — hiding
-    // the whole form the way the danger zone or the history add-form
-    // disappear would take the text with it. Only the control that
-    // writes (Save) is a write control; the box holding what was
-    // written is not, so it stays, marked non-editable instead.
+    // The two text boxes also show text people want to read, so only
+    // their Save buttons are hidden; the boxes stay, made read-only.
     document.getElementById("ground-rules-text").readOnly = readOnly;
     document.getElementById("save-ground-rules").hidden = readOnly;
     document.getElementById("business-context-text").readOnly = readOnly;
@@ -347,20 +317,18 @@
           " days are automatically deleted.";
   }
 
-  // A share, not a stat card: for a deployment with no consent banner
-  // (consent UI is out of v1 scope) a card would read 100% consentless
-  // forever. Counted in events, not sessions — a session that accepts
-  // mid-visit keeps its session_id (see "Visitor identification" in
-  // docs/decisions.md), so a session has no single consent mode to report. The
-  // raw counts ride along with the percentage for the same reason
-  // getBouncePages returns them: 100% of two events and 100% of two
-  // thousand mean very different things.
+  // One line, not a stat card: on a site without a consent banner, a card
+  // would always read "100% without consent". Counted in events, not
+  // sessions: a visitor who accepts during a visit keeps the same session
+  // (see "Visitor identification" in docs/decisions.md), so a session
+  // can have both modes. The counts are shown with the percentage,
+  // because 100% of two events and of two thousand mean different things.
   function renderConsentNote(breakdown) {
     const node = document.getElementById("consent-note");
     const consentful = breakdown.consentful.events;
     const total = consentful + breakdown.consentless.events;
-    // No events at all: a 0% share would read as a consent problem
-    // rather than as an empty period.
+    // No events at all: 0% would look like a consent problem instead of
+    // an empty period.
     node.hidden = total === 0;
     if (total === 0) return;
     node.textContent =
@@ -385,8 +353,8 @@
     setStat("stat-events", totalEvents(summary), false);
     setStat("stat-rejected", rejectedEventCount, true);
     setStat("stat-bots", botActivityCount, false);
-    // The red number is otherwise a dead end — the card explaining it is
-    // a screen further down and nothing says to look.
+    // Link the red number to the card that explains it, which is further
+    // down the page.
     document.getElementById("stat-rejected-hint").textContent =
       rejectedEventCount > 0
         ? "Failed validation — listed below"
@@ -401,16 +369,15 @@
   /* ---------- trend chart ---------- */
 
   const TREND_HEIGHT = 210;
-  // The right inset is wide enough for half of the last x-axis
-  // label, which is centred on the final data point and would
-  // otherwise be clipped by the SVG's own edge.
+  // The right margin fits half of the last x-axis label, which is
+  // centred on the last point and would otherwise be cut off.
   const TREND_PADDING = { top: 12, right: 24, bottom: 26, left: 46 };
   const GRID_LINES = 4;
 
   function formatDayLabel(dateStr) {
-    // dateStr is a calendar date the server already cut in the site's
-    // zone. Parsed and printed in UTC only so the viewer's own zone
-    // can't shift it a day — no conversion happens here.
+    // dateStr is a date the server already worked out in the site's time
+    // zone. It is parsed and printed in UTC only so the viewer's time zone
+    // can't move it by a day.
     return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
       month: "numeric",
       day: "numeric",
@@ -418,12 +385,10 @@
     });
   }
 
-  // The three trend views share one renderer: "day" is a genuine
-  // time series (drawn as connected lines), while "weekday"/"hour"
-  // are discrete categories with no meaningful slope between them
-  // (drawn as paired bars instead) — same underlying additive
-  // sessions/events shape, just a different chart type for a
-  // continuous vs. categorical axis.
+  // One renderer for the three trend views. "day" is a time series, drawn
+  // as lines; "weekday" and "hour" are categories with no meaning between
+  // them, drawn as pairs of bars. The data has the same shape in all
+  // three.
   const TREND_MODES = {
     day: {
       getLabel: (row) => formatDayLabel(row.date),
@@ -451,15 +416,12 @@
     },
   };
 
-  // Picks an axis maximum whose gridline labels are numbers a person
-  // can actually read off (0/20/40/60/80) rather than the raw data
-  // maximum sliced into quarters (0/13/26/39/52).
+  // Picks an axis maximum with round gridline labels (0/20/40/60/80)
+  // instead of the data maximum split into quarters (0/13/26/39/52).
   //
-  // It's the gap *between* gridlines that gets rounded to a nice
-  // 1/2/5 × 10ⁿ value, not the maximum itself — rounding the maximum
-  // and then dividing by GRID_LINES gives a nice top number but ugly
-  // ones underneath it. Never smaller than 1, so a chart with a
-  // handful of events is labelled in whole events, not halves.
+  // The step between gridlines is rounded to 1, 2 or 5 × 10ⁿ, not the
+  // maximum: a round maximum divided by GRID_LINES can still give odd
+  // steps. The step is at least 1, so small charts don't show halves.
   function niceMax(value) {
     const rawStep = value / GRID_LINES;
     const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
@@ -471,14 +433,14 @@
   }
 
   const tooltip = document.getElementById("trend-tooltip");
-  // Width the chart was last drawn at, so the ResizeObserver below
-  // can ignore the height change its own render causes and only
-  // redraw on a real width change.
+  // The width the chart was last drawn at, so the ResizeObserver below
+  // only redraws when the width changes, not when drawing changes the
+  // height.
   let lastTrendWidth = null;
-  // Which bucket holds the chart's one tab stop. Kept across redraws (a
-  // resize redraws), and dropped when the buckets change, since the
-  // same position then means a different hour or day. null is the
-  // newest bucket, the one most often wanted.
+  // Which bucket has the chart's single tab stop. Kept when the chart is
+  // redrawn (on resize), reset when the data changes, since the same
+  // position then means a different day or hour. null means the newest
+  // bucket, which is most often wanted.
   let trendFocus = { index: null, key: null };
 
   function showTooltip(x, label, sessions, events) {
@@ -504,18 +466,17 @@
     tooltip.classList.remove("visible");
   }
 
-  // A tap opens a bucket's tooltip (see the click handler on the hit
-  // rects); a tap anywhere outside the chart is the only way a
-  // touchscreen can close it again, since mouseleave never fires there.
+  // A tap opens a bucket's tooltip (see the click handler below). On a
+  // touchscreen mouseleave never fires, so tapping outside the chart is
+  // the way to close it.
   document.addEventListener("pointerdown", (e) => {
     if (!e.target.closest(".chart-wrap")) hideTooltip();
   });
 
-  // An empty panel names the period it is empty for. A bare "No data
-  // yet." reads as "nothing has ever arrived", and on Today, shortly
-  // after midnight, a perfectly healthy site shows exactly that. Keyed
-  // on the range the shown data was fetched for, not the picker, which
-  // moves before its data arrives.
+  // An empty chart says which period is empty. A plain "No data yet."
+  // sounds like nothing ever arrived, and a healthy site shows an empty
+  // Today shortly after midnight. Uses the period of the data shown, not
+  // the picker, which changes before the data arrives.
   const EMPTY_PERIOD_TEXT = {
     today: "No traffic yet today.",
     "24h": "No traffic in the last 24 hours.",
@@ -532,8 +493,8 @@
 
   function renderTrend(rows, mode) {
     const container = document.getElementById("trend-chart");
-    // Taken before the redraw removes the focused bucket, so focus can
-    // be put back on its replacement instead of falling to <body>.
+    // Remember focus before redrawing removes the focused bucket, so it
+    // can be put back on the new one instead of falling to <body>.
     const hadFocus = container.contains(document.activeElement);
     hideTooltip();
     clear(container);
@@ -543,10 +504,9 @@
       return;
     }
 
-    // Rendered at the container's real pixel width rather than a
-    // fixed viewBox stretched with preserveAspectRatio="none" —
-    // that scaled the axis text and stroke widths horizontally,
-    // visibly distorting both on a wide screen.
+    // Drawn at the container's real width in pixels. A fixed viewBox
+    // stretched with preserveAspectRatio="none" would also stretch the
+    // text and lines on a wide screen.
     lastTrendWidth = container.clientWidth;
     const width = Math.max(320, Math.round(lastTrendWidth));
     const { getLabel, getFullLabel, chart } = TREND_MODES[mode];
@@ -569,14 +529,12 @@
     const centerX = (i) =>
       chart === "line" ? pointX(i) : slotX(i) + slotWidth / 2;
 
-    // Purely visual — gridlines, the drawn shape, axis labels — kept in
-    // one aria-hidden group so a screen reader skips straight past them
-    // to the hit rects below, which carry the same numbers as real
-    // accessible content instead.
+    // The visual parts (gridlines, lines or bars, axis labels) are in one
+    // aria-hidden group, so a screen reader skips them and reads the hit
+    // areas below, which carry the same numbers.
     const children = [];
 
-    // Horizontal gridlines + y-axis labels: without them the chart
-    // showed a shape but no readable magnitude at all.
+    // Horizontal gridlines and y-axis labels, so values can be read off.
     for (let g = 0; g <= GRID_LINES; g++) {
       const value = (maxValue / GRID_LINES) * g;
       const y = valueY(value);
@@ -622,12 +580,10 @@
             points: linePoints(get),
           }),
         );
-        // A dot on every point. One point alone has no line to draw —
-        // Today in the Daily view was a blank chart under cards saying
-        // 48 sessions, which reads as "no traffic today" — so a lone
-        // point is always drawn, and larger. Otherwise only where the
-        // points are far enough apart: 30 days on a phone would be a
-        // bead chain hiding the line.
+        // Dots on the points. A single point has no line, so it always
+        // gets a larger dot; otherwise Today would look empty. With more
+        // points, dots are only drawn when there is room: 30 days on a
+        // phone would hide the line under dots.
         if (rows.length === 1 || innerWidth / rows.length >= 16) {
           rows.forEach((r, i) => {
             children.push(
@@ -666,15 +622,15 @@
       }
     }
 
-    // X labels are thinned out to whatever actually fits, so a
-    // 30-day or 24-hour axis doesn't collapse into overlapping ink.
+    // Only as many x-axis labels as fit, so 30 days or 24 hours don't
+    // overlap.
     const labelStep = Math.max(
       1,
       Math.ceil(rows.length / Math.max(1, Math.floor(innerWidth / 52))),
     );
-    // The last row is always labelled, so a regular label closer to it
-    // than one step is dropped: with 30 days at a step of 2, "26/09"
-    // and "27/09" otherwise printed on top of each other.
+    // The last row always gets a label, so a regular label less than one
+    // step before it is dropped. Otherwise, with 30 days and a step of 2,
+    // "26/09" and "27/09" would overlap.
     const lastIndex = rows.length - 1;
     rows.forEach((row, i) => {
       const regular = i % labelStep === 0 && lastIndex - i >= labelStep;
@@ -693,16 +649,14 @@
       );
     });
 
-    // One transparent full-height hit area per bucket, so hovering
-    // anywhere in a column reads its values — not just the 2px
-    // line or the bar itself. Focusable and labelled, unlike the
-    // decorative group above: this is the chart's actual accessible
-    // surface for a sighted keyboard-only visitor, who can see the
-    // shape but has no pointer to hover with.
+    // One invisible full-height area per bucket, so hovering anywhere in
+    // a column shows its values, not only on the thin line or the bar.
+    // These areas can be focused and have labels, so keyboard users can
+    // read the values too.
     //
-    // One tab stop for the whole chart, moved with the arrow keys (a
-    // roving tabindex). A stop per bucket put 24 or 30 of them between
-    // the period picker and the rest of the page.
+    // The whole chart is one tab stop, moved with the arrow keys (a
+    // "roving tabindex"). One stop per bucket would put 24 or 30 stops
+    // between the period picker and the rest of the page.
     const focusKey = mode + ":" + rows.length;
     if (trendFocus.key !== focusKey)
       trendFocus = { index: null, key: focusKey };
@@ -722,9 +676,8 @@
         role: "img",
         "aria-label": label,
       });
-      // Adjacent sibling so .trend-hit:hover + .trend-hit-bg (below)
-      // still matches — has to stay a direct svg child right after
-      // hit, not folded into the aria-hidden decorative group.
+      // Must come right after the hit area, as a direct child of the
+      // svg, so the CSS rule .trend-hit:hover + .trend-hit-bg matches.
       const highlight = svgEl("rect", {
         class: "trend-hit-bg",
         x: slotX(i),
@@ -742,7 +695,7 @@
           totalEvents(row),
         );
       hit.addEventListener("mouseenter", show);
-      // Touch has no hover, so a tap does the same job.
+      // Touchscreens have no hover, so a tap does the same.
       hit.addEventListener("click", show);
       hit.addEventListener("focus", () => {
         moveTabStop(i);
@@ -769,9 +722,9 @@
         height: TREND_HEIGHT,
         class: "trend-svg",
         role: "group",
-        // The caption alone, no "use the arrow keys": a screen reader
-        // in browse mode moves through the buckets with its own keys,
-        // and the arrow keys are only for a sighted keyboard user.
+        // Only the caption, without "use the arrow keys": screen readers
+        // move through the buckets with their own keys; the arrow keys
+        // are for sighted keyboard users.
         "aria-label": TREND_MODES[mode].caption,
       },
       [svgEl("g", { "aria-hidden": "true" }, children), ...interactive],
@@ -793,15 +746,13 @@
     container.append(svg);
     if (hadFocus) hits[activeIndex].focus();
 
-    // The same numbers as a real table, visually hidden — a
-    // read-it-all-at-once alternative to stepping through each hit rect
-    // above. Built from the same `rows`, so the two cannot drift.
+    // The same numbers as a table, hidden visually, so a screen reader can
+    // read them all at once. Built from the same `rows`.
     container.append(trendTable(rows, mode));
   }
 
-  // Every bucket is in the site's zone, which the viewer's browser may
-  // not share — so the caption names it, in the visible note and the
-  // table caption alike.
+  // The buckets are in the site's time zone, which may differ from the
+  // viewer's, so the note and the table caption name it.
   function trendCaption(mode) {
     return (
       TREND_MODES[mode].caption + " (" + zoneLabel(latestData.timezone) + ")"
@@ -822,9 +773,9 @@
         el("td", null, [String(totalEvents(row))]),
       ]),
     );
-    // Hidden through a wrapper, not on the table itself: a table box
-    // ignores `overflow`, so its cells kept their width and widened the
-    // page on a 320px phone, which then scrolled sideways.
+    // Hidden with a wrapper, not on the table itself: tables ignore
+    // `overflow`, so the hidden table would still widen the page on a
+    // narrow phone and make it scroll sideways.
     return el("div", { className: "visually-hidden" }, [
       el("table", null, [
         el("caption", null, [trendCaption(mode)]),
@@ -836,9 +787,8 @@
 
   /* ---------- ranked bar lists ---------- */
 
-  // Top pages, top referrers and the device breakdown are the same
-  // component: a label, an optional sub-label, and a count drawn
-  // both as a number and as a proportional bar.
+  // Used by top pages, top referrers and devices: a label, an optional
+  // second line, and a count shown as a number and as a bar.
   function renderBarList(containerId, rows, getLabel, getValue, options) {
     const { getSubLabel } = options || {};
     const container = document.getElementById(containerId);
@@ -863,10 +813,10 @@
               className: "bar-label",
               title: sub ? `${getLabel(row)} on ${sub}` : getLabel(row),
             },
-            // Two lines, each cut short on its own: on one, a long sub-label
-            // in front would push the part that tells rows apart out of
-            // a phone's width. The hidden " on " makes the pair read as
-            // one phrase ("/cart on shop.example.com").
+            // Two lines, each shortened separately: on one line, a long
+            // site name could push the path off a phone's screen. The
+            // hidden " on " lets screen readers read it as one phrase
+            // ("/cart on shop.example.com").
             sub
               ? [
                   el("span", { className: "bar-main" }, [getLabel(row)]),
@@ -883,10 +833,10 @@
     }
   }
 
-  // A row is a path on one site (lib/content.ts). On an installation
-  // with several sites every row names its site, even when the top ones
-  // are all one site's, or they read as both sites' together; with one
-  // it would only repeat the same name on every row.
+  // A row is a path on one site (lib/content.ts). With several sites,
+  // every row shows its site, even when the top rows are all from one
+  // site, so nobody reads them as both sites together. With one site it
+  // would only repeat the same name.
   function renderTopPages(topPages, siteHosts) {
     const severalSites = siteHosts.length > 1;
     renderBarList(
@@ -907,11 +857,9 @@
     );
   }
 
-  // The classifier's device types are lowercase identifiers, so they
-  // are spelled for reading here. "other" is a real classification
-  // rather than a gap — a smart TV or game console, not something the
-  // parser gave up on (see lib/userAgent.ts) — so it says so, instead
-  // of a bare word that reads like a bug.
+  // Readable names for the device types. "other" is a real category (a
+  // smart TV, a game console; see lib/userAgent.ts), so its label says
+  // so instead of looking like a bug.
   const DEVICE_TYPE_LABELS = {
     desktop: "Desktop",
     mobile: "Mobile",
@@ -935,11 +883,10 @@
       toolManifest.length + " registered";
     const container = document.getElementById("mcp-tools");
     clear(container);
-    // One accordion per tool, closed, showing the name alone. A tool
-    // description is product surface written for an agent, not a
-    // caption — several run to a paragraph — so neither the full text
-    // nor a truncated head of it belongs on a row whose job is to let
-    // the list of names be read down.
+    // One closed section per tool, showing only the name. Descriptions
+    // are written for the agent and are often a paragraph long, so they
+    // are shown only when opened, to keep the list of names easy to
+    // scan.
     for (const tool of toolManifest) {
       container.append(
         el("details", { className: "tool-item" }, [
@@ -955,33 +902,27 @@
 
   let schemaRegistryCache = {};
 
-  // The three points routes/events.ts can refuse a request at. Spelled
-  // out because the stored value is an identifier, and "invalid_props"
-  // in a column headed "Reason" tells a site owner less than the
-  // sentence it stands for. An unrecognised value falls through to
-  // itself rather than to a blank cell — a reason added later should
-  // look unfamiliar, not look like nothing.
+  // Readable text for the reasons routes/events.ts rejects a request
+  // with, since "invalid_props" says less than a sentence. An unknown
+  // reason is shown as it is, not as an empty cell.
   const REJECTION_REASONS = {
     invalid_envelope: "Malformed request",
     unknown_event_type: "Event not registered",
     invalid_props: "Props failed validation",
   };
 
-  // unknown_event_type stores no detail — there is no validation error
-  // to summarise, the name simply isn't in the registry. That would
-  // leave an em dash in the one column a reader consults to find out
-  // what to do, and on the most common rejection of the three, so the
-  // reason itself is spelled out instead. Not a list of the valid
-  // names: they are on this same page, in the Schema registry card.
+  // unknown_event_type has no detail (the name just isn't registered),
+  // which would leave the column empty for the most common rejection. So
+  // the detail column explains it. The valid names are in the Schema
+  // registry card on the same page.
   const REJECTION_FALLBACK_DETAIL = {
     unknown_event_type: "No registered event file declares this name.",
   };
 
-  // Only rendered when there is something to show; the card is hidden
-  // otherwise (see index.html). Every cell here is attacker-controlled
-  // in principle — /events is public, so the event name and the
-  // validation detail are both whatever the caller sent — which is why
-  // they go through el()/textContent and never innerHTML.
+  // Only shown when there is something to show; otherwise the card is
+  // hidden (see index.html). Anyone can send to /events, so the event
+  // name and detail may contain anything. That is why they are set with
+  // el()/textContent and never innerHTML.
   function renderRejectedEvents(rejected) {
     const rows = rejected || [];
     document.getElementById("rejected-card").hidden = rows.length === 0;
@@ -992,9 +933,8 @@
         el("tr", null, [
           el("td", null, [REJECTION_REASONS[row.reason] || row.reason]),
           el("td", null, [
-            // Absent for a request too malformed to read a name out of,
-            // which is itself the useful signal — so it is said, not
-            // left blank.
+            // Missing when the request was too broken to read a name;
+            // say so instead of leaving the cell empty.
             row.event
               ? el("span", { className: "event-name" }, [row.event])
               : el("span", { className: "unnamed" }, ["not readable"]),
@@ -1004,9 +944,8 @@
           ]),
           el("td", { className: "detail-cell" }, [
             row.lastDetail || REJECTION_FALLBACK_DETAIL[row.reason] || "—",
-            // A count with no date can't be acted on: three rejections
-            // in a week is either a live breakage or something already
-            // fixed on Monday, and those want opposite responses.
+            // Without a date, three rejections in a week could be a live
+            // problem or one already fixed on Monday.
             el("span", { className: "detail-when" }, [
               "Last seen " + new Date(row.lastSeen).toLocaleString(DATE_LOCALE),
             ]),
@@ -1016,11 +955,10 @@
     }
   }
 
-  // "3 days ago, 09:10" rather than a bare clock time: the recent
-  // events can span days on a quiet site, and "14:02" alone reads as
-  // today. The clock time stays in the text, not only in a title, which
-  // a phone, a keyboard or a screen reader never reaches. Computed at
-  // render, so it is as fresh as the "Updated" time in the header.
+  // "3 days ago, 09:10" rather than just a time: on a quiet site the
+  // recent events can span days, and "14:02" alone would look like
+  // today. The time is in the text, not only in a tooltip, which phones,
+  // keyboards and screen readers can't reach.
   const relativeFormat = new Intl.RelativeTimeFormat(DATE_LOCALE, {
     numeric: "auto",
   });
@@ -1037,10 +975,11 @@
   function relativeTime(ts) {
     const when = new Date(ts);
     const now = new Date();
-    // A browser clock behind the server's would say "in 2 minutes".
+    // If the browser's clock is behind the server's, this would
+    // otherwise say "in 2 minutes".
     const ago = Math.max(now.getTime() - when.getTime(), 0);
-    // Calendar days, not 24-hour blocks: 36 hours ago at 01:00 is the
-    // day before yesterday, not "yesterday".
+    // Count calendar days, not 24-hour blocks: 36 hours before 01:00 is
+    // the day before yesterday, not "yesterday".
     const days = Math.round(
       (localMidnight(now) - localMidnight(when)) / 86_400_000,
     );
@@ -1095,11 +1034,11 @@
     }
   }
 
-  // Fills a prose textarea with the stored text, unless the owner has
-  // typed in it since the last fill. Saving one box reloads the page,
-  // and overwriting the other box then would throw away what they were
-  // halfway through writing there. The stored text is remembered on the
-  // element, so "edited" means "differs from what the server last sent".
+  // Fills a text box with the saved text, unless the owner has typed in
+  // it since. Saving one box reloads the data, and overwriting the other
+  // box would lose what they were writing there. The saved text is kept
+  // on the element, so "edited" means "differs from what the server last
+  // sent".
   function fillProse(id, stored) {
     const box = document.getElementById(id);
     const edited =
@@ -1110,8 +1049,8 @@
     box.dataset.stored = stored;
   }
 
-  // Populates the two prose textareas (ground rules, business context)
-  // and their byte counters.
+  // Fills the two text boxes (ground rules, business context) and their
+  // size counters.
   let proseFieldMaxBytes = 0;
   function renderContext(groundRules, businessContext, maxBytes, history) {
     proseFieldMaxBytes = maxBytes;
@@ -1125,10 +1064,9 @@
       (history.entries.length === 1 ? " history entry" : " history entries");
   }
 
-  // Measured the same way the server does — UTF-8 bytes, not JS string
-  // length — so the count shown here agrees with the limit the save
-  // will actually be checked against. Shared by both prose fields: same
-  // cap, same rendering, only the element ids differ.
+  // Counts UTF-8 bytes like the server does, not JavaScript string
+  // length, so the number shown matches the limit the save is checked
+  // against.
   function updateByteCount(textareaId, counterId) {
     const bytes = new TextEncoder().encode(
       document.getElementById(textareaId).value,
@@ -1143,9 +1081,8 @@
   }
 
   function formatHistoryDate(dateStr) {
-    // Same UTC-midnight pin as formatDayLabel, and the same DATE_LOCALE
-    // as the rest of the page — these were rendering as raw
-    // "YYYY-MM-DD" while everything else already read en-GB.
+    // Parsed in UTC like formatDayLabel, and formatted with DATE_LOCALE
+    // like the rest of the page.
     return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(DATE_LOCALE, {
       year: "numeric",
       month: "short",
@@ -1154,9 +1091,8 @@
     });
   }
 
-  // Newest first, as the server already sorted them. A note the reader
-  // could not trust is named rather than silently missing — the same
-  // "say why, don't go quiet" rule the schema errors panel follows.
+  // Newest first, as the server sorts them. Entries that couldn't be
+  // read are listed with a note instead of silently missing.
   function renderHistoryList(history) {
     const list = document.getElementById("history-list");
     const emptyNote = document.getElementById("history-empty-note");
@@ -1208,23 +1144,15 @@
     }
   }
 
-  // Event files on the volume that the server refused to load. Rendered
-  // above the registry they failed to join, and counted in the card's
-  // collapsed summary too — the card is closed by default, and a
-  // rejected file nobody notices is the whole problem: its events keep
-  // arriving and keep being counted as rejected, with nothing saying
-  // the schema never loaded.
-  // Stored events whose type the registry no longer has. Only a rename
-  // or a deletion can produce these — an unregistered name is rejected
-  // before it is ever stored.
+  // Stored events whose name no registered event has. Only renaming or
+  // deleting an event creates them; an unknown name is rejected before
+  // it is stored.
   //
-  // Worth a warning because the damage is selective rather than
-  // obvious: these rows still count toward totals, so nothing looks
-  // missing, but every panel keyed on a registered name drops them.
-  // Renaming the page-view event is the case that hurts — its history
-  // stops counting as a page view and starts counting as an
-  // interaction, so the trend and the top-pages list are quietly wrong
-  // rather than visibly empty.
+  // Worth a warning because the effect is easy to miss: these rows still
+  // count in totals, so nothing looks missing, but every panel that uses
+  // a registered name leaves them out. Renaming the page-view event is
+  // the worst case: its old page views count as interactions, so the
+  // trend and top pages are quietly wrong rather than visibly empty.
   function renderOrphanedEvents(orphanedEvents) {
     const node = document.getElementById("orphaned-events");
     clear(node);
@@ -1261,6 +1189,10 @@
     );
   }
 
+  // Event files on the volume that the server couldn't load. Shown above
+  // the registry and counted in the card's summary, because the card is
+  // closed by default. Otherwise nobody would notice: the file's events
+  // keep arriving and are rejected, with nothing saying why.
   function renderSchemaErrors(schemaErrors) {
     const node = document.getElementById("schema-errors");
     clear(node);
@@ -1268,11 +1200,10 @@
     node.hidden = all.length === 0;
     if (all.length === 0) return;
 
-    // A directory that could not be prepared is not a rejected file:
-    // nothing was refused, the whole deployment is reading from the
-    // image instead. Filing it under "N event files were rejected"
-    // describes the wrong problem to someone already confused about
-    // why their edits will not save.
+    // A folder that couldn't be prepared isn't a rejected file: nothing
+    // was refused, the deployment reads from the image instead. Listing
+    // it under "N event files were rejected" would describe the wrong
+    // problem.
     const rejected = all.filter((error) => !error.directory);
     const directories = all.filter((error) => error.directory);
 
@@ -1305,15 +1236,13 @@
   }
 
   // Schema errors and orphaned rows both mean "numbers on this page are
-  // wrong right now", and both render inside a card that starts closed
-  // — so the count beside its title says which, in red, and the card
-  // opens itself the first time a load finds one. Only the first time:
-  // reopening a card someone deliberately closed on every refresh is
-  // its own kind of broken.
+  // wrong", and both are inside a card that starts closed. So the card's
+  // title shows a red count, and the card opens by itself the first time
+  // a problem is found. Only the first time: reopening a card someone
+  // closed on every refresh would be annoying.
   let schemaProblemOpened = false;
-  // Kept so renderSchemaRegistry can put it back: opening a form
-  // re-renders the card and rewrites the count, which dropped the
-  // problem while leaving it red.
+  // Kept so renderSchemaRegistry can show it again: opening a form
+  // redraws the card and its count.
   let schemaProblemNote = "";
 
   function flagOrphansInOverview(orphanedEvents) {
@@ -1361,34 +1290,29 @@
 
   const plural = (n) => (n === 1 ? "event" : "events");
 
-  // Editing state lives here rather than in the DOM: the card is
-  // re-rendered from scratch on every data load, and an open form has
-  // to survive that (a save triggers a reload of exactly this card).
+  // Which form is open is kept here, not in the page: the card is redrawn
+  // on every data load, and an open form must survive that.
   let editing = null;
   let creating = false;
-  // The open forms' DOM nodes, kept across re-renders. Refresh and the
-  // period buttons re-render the whole page, and rebuilding a form from
-  // server data would replace a half-typed description — or five
-  // half-filled props — with stored values, leaving the form open and
-  // looking as though nothing had happened. Keyed by form and event;
-  // a key the latest render did not ask for is dropped, so switching to
-  // a different event, or reopening one after cancelling, still builds
-  // a fresh form. A map rather than one slot: an edit form and another
-  // event's add-prop form can be open at once.
+  // The open forms' elements, kept across redraws. Refresh and the period
+  // buttons redraw the whole page, and building a form again from server
+  // data would replace what the owner had typed. Keyed by form and event.
+  // A form the latest redraw didn't ask for is dropped, so opening
+  // another event, or reopening after Cancel, builds a fresh form. A Map,
+  // because an edit form and another event's add-prop form can be open
+  // at the same time.
   const openForms = new Map();
   let formKeysThisRender = new Set();
   let schemaEditable = false;
   let storedEventCounts = {};
   let pageViewEventType = null;
-  // The other two roles — { outboundClick, fileDownload }, either value
-  // possibly absent. Page view is always present (see AGENTS.md: exactly
-  // one event must carry it), which is why it gets its own top-level
-  // field rather than living in here too.
+  // The other two roles, { outboundClick, fileDownload }; either may be
+  // missing. There is always a page-view event (see AGENTS.md), so it has
+  // its own field.
   let roleEventNames = {};
-  // Which event has its inline "Add a prop" form open, and which has its
-  // inline delete confirmation open. Both live inside an otherwise
-  // read-only eventItem() row rather than replacing it the way Edit
-  // does, so they get their own state instead of reusing editing/creating.
+  // Which event has its "Add a prop" form open, and which has its delete
+  // confirmation open. These appear inside the event's row instead of
+  // replacing it as Edit does, so they have their own variables.
   let addingPropTo = null;
   let confirmDeleteName = null;
 
@@ -1402,8 +1326,8 @@
       (entries.length === 1 ? " event" : " events") +
       schemaProblemNote;
 
-    // Same rule as the Edit buttons: absent when the events directory
-    // is one the server cannot write, rather than present and failing.
+    // Like the Edit buttons: hidden when the server can't write to the
+    // events folder, rather than shown and failing.
     document.getElementById("new-event").hidden = !schemaEditable;
 
     formKeysThisRender = new Set();
@@ -1427,13 +1351,10 @@
     }
   }
 
-  // Builds the form the first time this key is asked for, and hands
-  // back the same node — inputs and all — on every re-render after.
-  // Where Cancel goes back to. The Edit button it came from now sits
-  // inside the accordion body, which a fresh render draws closed — a
-  // button in a closed <details> can't take focus, so the row is opened
-  // again and its summary focused instead. That also leaves the event
-  // the user was reading on screen rather than collapsed away.
+  // Where Cancel returns focus. The Edit button is inside the row's
+  // <details>, which a redraw closes, and a button in a closed <details>
+  // can't take focus. So the row is opened again and its summary
+  // focused, which also keeps the event on screen.
   function reopenEventItem(eventName) {
     for (const item of document.querySelectorAll(
       "#schema-registry .schema-item",
@@ -1445,15 +1366,16 @@
     }
   }
 
+  // Builds the form the first time this key is asked for, and returns the
+  // same element, with what was typed, on every later redraw.
   function openOrBuildForm(key, build) {
     formKeysThisRender.add(key);
     if (!openForms.has(key)) openForms.set(key, build());
     return openForms.get(key);
   }
 
-  // How much there is to see before opening one, so the closed row
-  // still answers "which of these is actually firing" — the question
-  // someone opens this card with.
+  // A short summary for the closed row, so it still shows which events
+  // are actually arriving.
   function eventMeta(propCount, storedCount) {
     const props = propCount === 1 ? "1 prop" : propCount + " props";
     const stored =
@@ -1463,12 +1385,9 @@
     return props + " · " + stored;
   }
 
-  // One closed accordion per event, same control as the tool list.
-  // Expanded, every event printed its full five-column prop table, so
-  // three built-in events filled a screen and a half before a
-  // deployment added any of its own — and since each table sized itself
-  // to its own content, the columns didn't line up between them, which
-  // is what made the card read as a wall rather than a list.
+  // One closed section per event, like the tool list. Showing every
+  // event's prop table at once would fill screens even with only the
+  // built-in events.
   function eventItem(eventName, def, pageViewEventType, storedCount) {
     const propEntries = Object.entries(def.props);
     const propRows = propEntries.map(([propName, prop]) =>
@@ -1495,13 +1414,11 @@
       summaryChevron(),
       el("code", { className: "prop-code" }, [eventName]),
     ];
-    // Which role, if any, this event fills. A deployment can rename any
-    // of the three built-ins, so the name alone never says which one is
-    // which (see AGENTS.md) — and for page view, picking the wrong one
-    // to edit is how collection quietly stops. Deliberately not called
-    // "built-in": once seeded, nothing distinguishes a shipped file from
-    // one the deployment wrote, and the role tag is the only thing
-    // actually tracked here.
+    // Which role this event has, if any. A deployment can rename the
+    // built-in events, so the name doesn't say which is which (see
+    // AGENTS.md), and editing the wrong page-view event can quietly stop
+    // collection. Not labelled "built-in": once copied to the volume, a
+    // built-in file looks like any other; only the role tag is known.
     if (eventName === pageViewEventType) {
       summaryChildren.push(
         el("span", { className: "schema-badge" }, ["flagged as page view"]),
@@ -1519,9 +1436,8 @@
         ]),
       );
     }
-    // Independent of the role badges above: a role is at most one event
-    // by construction, but any number of events can be a conversion, so
-    // this is never an "else" of that chain.
+    // Separate from the role badges above: each role belongs to at most
+    // one event, but any number of events can be conversions.
     if (def.conversion) {
       summaryChildren.push(
         el("span", { className: "schema-badge" }, ["conversion"]),
@@ -1535,9 +1451,8 @@
 
     const body = [el("p", { className: "schema-desc" }, [def.description])];
 
-    // Inside the opened body rather than on the summary row: a button
-    // nested in a <summary> is a control inside a control, and clicking
-    // it would toggle the accordion as well as open the form.
+    // In the opened part, not on the summary row: a button inside a
+    // <summary> would also open or close the section when clicked.
     if (schemaEditable) {
       const editButton = el(
         "button",
@@ -1567,13 +1482,10 @@
 
       const actions = [editButton, addPropButton];
 
-      // Deleting a role-tagged event is not disabled here: the server
-      // (the DELETE handler in routes/cockpit/events.ts) deletes, then asks the
-      // real registry loader via reloadEvents() and restores the file
-      // if that loader refuses the result — the one case that needs
-      // care, and it needs the whole directory to decide, which this
-      // button cannot see any more than lib/deleteEvent.ts can. See
-      // deleteConfirm() below for the note this row gets instead.
+      // Events with a role tag can be deleted too. The server (the
+      // DELETE handler in routes/cockpit/events.ts) restores the file if
+      // the registry can't load without it. See deleteConfirm() below for
+      // the warning shown instead.
       const deleteButton = el(
         "button",
         { type: "button", className: "link-button is-critical" },
@@ -1583,24 +1495,22 @@
         confirmDeleteName = eventName;
         addingPropTo = null;
         renderSchemaRegistry(schemaRegistryCache);
-        // The card is rebuilt, so the button that was just clicked no
-        // longer exists and focus would fall to <body> — leaving a
-        // keyboard user to tab from the top of the page to reach a
-        // confirmation they just opened. Every other opener on this card
-        // already moves focus; this one was missed.
+        // The card is redrawn, so the clicked button no longer exists and
+        // focus would fall to <body>; a keyboard user would have to tab
+        // from the top of the page. So move focus to the confirmation.
         //
-        // The input, not "Delete forever": focus on a destructive button
-        // is one stray Space away from doing the thing.
+        // Focus the text box, not "Delete forever": on a destructive
+        // button, one stray Space press would delete.
         document.getElementById("delete-reason")?.focus();
       });
       actions.push(deleteButton);
 
       body.push(el("div", { className: "schema-actions" }, actions));
 
-      // The role is in the key because it changes the whole warning.
-      // The stored count only changes a number in it, and a live event
-      // gains rows between refreshes: rebuilding for that would wipe a
-      // typed reason, so the kept form updates its number instead.
+      // The role is part of the key because it changes the whole
+      // warning. The row count isn't: it grows between refreshes, and
+      // rebuilding the form would clear a typed reason, so the kept form
+      // just updates the number.
       if (confirmDeleteName === eventName) {
         const isPageView = eventName === pageViewEventType;
         const form = openOrBuildForm(
@@ -1639,26 +1549,21 @@
       el("summary", { className: "schema-title" }, summaryChildren),
       ...body,
     ]);
-    // el() assigns properties, and dataset isn't assignable that way —
-    // this is what Cancel uses to find its way back to the right row.
+    // Set separately, because el() can't set dataset. Cancel uses it to
+    // find the right row.
     item.dataset.event = eventName;
-    // Add a prop and Delete live inside this <details> rather than
-    // replacing it the way the Edit form does — so the click that opens
-    // either one triggers a renderSchemaRegistry() that rebuilds this
-    // exact node from scratch. A freshly created <details> always starts
-    // closed, which would silently collapse the row shut on the very
-    // click that was supposed to reveal the form. Forcing it open here
-    // is what keeps that from happening.
+    // Add a prop and Delete open inside this <details>, and opening them
+    // redraws the card. A new <details> starts closed, which would close
+    // the row on the very click meant to show the form, so keep it open.
     if (addingPropTo === eventName || confirmDeleteName === eventName) {
       item.open = true;
     }
     return item;
   }
 
-  // Only the words are inputs. A prop's name, type and whether it is
-  // required are printed exactly as they are in the read-only view,
-  // because changing one of those changes whether a live event is
-  // accepted — that is a file edit, deliberately (see lib/editEvent.ts).
+  // Only the wording can be edited. A prop's name, type and whether it is
+  // required are shown as text, because changing them changes which
+  // events are accepted; that needs a file edit (see lib/editEvent.ts).
   function eventForm(eventName, def) {
     const nameInput = el("input", {
       type: "text",
@@ -1673,16 +1578,16 @@
     });
     const propInputs = {};
     const propRows = Object.entries(def.props).map(([propName, prop]) => {
-      // No <label> in a table row, so each box names itself: a column
-      // header alone leaves a screen reader announcing "edit text".
+      // A table row has no <label>, so each box gets an aria-label;
+      // otherwise a screen reader would only say "edit text".
       const description = el("input", {
         type: "text",
         className: "edit-input",
         value: prop.description,
         ariaLabel: "Description of " + propName,
       });
-      // A plain string's example is its own text; anything else is
-      // typed as JSON, which is how the server reads it back.
+      // A string example is plain text; anything else is typed as JSON,
+      // which is how the server reads it.
       const example = el("input", {
         type: "text",
         className: "edit-input",
@@ -1706,9 +1611,8 @@
       ]);
     });
 
-    // Both notices below appear only once the name actually differs —
-    // until then there is nothing to move and nothing to inherit, and
-    // the warnings would just be noise.
+    // The two notices below only appear once the name differs; until
+    // then there is nothing to move or take over.
     const stored = storedEventCounts[eventName] || 0;
     const migrateBox = el("input", { type: "checkbox", checked: true });
     const migrateRow = el("label", { className: "edit-migrate" }, [
@@ -1716,17 +1620,15 @@
       el("span", null, [""]),
     ]);
 
-    // The other direction, and easy to miss: rows may already be stored
-    // under the name being typed, left orphaned by some earlier rename.
-    // Renaming onto them hands them to this event whether or not the
-    // box above is ticked — usually because you are undoing that
-    // earlier rename, which is exactly when nobody wants a surprise.
+    // The other direction, easy to miss: rows may already be stored under
+    // the new name, left over from an earlier rename. Renaming gives them
+    // to this event whether or not the box above is ticked. Usually that
+    // is wanted (undoing an earlier rename), but it shouldn't be a
+    // surprise.
     const adoptRow = el("p", { className: "edit-migrate edit-adopt" }, [""]);
 
-    // Shown only for a rename, because only a rename is written to the
-    // history log — offering the box on a wording fix would invite a
-    // sentence nothing ever records. Asked here rather than left for a
-    // history note afterwards: this is the moment anyone knows why.
+    // Only shown for a rename, because only renames are written to the
+    // history log. Asked here because this is when the reason is known.
     const reasonInput = el("input", {
       type: "text",
       className: "edit-input",
@@ -1735,14 +1637,12 @@
     });
     const reasonRow = field("Why the rename?", reasonInput);
     reasonRow.className += " edit-reason";
-    // A box next to a form field reads like a form field, and this one
-    // is neither private nor undoable: it is quoted to an AI agent
-    // months later, and the cockpit has no screen for taking it back.
-    // Said before anyone types, which is the only moment it helps.
+    // The reason isn't private and can't be undone from the cockpit: it is
+    // shown to the agent, maybe months later. Say so before anyone types.
     //
-    // aria-describedby rather than a paragraph sitting nearby — a
-    // screen reader in forms mode reads the label and the description,
-    // and skips loose text between fields.
+    // Linked with aria-describedby rather than placed nearby: in forms
+    // mode a screen reader reads the label and the description, and skips
+    // other text between fields.
     const reasonHint = el("p", null, [
       "The rename is written to the history log your agent reads either " +
         "way. What you type is added to that line, and can only be changed " +
@@ -1757,10 +1657,9 @@
       const renaming = typed !== eventName;
       const inherited = renaming ? storedEventCounts[typed] || 0 : 0;
 
-      // A name another event already holds is refused server-side, so
-      // say so rather than show the two notices below: they describe a
-      // rename that cannot happen, and the second would call that
-      // event's own rows orphans left behind by an earlier rename.
+      // The server refuses a name another event already has, so say that
+      // instead of showing the two notices below, which describe a rename
+      // that can't happen.
       if (renaming && Object.hasOwn(schemaRegistryCache, typed)) {
         migrateRow.hidden = true;
         reasonRow.hidden = true;
@@ -1785,9 +1684,8 @@
 
       if (!renaming) return;
 
-      // Moving rows on top of rows merges two histories into one name
-      // with nothing able to separate them again, so it is refused
-      // rather than offered — here as well as on the server.
+      // Moving rows onto existing rows would merge two histories for
+      // good, so it isn't offered (and the server refuses it too).
       if (inherited > 0 && stored > 0) {
         migrateBox.checked = false;
         migrateBox.disabled = true;
@@ -1822,9 +1720,8 @@
     cancel.addEventListener("click", () => {
       editing = null;
       renderSchemaRegistry(schemaRegistryCache);
-      // Back to the Edit button that opened this, which the re-render
-      // has just recreated — otherwise closing the form drops focus to
-      // <body> the same way opening it used to.
+      // Back to the Edit button that opened the form, which the redraw
+      // has just created again; otherwise focus would fall to <body>.
       reopenEventItem(eventName);
     });
 
@@ -1837,8 +1734,7 @@
         };
       }
 
-      // The registry the page is displaying is about to change, so a
-      // success reloads the whole card rather than patching it.
+      // The registry changes, so on success the whole card is reloaded.
       submitEventWrite(
         save,
         message,
@@ -1855,8 +1751,8 @@
             description: descInput.value.trim(),
             props,
             renameStoredEvents: !migrateBox.disabled && migrateBox.checked,
-            // Sent only when it says something: an empty string would
-            // be a "Reason given:" with nothing after it.
+            // Only sent when filled in; an empty string would produce an
+            // empty "Reason given:".
             ...(reasonInput.value.trim()
               ? { reason: reasonInput.value.trim() }
               : {}),
@@ -1903,19 +1799,16 @@
     ]);
   }
 
-  // One prop, as a block rather than a table row: a list prop's example
-  // grows a row per value, which a table cell handles badly.
+  // One prop's inputs, as a block rather than a table row, because a list
+  // prop's example has one row per value.
   //
-  // Nothing here is free text except the name and the description. The
-  // type is a fixed list of four, and `long` is one of those four
-  // rather than a modifier checkbox — parseRule rejects "number.long",
-  // and an option that is invalid in three of four combinations is
-  // better not offered than validated after the fact.
-  // `showRequired: false` is for adding a prop to an event that already
-  // has traffic (addPropForm below): the cockpit can only ever add an
-  // OPTIONAL prop there — see server/lib/addEventProp.ts for why — so
-  // the checkbox that would suggest otherwise isn't offered, and
-  // `read()` always reports `optional: true`.
+  // Only the name and description are free text. The type is chosen from
+  // four, and "long text" is one of them rather than a checkbox, because
+  // `long` only works for strings (parseRule rejects "number.long").
+  // `showRequired: false` is for adding a prop to an existing event
+  // (addPropForm below), which can only add an optional prop (see
+  // server/lib/addEventProp.ts). The checkbox is then hidden, and
+  // `read()` always returns `optional: true`.
   function propBlock(onRemove, { showRequired = true, nameInputId } = {}) {
     const nameInput = el("input", {
       type: "text",
@@ -1936,10 +1829,8 @@
     const listBox = el("input", { type: "checkbox" });
     const descInput = el("input", { type: "text", className: "edit-input" });
 
-    // The control matches the declared type, so a number prop cannot be
-    // given "about fifty" and a boolean cannot be given anything but
-    // true or false. The server still checks — this only means the
-    // ordinary way through the form cannot produce a bad example.
+    // The input matches the type, so a number prop can't get "about
+    // fifty" and a boolean only true or false. The server still checks.
     const makeControl = () => {
       if (typeSelect.value === "number") {
         return el("input", {
@@ -1976,9 +1867,8 @@
       clear(examples);
       controls.forEach((control, index) => {
         const row = el("div", { className: "create-example-row" }, [control]);
-        // Never offered for the last one: a prop with no example at all
-        // is a file the checker rejects, so that is not a state the
-        // form should be able to reach.
+        // Not offered for the last one: a prop without an example would
+        // be rejected.
         if (listBox.checked && controls.length > 1) {
           const drop = el(
             "button",
@@ -2006,9 +1896,8 @@
       }
     };
 
-    // A control built for the old type holds a value the new one cannot
-    // mean, so the honest move is to start the example over rather than
-    // carry text across and let the server reject it.
+    // A value for the old type doesn't fit the new one, so the example
+    // starts empty instead of keeping text the server would reject.
     typeSelect.addEventListener("change", () => {
       controls = [makeControl()];
       renderExamples();
@@ -2024,9 +1913,8 @@
     ]);
     remove.addEventListener("click", onRemove);
 
-    // Numbered because a server-side validation error names the block
-    // it came from ("prop 3: ..."), and an unnumbered pile of identical
-    // blocks gives nobody a way to find it.
+    // Numbered, because server errors name the prop by number
+    // ("prop 3: ...").
     const heading = el("span", null, ["Prop"]);
 
     const checks = [el("label", null, [listBox, "Holds several values"])];
@@ -2040,9 +1928,8 @@
       field("Type", typeSelect),
       el("div", { className: "create-checks" }, checks),
       field("Description", descInput),
-      // Not `field()`: the examples are a group of controls that comes
-      // and goes with the list checkbox, and a label can only point at
-      // one. Each control carries its own aria-label instead.
+      // Not `field()`: the examples can be several inputs, and a label
+      // can only point at one, so each input has its own aria-label.
       el("div", { className: "edit-field" }, [
         el("p", { className: "edit-label" }, ["Example"]),
         examples,
@@ -2065,10 +1952,8 @@
     };
   }
 
-  // The one shape change the cockpit can make to an event that already
-  // has traffic: one new OPTIONAL prop, never required, never a rule
-  // string change. See server/lib/addEventProp.ts for why that line is
-  // safe here and nowhere else on this form.
+  // Adds one optional prop to an existing event, the only change to an
+  // event's props the cockpit allows (see server/lib/addEventProp.ts).
   function addPropForm(eventName) {
     const block = propBlock(closeAddPropForm, {
       showRequired: false,
@@ -2092,8 +1977,7 @@
 
     save.addEventListener("click", () => {
       const spec = block.read();
-      // The registry the page is displaying is about to gain a prop, so
-      // a success reloads the whole card rather than patching it.
+      // The registry changes, so on success the whole card is reloaded.
       submitEventWrite(
         save,
         message,
@@ -2124,11 +2008,10 @@
     ]);
   }
 
-  // The inline confirmation a Delete click opens, replacing the button
-  // row with the row count that will be orphaned and one more click
-  // before anything is removed. Same disclosure pattern the rename form
-  // already uses for the same reason: the number, not a generic warning,
-  // is what lets someone decide.
+  // The confirmation a Delete click opens, in place of the buttons. It
+  // shows how many stored rows will be left without an event, since the
+  // number helps decide more than a general warning would, and needs one
+  // more click.
   function deleteConfirm(eventName, isPageView) {
     const rowsNote = (storedCount) =>
       storedCount > 0
@@ -2138,18 +2021,13 @@
           `events panel below will list them.`
         : `Nothing is stored under "${eventName}" yet, so there is ` +
           `nothing left behind.`;
-    // Page view can't actually be turned off — exactly one event must
-    // always carry the tag — so "Delete" on it does not mean the same
-    // thing it means everywhere else. Said plainly, before the click:
-    // this reverts to the built-in shape rather than stopping anything,
-    // and it is the one delete on this page that can quietly cost you
-    // data collection if you don't expect it, since a customized prop
-    // stops validating the moment the file it lived in is gone.
-    // Named so the reason input's aria-describedby can reach it too:
-    // opening this panel moves focus straight to #delete-reason (see
-    // below), skipping past this paragraph visually and, without the
-    // link, for a screen reader as well — the one part of this warning
-    // a sighted user gets for free just by it sitting above the field.
+    // Page views can't be turned off (one event must always have the
+    // tag), so deleting the page-view event means going back to the
+    // built-in one. Say so before the click: props added to it will then
+    // be rejected, which can quietly lose data.
+    // It has an id so the reason box's aria-describedby can point at it:
+    // focus moves straight to #delete-reason (see below), so a screen
+    // reader would otherwise skip this warning.
     const warningText = (storedCount) =>
       isPageView
         ? `This does not stop page views being tracked — it can't be: ` +
@@ -2175,9 +2053,8 @@
       className: "edit-input",
       maxLength: 500,
       placeholder: "Optional — e.g. replaced by checkout_started",
-      // Fixed, because the Delete button that opens this form has to
-      // find it to move focus there: only one confirmation is open at a
-      // time, so it stays unique.
+      // A fixed id, so the Delete button can find it to move focus. Only
+      // one confirmation is open at a time, so it is unique.
       id: "delete-reason",
     });
     const reasonRow = field("Why delete it?", reasonInput);
@@ -2213,8 +2090,7 @@
     });
 
     confirmButton.addEventListener("click", () => {
-      // The registry the page is displaying is about to lose an event,
-      // so a success reloads the whole card rather than patching it.
+      // The registry changes, so on success the whole card is reloaded.
       submitEventWrite(
         confirmButton,
         message,
@@ -2256,19 +2132,16 @@
       message,
       el("div", { className: "edit-actions" }, [confirmButton, cancel]),
     ]);
-    // Called on every render: the form outlives refreshes, the count
-    // it quotes does not.
+    // Called on every redraw: the form is kept, but the count changes.
     form.setStoredCount = (storedCount) => {
       warning.textContent = warningText(storedCount);
     };
     return form;
   }
 
-  // Creating an event does define its props, where editing one only
-  // changes its words. The difference is not how hard each is to build:
-  // a name nothing has sent yet has no traffic to reject and no history
-  // to strand, so a wrong shape here costs a file you fix rather than a
-  // site that quietly stops collecting. See server/lib/createEvent.ts.
+  // Creating an event defines its props, while editing only changes the
+  // wording: nothing sends a new event yet, so a mistake can be fixed
+  // before it costs data. See server/lib/createEvent.ts.
   function createForm() {
     const nameInput = el("input", {
       type: "text",
@@ -2281,14 +2154,11 @@
       rows: 2,
       placeholder: "Fired when a visitor clicks a link that leaves the site",
     });
-    // The name and description are the only thing the agent has to go
-    // on when it decides what an event means — there is no schema
-    // browser on its side, just these words in a tool description. A
-    // vague pair ("click" / "tracks clicks") makes every future
-    // question about this event a guess; a specific one ("outbound_
-    // link_click" / "Fired when a visitor clicks a link that leaves
-    // the site") answers it outright. The same goes for each prop's
-    // own description and example, below.
+    // The name and description are all the agent knows about what an
+    // event means. Vague ones ("click" / "tracks clicks") make every
+    // answer a guess; specific ones ("outbound_link_click" / "Sent when
+    // a visitor clicks a link that leaves the site") don't. The same goes
+    // for each prop's description and example below.
     const semanticHint = el("p", { className: "create-empty" }, [
       "Name and description are what the AI agent reads to understand " +
         "this event — write them as if explaining it to someone with no " +
@@ -2298,9 +2168,8 @@
         "goes for each prop's description and example below.",
     ]);
 
-    // The same disclosure a rename makes, for the same reason: rows
-    // stranded under this name by an earlier rename become this event's
-    // history the moment it exists.
+    // As for a rename: rows left under this name by an earlier rename
+    // become this event's history as soon as it exists.
     const adoptRow = el("p", { className: "edit-migrate edit-adopt" }, [""]);
     adoptRow.hidden = true;
     const updateAdoptNotice = () => {
@@ -2359,8 +2228,7 @@
     });
 
     save.addEventListener("click", () => {
-      // The registry the page is displaying is about to gain an event,
-      // so a success reloads the whole card rather than patching it.
+      // The registry changes, so on success the whole card is reloaded.
       submitEventWrite(
         save,
         message,
@@ -2412,12 +2280,12 @@
   /* ---------- wiring ---------- */
 
   let latestData = null;
-  // Hour, matching the default range: Today is a single day, which the
-  // Daily view can only show as one point. The window picker below
+  // Hourly, to match the default period: Today is one day, which the
+  // daily view would show as a single point. The period picker below
   // keeps the two in step.
   let trendMode = "hour";
-  // The view to go back to on leaving Today. Daily when the page opened
-  // on Today and nothing was picked before it.
+  // The view to return to when leaving Today. Daily if the page opened on
+  // Today and nothing was chosen before.
   let trendModeBeforeToday = "day";
   const TREND_DATA_KEY = {
     day: "trafficByDay",
@@ -2437,10 +2305,9 @@
     renderPeriod(data.period, data.timezone, shownRange);
     renderRetentionNote(data.retentionDays);
     renderReadOnly(data.readOnly === true);
-    // A form left open when the server came back read-only would render
-    // on regardless — renderSchemaRegistry draws the open form without
-    // consulting schemaEditable — and its Cancel would then focus a
-    // button that is now display:none, dropping focus to the body.
+    // Close open forms when the server is now read-only:
+    // renderSchemaRegistry would still draw them, and Cancel would then
+    // focus a hidden button, dropping focus to <body>.
     if (data.readOnly === true) {
       editing = null;
       creating = false;
@@ -2462,7 +2329,7 @@
     storedEventCounts = data.storedEventCounts || {};
     pageViewEventType = data.pageViewEventType || null;
     roleEventNames = data.roleEventNames || {};
-    // Before the registry: it sets the note the count line carries.
+    // Before the registry, because it sets the note the count uses.
     flagSchemaProblems(data.schemaErrors, data.orphanedEvents);
     renderSchemaRegistry(data.schemaRegistry);
     renderSchemaErrors(data.schemaErrors);
@@ -2476,9 +2343,8 @@
       data.proseFieldMaxBytes || 0,
       data.history || { entries: [], skipped: [], dropped: 0, error: null },
     );
-    // In the site's zone like the date line above it: in the viewer's
-    // own, an owner abroad saw "Updated 14:22" above an hour chart
-    // whose last bar was 20.
+    // In the site's time zone, like the dates above, so an owner abroad
+    // doesn't see "Updated 14:22" above an hourly chart ending at 20.
     document.getElementById("updated-at").textContent =
       "Updated " +
       new Date().toLocaleTimeString(DATE_LOCALE, { timeZone: data.timezone }) +
@@ -2486,12 +2352,12 @@
       lastEventText(data.lastEventAt, data.timezone);
   }
 
-  // A clock time, not "3 min ago": the page does not refresh by itself,
-  // so a relative time would go on claiming "just now" an hour later.
-  // Beside the fetch time, the gap between the two is the reading.
+  // A clock time, not "3 min ago": the page doesn't refresh by itself, so
+  // "just now" would still be shown an hour later. Compare it with the
+  // load time next to it.
   function lastEventText(lastEventAt, timezone) {
-    // "Stored", not "received": after Reset database, or on a site silent
-    // for longer than the retention period, events did arrive once.
+    // "Stored", not "received": after Reset database, or when retention
+    // has deleted everything, events may still have arrived before.
     if (!lastEventAt) return "no events stored";
     const at = new Date(lastEventAt);
     const opts = { timeZone: timezone, hour: "2-digit", minute: "2-digit" };
@@ -2512,22 +2378,19 @@
 
   function showError(message) {
     const banner = document.getElementById("error-banner");
-    // Shown before the text is written, not after: a live region that
-    // is display:none at the moment its content changes generally isn't
-    // announced at all.
+    // Show it before setting the text: a live region that is hidden when
+    // its text changes usually isn't announced.
     banner.classList.add("visible");
     document.getElementById("error-banner-text").textContent =
       "Failed to load cockpit data: " + message;
-    // The banner sits at the top of a page that is several screens
-    // long. Refresh from the bottom of the schema registry and the only
-    // other sign of failure is the spinner stopping, while every number
-    // above goes quietly stale.
+    // The error banner is at the top of a long page. After a refresh
+    // from far down, the owner would otherwise only see the spinner stop,
+    // while every number above is out of date. So scroll to it.
     //
-    // Measured rather than a fixed offset: the header is sticky, so
-    // scrolling the banner to the top of the viewport parks it
-    // underneath — and the header is a different height once it wraps
-    // on a phone. An inline style for a computed value, same as the
-    // bar widths (see docs/recipe-change-cockpit.md).
+    // The offset is measured: the header is sticky and would cover the
+    // banner, and it is taller on a phone when it wraps. An inline style
+    // for a computed value, like the bar widths (see
+    // docs/recipe-change-cockpit.md).
     const header = document.querySelector(".topbar");
     banner.style.scrollMarginTop =
       Math.round(header.getBoundingClientRect().height) + 16 + "px";
@@ -2559,17 +2422,13 @@
     }
   }
 
-  // There is one password, so there is one session: signing out here
-  // signs out every browser holding one, which is the behaviour to want
-  // from a button someone presses because a copy is somewhere it should
-  // not be. Goes to the login page whatever the server answers — a
-  // failed sign-out that leaves the page sitting there looking signed in
-  // is the one outcome worth ruling out.
+  // There is one password, so signing out signs out every browser. The
+  // page goes to the sign-in page whatever the server answers, so it
+  // never looks signed in after a failed sign-out.
   //
-  // Only a live session can sign the others out. When this tab's had
-  // already ended, or the answer never arrived, the login page says the
-  // other browsers may still be signed in, rather than claiming they
-  // are not.
+  // Only a valid session can sign out the others. If this tab's session
+  // had already ended, or no answer arrived, the sign-in page says other
+  // browsers may still be signed in.
   document.getElementById("logout").addEventListener("click", async () => {
     let revoked = false;
     try {
@@ -2579,17 +2438,17 @@
       });
       revoked = (await res.json()).revoked === true;
     } catch {
-      // there is nothing this page can do about that from here.
+      // No answer: the sign-in page says other browsers may still be
+      // signed in.
     }
-    // The login page says what happened, and says the part the button
-    // itself cannot: this signs out every browser, not this one.
+    // The sign-in page explains that every browser was signed out, not
+    // only this one.
     leaveNotice(revoked ? "signed-out" : "signed-out-this-tab");
     window.location.replace("login.html");
   });
 
-  // Applies whatever is on the volume now — a file edited over SSH, or
-  // dropped in by hand. The page then reloads its own data, because the
-  // registry it is displaying has just been replaced.
+  // Loads the event files as they are now on the volume (for example
+  // after editing one over SSH), then reloads the page's data.
   document.getElementById("new-event").addEventListener("click", () => {
     creating = true;
     editing = null;
@@ -2610,14 +2469,14 @@
       try {
         const res = await cockpitFetch("/cockpit/reload", {
           method: "POST",
-          // Not decoration: this is what stops a cross-site form from
-          // POSTing here on a logged-in browser's behalf. See the route.
+          // Required: it stops other sites from sending this request in
+          // the owner's browser (CSRF). See the route.
           headers: { "X-Genug-Cockpit": "1" },
         });
         const result = await readJson(res);
         if (!result.ok) {
-          // Worth spelling out — "failed" on its own reads as "the
-          // server is down", and the previous registry is still serving.
+          // Say that the old registry is still in use; "failed" alone
+          // sounds like the server is down.
           note.classList.add("is-critical");
           note.textContent =
             "Nothing changed — the event files could not be loaded, so the " +
@@ -2663,8 +2522,7 @@
           method: "POST",
           headers: {
             "content-type": "application/json",
-            // Same CSRF story as /cockpit/reload: a header no plain
-            // cross-site form can set. See the route.
+            // Required against CSRF, as for /cockpit/reload.
             "X-Genug-Cockpit": "1",
           },
           body: JSON.stringify({ password: passwordInput.value }),
@@ -2708,8 +2566,7 @@
           method: "POST",
           headers: {
             "content-type": "application/json",
-            // Same CSRF story as every other cockpit write: a header no
-            // plain cross-site form can set. See the route.
+            // Required against CSRF, as for every cockpit write.
             "X-Genug-Cockpit": "1",
           },
           body: JSON.stringify({ password: passwordInput.value }),
@@ -2728,9 +2585,8 @@
         " built-in " +
         (result.eventCount === 1 ? "event" : "events") +
         ".";
-      // Said here rather than left to the orphaned-events panel alone:
-      // this is the moment the rows were stranded, and the only one
-      // where the person can still connect the two.
+      // Said now, not only in the orphaned-events panel later, because now
+      // the owner can still connect cause and effect.
       if (result.stranded && result.stranded.length > 0) {
         const total = result.stranded.reduce((sum, row) => sum + row.count, 0);
         message.classList.remove("is-success");
@@ -2855,30 +2711,28 @@
       try {
         localStorage.setItem(RANGE_KEY, windowRange);
       } catch {
-        // Storage blocked: the choice simply isn't remembered.
+        // Storage blocked: the choice just isn't remembered.
       }
       load();
     });
 
-  // The period picked last time, so a cockpit opened every morning on
-  // 7d does not have to be switched back from Today each time. Per
-  // browser, like the theme. Checked against the buttons: a value left
-  // by an older page, or typed in by hand, falls back to the default
-  // rather than asking the server for a range it refuses.
+  // The period chosen last time, so someone who always looks at 7d
+  // doesn't have to switch every time. Stored per browser, like the theme.
+  // An unknown stored value falls back to the default instead of asking
+  // the server for a period it refuses.
   const RANGE_KEY = "genug-range";
 
-  // Sets the range and its buttons together, for a click and for the
-  // remembered choice alike. Loading is left to the caller.
+  // Sets the period and updates its buttons, for a click and for the
+  // remembered choice. The caller loads the data.
   function selectRange(range) {
     const picker = document.getElementById("window-picker");
     const button = [...picker.querySelectorAll("button[data-range]")].find(
       (b) => b.dataset.range === range,
     );
     if (!button) return;
-    // Only crossing Today moves the trend view. Into it, Hour is the
-    // useful picture of one day — Daily or Weekday would be a single
-    // point or bar. Out of it, the view from before Today comes back,
-    // so a round trip through Today leaves the owner's choice alone.
+    // The trend view only changes when switching to or from Today. For
+    // Today, hourly is the useful view (daily or weekday would be one
+    // point or bar). Leaving Today brings back the previous view.
     const previous = windowRange;
     windowRange = range;
     if (windowRange === "today" && previous !== "today") {
@@ -2889,9 +2743,8 @@
     }
     for (const b of picker.querySelectorAll("button")) {
       b.classList.toggle("active", b === button);
-      // Selection is otherwise conveyed by a class alone, which a
-      // screen reader cannot see: it hears three plain buttons and
-      // nothing at all changing when one is pressed.
+      // aria-pressed tells screen readers which button is selected; the
+      // CSS class alone can't be heard.
       b.setAttribute("aria-pressed", String(b === button));
     }
   }
@@ -2900,7 +2753,7 @@
     const saved = localStorage.getItem(RANGE_KEY);
     if (saved) selectRange(saved);
   } catch {
-    // Storage blocked: start on the default, Today.
+    // Storage blocked: start with the default, Today.
   }
 
   document
@@ -2912,34 +2765,31 @@
       renderCurrentTrend();
     });
 
-  // Sets the mode and its buttons together, for the owner's click and
-  // for the window picker's switch alike. Rendering is left to the
-  // caller: the window picker reloads the data first.
+  // Sets the trend view and updates its buttons, for a click and for the
+  // period picker. The caller redraws: the period picker reloads the data
+  // first.
   function selectTrendMode(mode) {
     trendMode = mode;
     const group = document.getElementById("trend-granularity");
     for (const b of group.querySelectorAll("button[data-mode]")) {
       const selected = b.dataset.mode === mode;
       b.classList.toggle("active", selected);
-      // Selection is otherwise conveyed by a class alone, which a
-      // screen reader cannot see: it hears three plain buttons and
-      // nothing at all changing when one is pressed.
+      // aria-pressed tells screen readers which button is selected; the
+      // CSS class alone can't be heard.
       b.setAttribute("aria-pressed", String(selected));
     }
   }
 
-  // The chart is drawn at real pixel dimensions, so it has to be
-  // redrawn when its container's width changes — a plain
-  // width: 100% SVG would rescale itself, this one can't.
+  // The chart is drawn in real pixels, so it must be redrawn when its
+  // container's width changes.
   const trendContainer = document.getElementById("trend-chart");
   new ResizeObserver(() => {
     if (trendContainer.clientWidth === lastTrendWidth) return;
     renderCurrentTrend();
   }).observe(trendContainer);
 
-  // Theme toggle: explicit, persisted choice that overrides
-  // prefers-color-scheme once used (see the head-inline script that
-  // applies the saved value before first paint).
+  // Theme switch: once used, the saved choice overrides
+  // prefers-color-scheme (theme.js applies it before the page is drawn).
   function currentTheme() {
     return (
       document.documentElement.dataset.theme ||
@@ -2949,9 +2799,8 @@
     );
   }
   function updateThemeIcon() {
-    // Shows the icon for the mode a click would switch *to*, not
-    // the active one — sun visible in dark mode (click for light),
-    // moon visible in light mode (click for dark).
+    // Shows the icon of the mode a click switches to: a sun in dark mode,
+    // a moon in light mode.
     const isDark = currentTheme() === "dark";
     document
       .getElementById("theme-icon-sun")
@@ -2959,9 +2808,8 @@
     document
       .getElementById("theme-icon-moon")
       .classList.toggle("icon-hidden", isDark);
-    // The icon swap is invisible to a screen reader — aria-pressed is
-    // what actually confirms the toggle took effect, same as the
-    // window-picker and trend-granularity controls above.
+    // Screen readers can't see the icon change, so aria-pressed says
+    // whether dark mode is on.
     document
       .getElementById("theme-toggle")
       .setAttribute("aria-pressed", String(isDark));
@@ -2976,9 +2824,9 @@
 
   document.getElementById("refresh").addEventListener("click", load);
 
-  // The list sits inside a card that may be closed, and a link cannot
-  // scroll to something a closed <details> hides. Open it first; the
-  // link's own navigation then scrolls to the list.
+  // The list is in a card that may be closed, and a link can't scroll to
+  // something hidden in a closed <details>. So open it first; the link
+  // then scrolls to it.
   document.getElementById("orphan-note-link").addEventListener("click", () => {
     document.getElementById("schema-card").open = true;
   });

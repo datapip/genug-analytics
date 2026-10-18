@@ -6,34 +6,28 @@ export interface RejectedEventBreakdown {
   reason: string;
   event: string | null;
   requests: number;
-  // The most recent occurrence's detail (e.g. "props.value: Expected
-  // number, received string") — one representative example, not
-  // grouped on, since occurrences of the same (reason, event) can each
-  // fail for a slightly different reason. Relies on SQLite's documented
-  // behavior that a bare column alongside a MAX() aggregate comes from
-  // the row that produced that max — same trick getEntryPages/
-  // getExitPages already use for "the url at the earliest/latest ts".
+  // The newest rejection's detail (such as "props.value: Expected number,
+  // received string"), as one example. Rows are not grouped by it, since
+  // rejections of the same event can differ slightly. SQLite returns a
+  // plain column next to MAX() from the row that has the maximum, which
+  // is how this gets the newest row's detail.
   lastDetail: string | null;
-  // When the most recent one arrived, from the same MAX(ts) row that
-  // produced lastDetail. Without it a count is unreadable: three
-  // rejections in a seven-day window is either a live breakage or a
-  // bug fixed on Monday, and those need opposite responses.
+  // When the newest one arrived. Without it, three rejections in a week
+  // could be a live problem or one fixed on Monday, which need different
+  // responses.
   lastSeen: string;
 }
 
-// Same "group and count" shape as getTopEvents/getEventsByProperty — grouped by
-// (reason, event) rather than event alone, since for unknown_event_type
-// specifically the event name itself (a likely typo, e.g.
-// "produt_added_to_cart") is often the single most useful piece of
-// information, not just how many times it happened.
+// Counts rejections by reason and event name. The name matters most for
+// unknown_event_type, where it is often a typo such as
+// "produt_added_to_cart".
 export function getTopRejectedEvents(
   db: Database.Database,
   period: Period,
   limit: number,
 ): Ranked<RejectedEventBreakdown> {
-  // MAX(ts) does double duty: it triggers the bare-column-from-the-max-row
-  // behavior that gives `lastDetail` the newest occurrence's detail, and
-  // it is itself returned as `lastSeen`.
+  // MAX(ts) is returned as `lastSeen`, and also makes SQLite take
+  // `lastDetail` from the newest row.
   const rows = db
     .prepare(
       `SELECT reason, event, COUNT(*) AS requests, MAX(ts) AS ts, detail AS lastDetail
@@ -59,9 +53,7 @@ export function getTopRejectedEvents(
   );
 }
 
-// The cockpit's simple stat card just needs a total, not the
-// breakdown — same relationship get_traffic_summary's sessions/events
-// counts have to get_top_events' breakdown.
+// Just the total, for the cockpit's stat card.
 export function getRejectedEventCount(
   db: Database.Database,
   period: Period,

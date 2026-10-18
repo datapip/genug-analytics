@@ -36,13 +36,11 @@ export function createMcpRouter(deps: McpRouterDeps): Router {
   return router;
 }
 
-// One JSON-RPC message per request, at 16kb. Express's default body
-// limit is 100kb, and the transport accepts an *array* of messages in
-// one POST — so without this a single allowed request carries hundreds
-// of tool calls and the per-minute limiter above bounds almost nothing.
-// Batching was removed from the MCP spec in 2025-06-18, so refusing it
-// costs no client anything, and it is refused here rather than inside
-// the transport because the point is to answer before any query runs.
+// One JSON-RPC message per request, at most 16kb. The transport would
+// accept an array of messages in one request, so a single request could
+// carry hundreds of tool calls and get around the rate limit. The MCP spec
+// no longer allows such batches, so no client needs them. They are
+// refused here, before any query runs.
 const parseMcpBody = json({ limit: "16kb" });
 
 function refusesBatch(req: Request, res: Response): boolean {
@@ -66,9 +64,9 @@ async function handleMcpRequest(
 ): Promise<void> {
   if (refusesBatch(req, res)) return;
 
-  // Stateless mode (see mcp/tools.ts): a fresh server + transport per
-  // request, no session tracking — this server only does simple one-shot
-  // query tools, no long-running/streaming operations.
+  // Stateless: a new server and transport for each request, with no
+  // session. Every tool answers in one response, so nothing needs to be
+  // kept between requests.
   const server = createMcpServer(db, {
     readOnly,
     timezone,

@@ -8,10 +8,9 @@ import { getTrafficSummary, getSessionSummary } from "./traffic.js";
 import { getEntryPages } from "./content.js";
 import type { Period } from "./period.js";
 
-// The old single-condition segment tool, expressed through what replaced
-// it: a segment clause pasted into the traffic summary. `visitors` is
-// dropped from the result so the assertions below stay about what the
-// segment selected.
+// The traffic summary for a one-condition segment (an event, optionally
+// with a prop value). `visitors` is left out, so the checks below are
+// about what the segment selected.
 function segmentSummary(
   db: Database.Database,
   filter: Omit<Extract<SegmentCondition, { kind: "event" }>, "kind">,
@@ -334,12 +333,10 @@ test("segment reports viewEvents: 0 (not omitted) when nothing matches but a pag
   });
 });
 
-// The bug the subquery exists for: this used to materialize every
-// matching session_id and rebind them one bound parameter each, against
-// SQLite's cap of 32,766 — so it threw "too many SQL variables" instead
-// of answering. Same ceiling funnel.ts chunks around, reached sooner
-// here, because filtering on the page-view event selects essentially
-// every session in the period.
+// The segment uses a subquery, not one SQL parameter per session, so
+// more sessions than SQLite's 32,766-parameter limit still work. A
+// page-view condition selects almost every session, so the limit is
+// easy to reach.
 test("survives more sessions than SQLite allows bound parameters", () => {
   const db = setupDb();
   const insert = db.prepare(
@@ -372,8 +369,7 @@ test("survives more sessions than SQLite allows bound parameters", () => {
   });
 });
 
-// The property-filtered branch binds two extra parameters and builds a
-// different WHERE, so it needs its own pass over the same ceiling.
+// The same with a prop value, which builds a different query.
 test("survives the same volume when filtering on a property value", () => {
   const db = setupDb();
   const insert = db.prepare(
@@ -406,11 +402,10 @@ test("survives the same volume when filtering on a property value", () => {
   });
 });
 
-// A list prop keeps its values inside one JSON array, so comparing
-// json_extract to the value compares the whole serialized array and
-// matches nothing — which would report zero sessions, an answer that
-// reads as "nobody did this". These pin the json_each branch that makes
-// the filter mean "carries this value".
+// A list prop stores its values in one JSON array, so comparing
+// json_extract with a value compares the whole array and matches nothing,
+// which would read as "nobody did this". These test the json_each
+// version, which means "contains this value".
 function insertArticle(
   db: Database.Database,
   session: string,
@@ -448,9 +443,8 @@ test("segment matches a value inside a list prop", () => {
   );
 });
 
-// One event carrying the value several times is still one event: EXISTS
-// asks whether it is there, it does not multiply the row out, which
-// would inflate every count this returns.
+// An event with the value several times is still one event: EXISTS
+// only checks whether it is there, without multiplying rows.
 test("segment counts an event once however often the value repeats", () => {
   const db = setupDb();
   insertArticle(db, "s1", ["pricing", "pricing", "pricing"]);
@@ -507,8 +501,8 @@ test("segment finds nothing for a value no list holds", () => {
   );
 });
 
-// An empty list, and a prop that isn't there at all: json_each produces
-// no rows for either, so neither needs a guard and neither errors.
+// An empty list and a missing prop: json_each gives no rows for either,
+// so neither causes an error.
 test("segment tolerates an empty list and a missing prop", () => {
   const db = setupDb();
   insertArticle(db, "s1", []);
@@ -537,8 +531,7 @@ test("segment tolerates an empty list and a missing prop", () => {
   );
 });
 
-// The flag is load-bearing, not decoration: without it the same data
-// answers zero, which is the failure this branch exists to remove.
+// The list flag matters: without it the same data gives zero.
 test("without the list flag the same filter matches nothing", () => {
   const db = setupDb();
   insertArticle(db, "s1", ["pricing"]);
@@ -628,9 +621,8 @@ test("a country condition selects the sessions from it, ZZ included", () => {
   assert.equal(summaryFor(db, [{ kind: "country", value: "ZZ" }]).sessions, 1);
 });
 
-// A session that changed network midway (a VPN switched on) is filed
-// under its first country by getTopCountries, so the segment has to
-// agree, or one session is counted under DE and segmented as AT.
+// A session that changed network midway (a VPN switched on) counts
+// under its first country in getTopCountries, so the segment must agree.
 test("a country condition goes by the session's first event", () => {
   const db = setupDb();
   visit(db, "s1", "https://example.com/", { country: "DE" });
@@ -648,7 +640,7 @@ test("a host condition selects the sessions on that site, www folded into the ap
   visit(db, "s1", "https://example.com/");
   visit(db, "s2", "https://www.example.com/pricing");
   visit(db, "s3", "https://shop.example.com/");
-  // A session of custom events only still has a site.
+  // A session with only custom events still has a site.
   insertEvent(db, {
     event: "signup",
     visitorId: "v-s4",
@@ -668,9 +660,8 @@ test("a host condition selects the sessions on that site, www folded into the ap
   );
 });
 
-// Sessions stored before 0.13.0 could cross sites under one consent
-// cookie. The segment and the host list must file one under the same
-// site — its first — or it is counted under one and listed under another.
+// Older stored sessions may span two sites. The segment and the host
+// list must both use the session's first site.
 test("a session that crossed sites is filed under its first one", () => {
   const db = setupDb();
   visit(db, "s1", "https://blog.example.com/");
@@ -784,7 +775,7 @@ test("entry-based conditions look at the page view that started the session", ()
 
 test("an entry-based condition only knows sessions that started in the period", () => {
   const db = setupDb();
-  // Entered from Google yesterday, still browsing after midnight: the
+  // Came from Google yesterday and still browsing after midnight: the
   // session belongs to yesterday, so today's Google segment is empty.
   visit(db, "s1", "https://example.com/", {
     referrer: "https://www.google.com/",
@@ -807,9 +798,8 @@ test("an empty condition list is no segment at all", () => {
   assert.equal(summaryFor(db, []).sessions, 1);
 });
 
-// The mismatch the testing review caught: the session-shaped queries
-// read a session that started in the period in full, so the event
-// condition must see the event even where it fell after the period.
+// Session queries read a session that started in the period in full,
+// so the event condition must also find an event after the period.
 test("an event condition keeps a session that started in the period and did the event after it", () => {
   const db = setupDb();
   visit(db, "s1", "https://example.com/", { ts: "2026-01-01T23:50:00.000Z" });
@@ -838,11 +828,9 @@ test("an event condition keeps a session that started in the period and did the 
   ]);
 });
 
-// The (event, ts) index looks like the natural way in, but it would
-// walk every row of the event since the database began and check each
-// one against the period's sessions. The app never runs ANALYZE, so the
-// planner picks it on shape alone; the plan has to start from the
-// sessions instead.
+// The (event, ts) index looks right but would read every row of the
+// event ever stored. Without ANALYZE statistics SQLite would pick it
+// anyway, so the query plan must start from the sessions instead.
 test("an event condition starts from the period's sessions, not the event's history", () => {
   const db = setupDb();
   const clause = buildSegment(

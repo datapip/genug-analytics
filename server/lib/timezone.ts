@@ -1,20 +1,18 @@
 import type Database from "better-sqlite3";
 
-// The site's own calendar. Every stored `ts` is a UTC instant, and that
-// stays true; this module is only about where one day or hour ends and
-// the next begins. Those cuts used to be at UTC midnight, which for a
-// site in Berlin is 01:00 or 02:00 local time — a visit at 00:30 was
-// counted on the previous day and at hour 22, plausible while wrong.
+// Days and hours in the site's time zone. Every stored `ts` is in UTC;
+// this module only decides where a local day or hour begins and ends.
+// Using UTC midnight instead would, for a site in Berlin, count a visit
+// at 00:30 on the previous day.
 //
-// SQLite's strftime can shift by a fixed offset but knows nothing of
-// IANA zones, and a fixed offset is wrong for half the year wherever
-// clocks change. So the offsets are worked out here, with Intl, and
-// handed to SQL as spans of constant offset (`localSpans`): one span
-// for most periods, two or three when a clock change falls inside.
+// SQLite's strftime can only shift by a fixed offset, and a fixed offset
+// is wrong for half the year wherever clocks change. So the offsets are
+// worked out here with Intl and passed to SQL as time spans with one
+// offset each (`localSpans`): one span for most periods, two or three
+// when a clock change falls inside.
 //
-// Every function takes the zone explicitly rather than reading it from
-// the environment, so a test can pin any zone and none of them holds
-// state beyond a cache of formatters.
+// Every function takes the time zone as a parameter instead of reading
+// the environment, so tests can use any zone.
 
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -26,8 +24,8 @@ function formatterFor(timezone: string): Intl.DateTimeFormat {
   if (!formatter) {
     formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-      // h23, not the default h12 or `hour12: false`: the latter prints
-      // midnight as "24" in some engines.
+      // h23 rather than `hour12: false`, which shows midnight as "24" in
+      // some JavaScript engines.
       hourCycle: "h23",
       year: "numeric",
       month: "2-digit",
@@ -69,26 +67,28 @@ export function localDate(instant: Date | number, timezone: string): string {
     .slice(0, 10);
 }
 
-// Calendar arithmetic on a YYYY-MM-DD, in whole days. Done on the date
-// itself, not by adding 24 hours to an instant: a day with a clock
-// change has 23 or 25.
+// Adds whole days to a YYYY-MM-DD date. Done on the date itself, not by
+// adding 24 hours to a time, because a day with a clock change has 23 or
+// 25 hours.
 export function addDays(date: string, days: number): string {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
 }
 
-// The first instant of a local calendar day, as epoch ms. Found by
-// bisection rather than by subtracting an offset: the offset at
-// midnight is the thing being looked for, and in the few zones that
-// change their clocks at 00:00 local midnight does not exist at all —
-// the day then starts at the change, which is what this returns.
+// The first moment of a local day, in milliseconds since 1970. Found by
+// binary search rather than by subtracting an offset, because the offset
+// at midnight is what we don't know yet. In the few zones that change
+// clocks at 00:00, midnight doesn't exist on that day; the day then
+// starts at the change, which is what this returns.
 export function localDayStart(date: string, timezone: string): number {
-  // Every real offset lies within ±14 hours, so the day starts in here.
+  // Every real offset is within ±14 hours, so the day starts in this
+  // range.
   const nominal = new Date(`${date}T00:00:00.000Z`).getTime();
   let lo = nominal - 15 * 60 * MINUTE_MS;
   let hi = nominal + 15 * 60 * MINUTE_MS;
-  // Invariant: lo is before the day, hi is inside it or after.
+  // Always true in the loop: lo is before the day, hi is inside it or
+  // after.
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
     if (localDate(mid, timezone) < date) lo = mid;
@@ -97,9 +97,9 @@ export function localDayStart(date: string, timezone: string): number {
   return hi;
 }
 
-// Every local calendar day a period touches, in order. A trend needs
-// every day present, not only the ones with data, or a quiet day
-// vanishes instead of showing as a dip.
+// Every local day a period touches, in order. A trend needs every day,
+// not only days with data, or a quiet day would vanish instead of
+// showing as a dip.
 export function enumerateDays(
   fromIso: string,
   toIso: string,
@@ -123,14 +123,13 @@ export interface OffsetSpan {
   offset: number;
 }
 
-// The period cut into pieces of constant offset. Contiguous and
-// half-open by construction — [start, end) — because an overlap would
-// count a row twice and a gap would drop it, both silently. The outer
-// edges are left open ('' and '9999' sort around every timestamp): the
-// query's own `ts BETWEEN @from AND @to` bounds the period, so only the
-// clock changes inside it need to be exact. Those are emitted with
-// toISOString(), the one format `ts` is stored in, or the string
-// comparison goes wrong the way lib/period.ts describes.
+// The period cut into spans that each have one UTC offset. The spans
+// touch without overlapping ([start, end)), because an overlap would
+// count a row twice and a gap would drop it. The outer edges are open
+// ('' and '9999' sort before and after every timestamp), since the
+// query's own `ts BETWEEN @from AND @to` limits the period. The clock
+// changes in between are written with toISOString(), the format `ts` is
+// stored in, so the text comparison works (see lib/period.ts).
 export function offsetSpans(
   fromIso: string,
   toIso: string,
@@ -142,8 +141,8 @@ export function offsetSpans(
   let start = "";
   let offset = offsetMinutes(from, timezone);
 
-  // A day at a time: no zone changes its clock twice within one day,
-  // so a change between two steps is found by bisecting that day.
+  // Step one day at a time. No zone changes its clock twice in a day, so
+  // a change between two steps is found by binary search within that day.
   for (let prev = from; prev < to;) {
     const next = Math.min(prev + DAY_MS, to);
     const nextOffset = offsetMinutes(next, timezone);
@@ -166,13 +165,12 @@ export function offsetSpans(
   return spans;
 }
 
-// Joins each event to the span it falls in, so a query can bucket on
+// Joins each event to the span it falls in, so a query can group by
 // local time with `strftime(fmt, ts, span_offset || ' minutes')`. The
-// spans arrive as one bound JSON parameter, @spans, from `localSpans`
-// below — the same one-parameter idiom as a segment's lists — so the
-// SQL text is fixed and nothing is built from a value. The column names
-// are prefixed so none of them can shadow a column of `events`, which
-// a segment clause pasted after this refers to unqualified.
+// spans are passed as one JSON parameter, @spans (from `localSpans`
+// below), so the SQL text stays fixed. The column names have a `span_`
+// prefix so they can't clash with columns of `events`, which a segment
+// clause added after this uses without a table name.
 export const LOCAL_SPANS_CTE = `local_spans AS (
   SELECT json_extract(value, '$.start') AS span_start,
          json_extract(value, '$.end') AS span_end,
@@ -182,11 +180,10 @@ export const LOCAL_SPANS_CTE = `local_spans AS (
 export const JOIN_LOCAL_SPANS =
   "JOIN local_spans ON ts >= span_start AND ts < span_end";
 
-// Scanned between the first and last stored row in the period, not
-// between the bounds asked for: an agent can ask from year 1, which is
-// ~740,000 daily steps, while the rows — stamped by this server on
-// arrival — span at most the deployment's life. Two lookups on the ts
-// index, each a single seek.
+// Searches only between the first and last stored row in the period,
+// not the bounds asked for: an agent may ask from year 1 (about 740,000
+// days), but the rows only cover the time the deployment has run. Finding
+// the first and last row takes two quick index lookups.
 export function localSpans(
   db: Database.Database,
   period: { from: string; to: string },
@@ -201,7 +198,7 @@ export function localSpans(
     first: string | null;
     last: string | null;
   };
-  // No rows, nothing to bucket: any single span will do.
+  // No rows to group, so any single span will do.
   if (first === null || last === null) {
     return JSON.stringify([{ start: "", end: "9999", offset: 0 }]);
   }

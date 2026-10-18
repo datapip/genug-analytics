@@ -3,47 +3,38 @@ import type Database from "better-sqlite3";
 export interface OrphanedEventGroup {
   event: string;
   events: number;
-  // When the last one arrived — effectively when the event stopped
-  // being registered, since nothing can have been written under the
-  // name since.
+  // When the last one arrived. That is roughly when the event was
+  // renamed or deleted, since nothing can be stored under the name after.
   lastSeen: string;
 }
 
-// Stored events whose type the registry no longer has.
+// Stored events whose name no registered event has ("orphaned" rows).
 //
-// These can only come from one thing: an event that was renamed or
-// deleted. A name that was never registered cannot produce rows at all,
-// because routes/events.ts rejects it at ingestion — so unlike
-// rejected_events, which records requests that never became data, this
-// is real data the registry has lost track of.
+// They can only come from renaming or deleting an event: /events
+// rejects a name that isn't registered, so no new rows can appear under
+// it.
 //
-// What that costs is uneven, which is why it is worth reporting rather
-// than leaving to be noticed. Queries that group by whatever is in the
-// column still see these rows (getTopEvents, getRecentEvents), under
-// the old name. Queries that resolve a *registered* name do not, and
-// no tool will accept the old name as an argument. The bad case is
-// renaming the page-view event: its history stops matching
-// pageViewEventType, so top/entry/exit/bounce pages lose it entirely
-// and getTrafficSummary counts those page views as interactionEvents
-// instead. The totals stay plausible while the split is wrong, which is
-// harder to spot than a zero.
+// Why report them: queries that group by the stored name
+// (getTopEvents, getRecentEvents) still show them under the old name,
+// but queries that look up a registered name miss them, and no tool
+// accepts the old name. Worst case is renaming the page-view event: the
+// old page views drop out of the page tools, and getTrafficSummary
+// counts them as interactionEvents. The totals look right while the
+// split is wrong, which is harder to spot than a zero.
 //
-// Deliberately not scoped to a period. A rename's orphans age out of
-// any window while staying just as invisible, so a period-scoped
-// version would stop reporting the problem precisely when it had been
-// there longest.
+// Not limited to a period: the old rows fall out of any recent period
+// but stay just as invisible, so a period would hide the problem the
+// longer it lasts.
 //
-// No limit either: the rows can only be produced by the deployment's
-// own renames, never by traffic, so the number of distinct names here
-// is a handful at most and not something a visitor can inflate.
+// No row limit either: only the deployment's own renames create these,
+// not visitors, so there are a handful at most.
 export function getOrphanedEvents(
   db: Database.Database,
   registeredEvents: readonly string[],
 ): OrphanedEventGroup[] {
-  // The registered names go in as one bound JSON array rather than a
-  // generated run of placeholders — no SQL is built by interpolation,
-  // and the number of registered events can't run into SQLite's bound
-  // parameter ceiling. Same json_each idiom as lib/funnel.ts.
+  // The registered names are passed as one JSON array and unpacked with
+  // json_each, instead of one `?` per name. That keeps the SQL fixed and
+  // can't hit SQLite's limit on the number of parameters.
   return db
     .prepare(
       `SELECT event, COUNT(*) AS events, MAX(ts) AS lastSeen

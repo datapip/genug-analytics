@@ -11,24 +11,22 @@ import {
 } from "./loadEvents.js";
 import { seedEvents } from "./seedEvents.js";
 
-// The events shipped inside the image: one JSON file each, in
-// packages/schema-registry/events/. Resolved relative to this module
-// rather than the working directory, because the server is started from
-// wherever a deployment happens to put it.
+// The built-in events that ship with the image, one JSON file each, in
+// packages/schema-registry/events/. Found relative to this file, not the
+// working directory, which may be anywhere.
 const BUILT_IN_EVENTS_DIR = fileURLToPath(
   new URL("../events", import.meta.url),
 );
 
 const image = loadEvents(BUILT_IN_EVENTS_DIR);
 
-// A file that arrived through a build is a developer error, so it stops
-// the process rather than being skipped — the same fail-fast spirit as
-// requireEnv. Nothing here reached a server without someone building
-// it, so a broken one should never get as far as collecting data.
+// A broken built-in file is a developer mistake, so it stops the server
+// instead of being skipped: it should never get as far as collecting
+// data.
 //
-// Files on the volume are the opposite, and deliberately so: they were
-// hand-edited on a live server, or written by the cockpit, where one
-// typo must not take collection down for every other event.
+// Files on the volume are handled the other way on purpose: they were
+// edited by hand on a live server or written by the cockpit, and one
+// typo must not stop collection for every other event.
 if (image.errors.length > 0) {
   throw new Error(
     `Invalid event schema files in ${BUILT_IN_EVENTS_DIR}:
@@ -36,41 +34,31 @@ if (image.errors.length > 0) {
   );
 }
 
-// A deployment's own events, read from the persistent volume — the same
-// `/data` the database lives on, so a stock image plus a volume is a
-// complete customised setup with nothing to build. Overridable for
-// local dev outside Docker, exactly like DB_PATH, and for the same
-// reason: it is a filesystem path, not a secret.
+// The deployment's own events, on the persistent volume next to the
+// database, so a stock image plus a volume is a complete customised
+// setup. Can be changed with EVENTS_PATH (for local development outside
+// Docker, like DB_PATH).
 //
-// Reading an env var from inside this package is a small layering
-// oddity. The alternative is turning the registry from a module-level
-// constant into something the server constructs and threads through
-// every consumer, which is a large change to buy nothing.
+// Reading an environment variable inside this package is a little
+// unusual, but the alternative (the server creating the registry and
+// passing it to every user) would be a big change for no benefit.
 export const eventsPath: string = process.env.EVENTS_PATH ?? "/data/events";
 
-// Was `keyof typeof eventRegistry`: a checked union of the four
-// built-in names. Schemas are JSON read at startup now, so there is
-// nothing left for the compiler to read — which event names exist is
-// not knowable until the process runs, which is the entire point of the
-// change (see docs/decisions.md).
-//
-// Nothing leaned on the union for safety. An event name arrives from
-// the network as an arbitrary string and is checked against the
-// registry at runtime either way. What is genuinely lost is a typo in
-// server code that names an event being caught at save time.
+// Just `string`: events are read from JSON files when the server starts,
+// so the compiler can't know their names (see docs/decisions.md). Event
+// names arrive from the network as any string and are checked against
+// the registry at runtime anyway.
 export type EventType = string;
 
-// The role tags an event may carry, written in the JSON files as
+// The role tags an event can have, written in the JSON files as
 // `_pageView`, `_automaticOutboundClick` and `_automaticFileDownload`
-// (checkEvent.ts maps the keys onto these names, and says why they
-// differ). Each answers "which event means X in this
-// deployment?", so nothing has to assume a fixed event name.
+// (checkEvent.ts maps the keys to these names and explains why they
+// differ). Each answers "which event means X in this deployment?", so no
+// code needs to assume a fixed event name.
 export type EventRoleTag = "pageView" | "outboundClick" | "fileDownload";
 
-// Exported (and taking `registry` as a parameter, rather than reading
-// eventRegistry directly) purely so tests can hand it a small synthetic
-// registry to verify the "multiple tagged" error, without needing the
-// real registry to be misconfigured.
+// `registry` is a parameter so tests can pass a small made-up registry,
+// for example to test the error when two events have the same tag.
 export function resolveTaggedEvent(
   registry: Record<string, Partial<Record<EventRoleTag, boolean>>>,
   tag: EventRoleTag,
@@ -91,23 +79,22 @@ interface BuiltRegistry {
   errors: SchemaFileError[];
   pageViewEventType: EventType;
   roleEventNames: Readonly<Partial<Record<EventRoleTag, string>>>;
-  // Which directory these came from. Equal to eventsPath normally, and
-  // to the image's own directory when the volume could not be prepared
-  // — which is what tells the cockpit whether an edit can be saved.
+  // Which folder these came from: normally eventsPath, or the image's own
+  // folder when the volume couldn't be prepared. The cockpit uses it to
+  // decide whether edits can be saved.
   source: string;
 }
 
-// Everything that depends on reading a directory, in one function so it
-// can run a second time. Throws on the one state nothing can serve —
-// see the pageView check at the end.
+// Reads the events folder and builds the registry. A function, so it
+// can run again on reload. Throws only when there would be no page-view
+// event (see the check at the end).
 function buildRegistry(): BuiltRegistry {
-  // The volume is the only source, and gets the image's events copied
-  // into it the first time it is empty (see seedEvents.ts for why that
-  // has to happen exactly once). Nothing is layered over anything, so
-  // renaming or deleting a built-in is an ordinary edit to an ordinary
-  // file. Where a volume cannot be prepared at all — a clone with no
-  // /data, most often — the image's own directory serves instead, and
-  // seedEvents says so in an error the cockpit shows.
+  // The volume is the only source. The built-in events are copied into
+  // it the first time it is empty (see seedEvents.ts for why only then).
+  // So renaming or deleting a built-in is a normal file edit. When no
+  // volume can be prepared (usually a git clone without /data), the
+  // image's own folder is used, and seedEvents returns an error the
+  // cockpit shows.
   const seeded = seedEvents(BUILT_IN_EVENTS_DIR, eventsPath);
   const loaded =
     seeded.source === BUILT_IN_EVENTS_DIR ? image : loadEvents(seeded.source);
@@ -115,17 +102,14 @@ function buildRegistry(): BuiltRegistry {
   const registry: Record<string, EventDefinition> = { ...loaded.registry };
   const errors: SchemaFileError[] = [...seeded.errors, ...loaded.errors];
 
-  // Last resort: a typo in the page-view file gets it skipped like any
-  // other broken file, and the registry refuses to start without a
-  // pageView event (see below) — so without this a single bad character
-  // would take the whole deployment down, which is precisely the
-  // failure loading volume files leniently exists to prevent.
+  // Fallback: a typo in the page-view file gets that file skipped, and
+  // the registry can't work without a page-view event (see below), so one
+  // bad character would stop the whole server.
   //
-  // Re-registering the image's copy keeps the server up, keeps page
-  // views being recorded under the name the client already sends, and
-  // puts the real problem where every other rejected file appears. It
-  // cannot quietly paper over an edit: it only runs when *nothing*
-  // carries the tag, so a successful rename is untouched.
+  // Registering the built-in copy instead keeps the server running and
+  // page views recorded, and the broken file is reported like any other.
+  // It only happens when no event has the tag, so a successful rename is
+  // not affected.
   const imagePageView = resolveTaggedEvent(image.registry, "pageView");
   if (
     imagePageView !== undefined &&
@@ -146,21 +130,15 @@ function buildRegistry(): BuiltRegistry {
     });
   }
 
-  // Exactly one event must carry the tag: resolveTaggedEvent throws on
-  // more than one, and this throws on none. Required rather than
-  // optional because every page-scoped query resolves through it
-  // (get_top_pages, get_top_referrers, entry/exit/bounce pages, the
-  // viewEvents half of every traffic summary), and because the
-  // alternative was worse than it looked. Allowing zero meant every one
-  // of those results carried an "or this deployment has no page-view
-  // concept" case that had to be told apart from "no data yet", in the
-  // types, in the cockpit, and in five tool descriptions the agent reads
-  // on every call — to serve a browser-script analytics deployment that
-  // does not track page views, which does not exist.
+  // Exactly one event must have the tag: resolveTaggedEvent throws on
+  // more than one, and this throws on none. Every page query depends on
+  // it (top pages, referrers, entry/exit/bounce pages, the page views in
+  // the traffic summary). Allowing none would mean every one of those
+  // needs a "this deployment has no page views" case, kept apart from
+  // "no data yet", for a kind of site that doesn't exist.
   //
-  // A deployment that genuinely doesn't care registers one and never
-  // fires it. An empty result then means zero page views, accurately,
-  // which is the ambiguity the optional case existed to avoid.
+  // A deployment that doesn't care about page views can register one and
+  // never send it; zero then truly means zero page views.
   const taggedPageViewEvent = resolveTaggedEvent(registry, "pageView");
   if (taggedPageViewEvent === undefined) {
     throw new Error(
@@ -180,19 +158,15 @@ function buildRegistry(): BuiltRegistry {
     errors,
     source: seeded.source,
     pageViewEventType: taggedPageViewEvent,
-    // Which event this deployment records each client-fired role as,
-    // resolved through the role tags so a rename is invisible to the client
-    // — it sends the role, never a name (see envelope.ts's AUTO_EVENT_ROLES
-    // and routes/events.ts).
+    // Which event each role the client sends is stored as, found through
+    // the role tags. The client sends the role, never a name, so renaming
+    // an event doesn't affect it (see AUTO_EVENT_ROLES in envelope.ts and
+    // routes/events.ts).
     //
-    // A role may be absent: a deployment that does not want outbound-click
-    // tracking simply registers no event carrying that tag. The client can
-    // still be configured to fire it, and the server then rejects it as an
-    // unknown event type with a detail saying which tag is missing — the
-    // same one place every other mistracked event surfaces, rather than a
-    // second diagnostic. This used to fall back to the built-in *name*,
-    // which quietly produced the same rejection with a less useful reason
-    // when that name was not registered either.
+    // A role may have no event: a deployment that doesn't want outbound
+    // click tracking registers no event with that tag. If the client still
+    // sends it, the server rejects it as an unknown event type, saying
+    // which tag is missing, in the same place as every other rejection.
     roleEventNames: {
       pageView: taggedPageViewEvent,
       outboundClick: resolveTaggedEvent(registry, "outboundClick"),
@@ -201,38 +175,31 @@ function buildRegistry(): BuiltRegistry {
   };
 }
 
-// Built once at import, same fail-fast spirit as requireEnv — a
-// misconfigured registry should break at startup, not silently pick one
-// candidate later.
+// Built once when this module loads, so a misconfigured registry fails
+// at startup.
 const built = buildRegistry();
 
-// The four below are `let` rather than `const` so reloadEvents can
-// replace them. ES module imports are live bindings, so every consumer
-// sees the new value with no wiring of its own, including through this
-// package's re-export in index.ts. That holds only because no consumer
-// reads one of these at module scope — every use is inside a request
-// handler, which was counted rather than assumed (see
-// docs/decisions.md). Caching one in a module-level constant silently
-// opts that consumer out of every reload.
+// The exports below are `let`, not `const`, so reloadEvents can replace
+// them. ES module imports are live bindings: every importer sees the new
+// value, also through the re-export in index.ts. This only works because
+// they are read inside request handlers. Copying one into a module-level
+// constant would keep the old value forever (see docs/decisions.md).
 
-// Lookup by event name — routes/events.ts uses this to find the props
-// schema for an incoming event; mcp/tools.ts iterates it for
-// list_event_types/get_schema.
+// Event definitions by name. routes/events.ts looks up an incoming
+// event's props schema here; list_event_types lists it.
 export let eventRegistry: Record<string, EventDefinition> = built.registry;
 
-// Files that were skipped, and why. Surfaced by the cockpit: a rejected
-// file nobody can see is worse than useless, because the events it
-// should have registered are instead piling up in rejected_events as an
-// unknown type, with nothing saying why.
+// Files that were skipped, and why. The cockpit shows them; otherwise
+// their events would pile up in rejected_events as unknown, with nothing
+// saying why.
 export let schemaErrors: readonly SchemaFileError[] = built.errors;
 
 export let pageViewEventType: EventType = built.pageViewEventType;
 
-// The directory the registry was actually read from, and the one an
-// edit has to be written to. Not the same as eventsPath when seeding
-// could not prepare a volume: the image's directory is then serving,
-// and the cockpit must say editing is unavailable rather than write
-// somewhere that is thrown away on the next deploy.
+// The folder the registry was read from, where edits must be written.
+// It differs from eventsPath when no volume could be prepared: then the
+// image's folder is used, and the cockpit says editing isn't possible
+// instead of writing somewhere the next deploy throws away.
 export let eventsSource: string = built.source;
 
 export let roleEventNames: Readonly<Partial<Record<EventRoleTag, string>>> =
@@ -242,19 +209,17 @@ export type ReloadResult =
   | { ok: true; eventCount: number; errors: readonly SchemaFileError[] }
   | { ok: false; error: string };
 
-// Re-reads the event files and swaps the registry in place, so a schema
-// change applies without a restart — which is what makes editing an
-// event from the cockpit a whole action rather than half of one.
+// Reads the event files again and replaces the registry, so a change
+// takes effect without a restart (for example after an edit in the
+// cockpit).
 //
-// Never throws, and never leaves the registry half-replaced: a build
-// that fails is discarded entire and the running one keeps serving,
-// with the reason handed back for the caller to show. That matters more
-// here than at startup — this runs from an HTTP handler on a live
-// server, where taking the process down over one bad file is the
-// failure that loading volume files leniently exists to prevent.
+// Never throws and never replaces only part of the registry: if building
+// fails, the old registry keeps running and the reason is returned. This
+// runs from an HTTP request on a live server, where one bad file must not
+// stop the process.
 //
-// It cannot pick up EVENTS_PATH or any other env var. Those still need
-// a real restart, and that is fine — it is not what this is for.
+// Changes to EVENTS_PATH or other environment variables still need a
+// restart.
 export function reloadEvents(): ReloadResult {
   let next: BuiltRegistry;
   try {
@@ -285,38 +250,32 @@ export type ResetEventsResult =
 
 const isEventFile = (name: string): boolean => name.endsWith(".json");
 
-// Puts the events directory back to what the image ships: every file on
-// the volume is removed, then the built-ins are copied out again.
+// Resets the events folder to the built-in events: every file on the
+// volume is deleted, then the built-ins are copied again.
 //
-// Deliberately the whole directory and not "the files that aren't
-// built-ins". A deployment renames a built-in by renaming its file (see
-// seedEvents), so after `page_view.json` becomes `seitenaufruf.json`
-// there is no way left to tell a renamed built-in from an event
-// somebody wrote — the name is all there is, and it is the thing that
-// changed. Removing everything and re-seeding is the only version of
-// this that means one predictable thing, and it is what "reset" should
-// do anyway: edits to built-ins go too.
+// Always the whole folder, not "everything except the built-ins". A
+// built-in is renamed by renaming its file (see seedEvents), so after
+// `page_view.json` becomes `seitenaufruf.json` there is no way to tell it
+// from an event someone wrote. Deleting everything is the only reset that
+// always does the same thing, and edits to built-ins are undone too.
 //
-// The caller reloads. This touches files; it does not swap the running
-// registry, so a failure here leaves the process serving exactly what
-// it was serving before.
+// The caller reloads afterwards. This only changes files, so if it fails
+// the server keeps running with the registry it had.
 export function resetEvents(): ResetEventsResult {
   return resetEventFiles(BUILT_IN_EVENTS_DIR, eventsPath);
 }
 
-// The body of resetEvents, with both directories passed in so it can be
-// tested against temporary ones — resetEvents itself closes over module
-// constants fixed at import, and a test that could reach them would be
-// deleting the repository's own event files.
+// resetEvents with both folders as parameters, so tests can use
+// temporary folders instead of deleting the repository's own event
+// files.
 export function resetEventFiles(
   imageDir: string,
   volumeDir: string,
 ): ResetEventsResult {
-  // EVENTS_PATH can be pointed at the image's own directory, and then
-  // the source and the target are the same files: clearing the volume
-  // would delete the built-ins, and re-seeding would copy an empty
-  // directory over itself. Every file would be gone and this would
-  // report success.
+  // EVENTS_PATH may point at the image's own folder. Then source and
+  // target are the same files: deleting would remove the built-ins, and
+  // copying would then copy nothing. Every file would be gone, and this
+  // would report success.
   if (resolve(imageDir) === resolve(volumeDir)) {
     return {
       ok: false,
@@ -327,10 +286,9 @@ export function resetEventFiles(
     };
   }
 
-  // Read the image's files before deleting anything on the volume. They
-  // were validated at import, so this should not fail — but if it ever
-  // did, deleting first would leave a deployment with no events at all
-  // and nothing to restore them from.
+  // Read the built-in files before deleting anything. They were checked
+  // at startup, so this shouldn't fail, but if it did after deleting,
+  // the deployment would have no events left.
   let builtIns: string[];
   try {
     builtIns = readdirSync(imageDir).filter(isEventFile);
@@ -365,9 +323,8 @@ export function resetEventFiles(
     };
   }
 
-  // seedEvents copies when the directory holds no event files, which is
-  // exactly the state just created — so the one piece of code that
-  // knows how to put the image's events on a volume stays the only one.
+  // The folder is now empty, which is exactly when seedEvents copies the
+  // built-ins, so the copying stays in one place.
   const seeded = seedEvents(imageDir, volumeDir);
   if (seeded.errors.length > 0) {
     return {
@@ -385,26 +342,21 @@ export interface RegistrySummary {
   [eventName: string]: {
     description: string;
     props: Record<string, PropMetadata>;
-    // Unlike the three role tags (pageView/outboundClick/fileDownload,
-    // deliberately excluded here — see "role tags never reach the
-    // agent" in tools.test.ts), conversion is meant to reach both
-    // readers of this summary: it marks a business goal, not client or
-    // server wiring.
+    // Unlike the role tags, which are left out on purpose (see "role
+    // tags never reach the agent" in tools.test.ts), conversion is shown:
+    // it marks a business goal, which matters to the agent and the
+    // owner.
     conversion: boolean;
   };
 }
 
-// The registry, minus the Zod schemas — just the JSON-safe metadata
-// consumers show to a human or an AI agent (the MCP resource, the
-// cockpit). One function so both stay in sync automatically.
+// The registry without the Zod schemas: the descriptions and types that
+// the MCP resource and the cockpit show. One function, so both always
+// show the same.
 //
-// Takes `registry` as a parameter, defaulting to the live one, for the
-// same reason resolveTaggedEvent above does: none of the shipped
-// built-in events set _conversion, so a test comparing this function's
-// output against the real eventRegistry can only ever compare false to
-// false — it would pass just as well if this function hardcoded
-// `conversion: false`. Handing it a synthetic registry is what lets a
-// test prove a `true` value actually survives the mapping.
+// `registry` is a parameter so tests can pass their own. No built-in
+// event sets _conversion, so with only the real registry a test couldn't
+// check that `true` is passed through.
 export function serializeRegistry(
   registry: Record<string, EventDefinition> = eventRegistry,
 ): RegistrySummary {

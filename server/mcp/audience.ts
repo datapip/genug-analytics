@@ -22,8 +22,8 @@ import {
   VISITOR_TEXT_CAVEAT,
 } from "./shared.js";
 
-// "Who is visiting" — the visitor-shaped questions, as opposed to
-// traffic volume (traffic.ts) or what they looked at (content.ts).
+// Tools about who is visiting: referrers, devices, languages, countries.
+// Traffic volume is in traffic.ts, pages in content.ts.
 export const registerAudienceTools: ToolRegistrar = (
   server,
   db,
@@ -101,9 +101,9 @@ export const registerAudienceTools: ToolRegistrar = (
       },
     },
     async ({ cohortFrom, cohortTo, returnFrom, returnTo, segment }) => {
-      // Neither pair is named from/to, so the registration-time guard
-      // (mcp/tools.ts) doesn't see them; checked here instead, plus the
-      // ordering between the two periods that no single-period tool has.
+      // These periods aren't named from/to, so the startup check in
+      // mcp/tools.ts doesn't cover them. They are checked here, together
+      // with the order of the two periods.
       const inverted =
         invertedPeriodError(cohortFrom, cohortTo) ??
         invertedPeriodError(returnFrom, returnTo);
@@ -170,8 +170,8 @@ export const registerAudienceTools: ToolRegistrar = (
     async ({ from, to, segment, limit }) => {
       return withSegment(db, segment, { from, to }, (clause) => {
         const countries = getTopCountries(db, { from, to }, limit, clause);
-        // Every session unlooked-up reads as "no data" when it is
-        // really "the feature is off" — the mistake has to look like one.
+        // With the lookup off, an empty list would read as "no visitors
+        // from anywhere". Say that the feature is off instead.
         if (countries.total === 0 && countries.notLookedUp > 0) {
           return toolError(
             "No session in this period has a country. The lookup is off unless the server runs with COUNTRY_LOOKUP=true, and rows stored before it was turned on never get one.",

@@ -19,8 +19,7 @@ test("invertedPeriodError passes a normal period through", () => {
   );
 });
 
-// A single-instant period is degenerate but not a mistake — an event
-// could land exactly on it.
+// A period of one instant is allowed: an event could be exactly then.
 test("invertedPeriodError allows from === to", () => {
   assert.equal(
     invertedPeriodError("2026-09-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z"),
@@ -28,9 +27,8 @@ test("invertedPeriodError allows from === to", () => {
   );
 });
 
-// Without this, swapped arguments produce an empty result, which an
-// agent reports as "no data" with full confidence — the same class of
-// silent wrong answer normalizePeriodBound exists to prevent.
+// Swapped dates must be an error; an empty result would be reported as
+// "no data".
 test("invertedPeriodError catches swapped bounds and names both", () => {
   const message = errorMessage(
     invertedPeriodError("2026-09-30T00:00:00.000Z", "2026-09-01T00:00:00.000Z"),
@@ -40,9 +38,8 @@ test("invertedPeriodError catches swapped bounds and names both", () => {
   assert.match(message!, /2026-09-01/);
 });
 
-// String comparison is only valid because both bounds are already
-// normalized to the exact shape toISOString() produces — the same
-// property every metrics query relies on when comparing ts in SQL.
+// Comparing as text only works because both bounds are already in the
+// toISOString() format, as every query relies on.
 test("invertedPeriodError compares by instant, not lexically by accident", () => {
   assert.equal(
     invertedPeriodError("2026-09-09T23:59:59.999Z", "2026-09-10T00:00:00.000Z"),
@@ -66,8 +63,8 @@ test("periodLengthInDays counts both ends", () => {
   );
 });
 
-// The case that made a cap necessary: unbounded, this produced 3.65M
-// day entries and a 250MB response.
+// Without a maximum, a period from year 1 would produce millions of
+// days.
 test("periodLengthInDays handles an all-time range", () => {
   assert.equal(
     periodLengthInDays("0001-01-01T00:00:00.000Z", "9999-12-31T23:59:59.999Z"),
@@ -75,10 +72,8 @@ test("periodLengthInDays handles an all-time range", () => {
   );
 });
 
-// `in` would match inherited Object.prototype keys, so these passed the
-// guard and produced an empty breakdown rather than the explanatory
-// error an undeclared prop is supposed to get — the "a mistake must
-// look like a mistake" rule, broken by one keyword.
+// With `in`, built-in object keys would count as declared props and give
+// an empty result instead of an error.
 test("hasDeclaredProp rejects inherited Object.prototype keys", () => {
   for (const inherited of ["constructor", "toString", "valueOf"]) {
     assert.equal(

@@ -16,22 +16,19 @@ import {
   localSpans,
 } from "./timezone.js";
 
-// "What happened" — keyed on event types and their props rather than on
-// pages, so unlike content.ts nothing here needs a page-view event to
-// exist. Pairs with mcp/events.ts.
+// Queries about events and their props (what happened), as opposed to
+// pages (content.ts). Used by mcp/events.ts.
 //
-// Every query takes an optional segment (lib/segment.ts) and pastes its
-// clause into the WHERE: "orders from visitors who came from Google" is
-// getPropertySum narrowed, not a second query.
+// Every query takes an optional segment (lib/segment.ts) and adds its
+// condition to the WHERE: "orders from visitors who came from Google" is
+// getPropertySum with a segment, not a separate query.
 
 export interface TopEvent {
   event: string;
   events: number;
 }
 
-// Every event type, not just page_view — get_top_pages already covers
-// page views specifically; this is the "what's actually happening"
-// breakdown across everything a deployment tracks.
+// Counts every event type, including page views.
 export function getTopEvents(
   db: Database.Database,
   period: Period,
@@ -56,11 +53,10 @@ export interface EventTrendDay {
   visitors: number;
 }
 
-// One event over time: "did signups grow this month". getTrafficByDay
-// covers everything together and a segment gives one number for the
-// whole period, so before this a single event had no trend at all.
-// Same local calendar days and zero-fill as getTrafficByDay, and the same
-// per-day counting: a session or visitor active on two days is in both.
+// One event per day: "did signups grow this month?". Uses the same local
+// days as getTrafficByDay, with days without events filled in as zero,
+// and counts the same way: a session or visitor active on two days
+// counts on both.
 export function getEventTrend(
   db: Database.Database,
   event: string,
@@ -98,12 +94,10 @@ export interface EntryEvent {
   sessions: number;
 }
 
-// Ranks by event TYPE, not page — for deployments where the url barely
-// varies (e.g. a single-page app that never updates the address bar)
-// and getEntryPages' path-based grouping would be meaningless. Not
-// gated behind a pageView-tagged event at all, unlike getEntryPages —
-// there's no "page" concept involved, just event names, so this works
-// for every deployment regardless of whether page views are tracked.
+// Ranks the first event of each session by event type, not by page. For
+// sites where the url hardly changes (such as a single-page app that
+// never updates the address bar), getEntryPages says little. Works for
+// any events, with or without page views.
 export function getEntryEvents(
   db: Database.Database,
   period: Period,
@@ -132,8 +126,7 @@ export interface ExitEvent {
   sessions: number;
 }
 
-// Same as getEntryEvents, but the event type with the latest ts per
-// session.
+// Same as getEntryEvents, but for the last event of each session.
 export function getExitEvents(
   db: Database.Database,
   period: Period,
@@ -157,12 +150,10 @@ export function getExitEvents(
   );
 }
 
-// Only lowercase letters, digits, and underscores — the schema
-// registry's checker enforces the same rule on every declared prop
-// name. Rejecting anything else keeps the json_extract path below
-// predictable, not a safety mechanism: it's passed as a bound
-// parameter, not concatenated into the SQL text, so it was never an
-// injection risk either way.
+// Only lowercase letters, digits and underscores, the same rule the
+// schema registry applies to prop names. This keeps the json_extract
+// path below simple. It isn't a security check: the path is passed as a
+// bound parameter, never pasted into the SQL.
 const PROPERTY_KEY_PATTERN = /^[a-z0-9_]+$/;
 
 export function isValidPropertyKey(key: string): boolean {
@@ -174,11 +165,9 @@ export interface PropertyBreakdown {
   events: number;
 }
 
-// Counts one event type's occurrences grouped by one of its own prop
-// values — the generic "break this event down by any dimension it
-// declares" tool, e.g. product_added_to_cart grouped by product_id.
-// Rows where the property is absent (json_extract returns NULL) are
-// excluded rather than grouped under a "null" bucket.
+// Counts one event type grouped by the value of one of its props, for
+// example product_added_to_cart grouped by product_id. Rows without the
+// prop are left out, not counted under "null".
 export function getEventsByProperty(
   db: Database.Database,
   event: string,
@@ -205,8 +194,8 @@ export function getEventsByProperty(
   return rank(rows, (row) => row.events, limit);
 }
 
-// The segment clause goes between the WHERE and the GROUP BY, so the
-// two statements end at their WHERE and share the GROUP BY.
+// The segment condition goes between WHERE and GROUP BY, so both
+// queries end at their WHERE and share this GROUP BY.
 const GROUP_BY_VALUE = `
    GROUP BY value`;
 
@@ -216,18 +205,15 @@ const SCALAR_BREAKDOWN_SQL = `SELECT json_extract(props, @jsonPath) AS value, CO
      AND ts BETWEEN @from AND @to
      AND json_extract(props, @jsonPath) IS NOT NULL`;
 
-// A list prop holds several values in one row, and json_extract hands
-// the whole array back as one opaque string — grouping by it would
-// group by the entire array, so ["a","b"] and ["b","a"] would be two
-// different "values". json_each expands the array into one row per
-// value instead, which is what makes a list queryable at all.
+// A list prop holds several values in one row. json_extract would
+// return the whole array as one string, so ["a","b"] and ["b","a"] would
+// be two different values. json_each turns the array into one row per
+// value instead.
 //
-// COUNT(DISTINCT events.id), not COUNT(*): it counts *events containing
-// a value*, so an event that repeats one tag doesn't inflate that tag's
-// number. The counts still sum to more than the number of events, since
-// each event contributes to several of them — get_events_by_property's
-// description says so, because a total that exceeds the event count
-// otherwise reads as a bug.
+// COUNT(DISTINCT events.id), not COUNT(*), counts events that contain a
+// value, so an event repeating a tag counts once for it. The counts can
+// add up to more than the number of events, since one event can have
+// several values; get_events_by_property's description says so.
 const LIST_BREAKDOWN_SQL = `SELECT je.value AS value, COUNT(DISTINCT events.id) AS events
    FROM events, json_each(json_extract(events.props, @jsonPath)) je
    WHERE event = @event
@@ -236,20 +222,16 @@ const LIST_BREAKDOWN_SQL = `SELECT je.value AS value, COUNT(DISTINCT events.id) 
 export interface PropertySum {
   sum: number;
   average: number;
-  // Values that went into the sum, i.e. what `average` is over. One per
-  // event for an ordinary prop; one per value for a list prop.
+  // How many values were summed, which is what `average` divides by. One
+  // per event for a normal prop, one per value for a list prop.
   values: number;
 }
 
-// SUM/AVG twin of getEventsByProperty — instead of grouping occurrences by a
-// prop's distinct values, aggregates the prop's own numeric value across
-// every occurrence in the period (e.g. total/average revenue from an
-// order_completed event's value prop). The caller (mcp/events.ts) is
-// responsible for checking the property is actually numeric before
-// calling this — SUM/AVG over a non-numeric prop would just silently
-// return 0, the same "should look like a mistake" concern get_events_by_property
-// avoids via registry validation. Rows where the property is absent are
-// excluded from sum, average, and count alike, same as getEventsByProperty.
+// Sum and average of a number prop over the period, for example the
+// total and average revenue from order_completed's value prop. The caller
+// (mcp/events.ts) must check that the prop is a number first: SUM over a
+// text prop returns 0 instead of an error. Rows without the prop are
+// left out of the sum, the average and the count.
 export function getPropertySum(
   db: Database.Database,
   event: string,
@@ -273,9 +255,8 @@ export function getPropertySum(
     value_count: number;
   };
 
-  // SUM/AVG return SQL NULL, not 0, when no row matched — an explicit
-  // zero reads clearly as "no matching events," same reasoning as
-  // getSessionSummary's zero-data case.
+  // SUM and AVG return NULL when no row matched. Return 0 instead, which
+  // clearly reads as "no matching events".
   return {
     sum: roundTo(row.sum ?? 0, 2),
     average: roundTo(row.average ?? 0, 2),
@@ -293,11 +274,10 @@ const SCALAR_SUM_SQL = `SELECT
      AND ts BETWEEN @from AND @to
      AND json_extract(props, @jsonPath) IS NOT NULL`;
 
-// Same json_each expansion as the breakdown above. The count is of
-// *values* summed, not of events — one event carrying three prices
-// contributes three. That keeps sum / values === average, which is the
-// property a reader will assume holds; the tool description says which
-// unit the count is in.
+// Uses json_each like the breakdown above. The count is of values, not
+// events: one event with three prices counts three. That keeps
+// sum / values === average, as a reader would expect; the tool
+// description says what the count means.
 const LIST_SUM_SQL = `SELECT
      SUM(je.value) AS sum,
      AVG(je.value) AS average,
@@ -306,14 +286,11 @@ const LIST_SUM_SQL = `SELECT
    WHERE event = @event
      AND ts BETWEEN @from AND @to`;
 
-// How many rows each event name holds, all time and unranked. Distinct
-// from getTopEvents, which is period-scoped and ranked: this answers
-// "how much history would a rename move", and a period-scoped answer
-// would understate it by however much predates the window.
+// How many rows each event name has, over all time. Unlike getTopEvents
+// it has no period, because it answers "how many rows would a rename
+// move?".
 //
-// Returned as a plain object because the cockpit looks names up in it
-// rather than iterating, and because every caller wants a total that is
-// zero for an event nothing has ever fired.
+// A plain object, because the cockpit looks names up in it.
 export function getStoredEventCounts(
   db: Database.Database,
 ): Record<string, number> {
@@ -326,9 +303,8 @@ export function getStoredEventCounts(
   return counts;
 }
 
-// One event name's count, all time — the single-name counterpart to
-// getStoredEventCounts, for callers (create/edit) that only ever need
-// to know about the one name they're about to touch.
+// The number of rows stored under one event name, over all time. Used
+// when creating or editing that event.
 export function countStored(db: Database.Database, event: string): number {
   const row = db
     .prepare(`SELECT COUNT(*) AS count FROM events WHERE event = ?`)

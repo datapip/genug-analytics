@@ -11,14 +11,14 @@ import { openDatabase } from "../db/index.js";
 import { createDailySalt } from "../lib/dailySalt.js";
 import { createDiskGuard } from "../lib/diskSpace.js";
 
-// A real database file rather than :memory:, so the connection is the
-// one the server opens, with its WAL and secure_delete settings.
+// A real database file, not :memory:, so the connection has the same
+// settings as the server's (WAL, secure_delete).
 const tmpDir = mkdtempSync(join(tmpdir(), "genug-events-"));
 const db = openDatabase(join(tmpDir, "test.db"));
 
 const app = express();
-// Lets a test choose its address through X-Forwarded-For. Without the
-// header req.ip is still the loopback address, as for every other test.
+// Lets a test set its address with X-Forwarded-For. Without the header,
+// req.ip is the loopback address.
 app.set("trust proxy", true);
 app.use(
   "/events",
@@ -28,7 +28,7 @@ app.use(
       "https://site.example",
       "https://www.site.example",
     ]),
-    // Three more sites, so the multi-site tests have somewhere to go.
+    // Three more sites, for the multi-site tests.
     siteHosts: new Set([
       "site.example",
       "other.example",
@@ -39,9 +39,9 @@ app.use(
     diskGuard: createDiskGuard(tmpDir),
   }),
 );
-// The same route with the country lookup on. The table is a stand-in
-// that records what it was asked, which is the point of the test using
-// it: it must only ever see the shortened address.
+// The same route with the country lookup on. The table is a fake that
+// records what it was asked, to check it only gets the shortened
+// address.
 const askedForCountry: string[] = [];
 app.use(
   "/with-country/events",
@@ -64,9 +64,8 @@ const { port } = server.address() as AddressInfo;
 
 after(() => {
   server.close();
-  // Close before removing: the handle keeps the file open, and Windows
-  // refuses to delete a directory that still has one (see the same
-  // ordering rule in integration/wiring.test.ts).
+  // Close before removing: Windows can't delete a folder with an open
+  // file (see integration/wiring.test.ts).
   db.close();
   rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -86,8 +85,7 @@ interface EventRow {
   props: string;
 }
 
-// The newest rejected_events row: what the cockpit and
-// get_top_rejected_events show for the request a test just sent.
+// The newest rejected_events row, for the request a test just sent.
 function lastRejection() {
   return db
     .prepare(
@@ -96,9 +94,8 @@ function lastRejection() {
     .get() as { reason: string; event: string | null; detail: string | null };
 }
 
-// A distinct User-Agent per test keeps each one on its own derived
-// visitor_id, since the hash is over IP + UA and every request here
-// comes from the same loopback address.
+// A different User-Agent per test gives each test its own visitor_id,
+// since every request comes from the same address.
 async function post(
   body: unknown,
   headers: Record<string, string> = {},
@@ -111,11 +108,9 @@ async function post(
   });
 }
 
-// The rows a test wrote. The User-Agent is not stored (only what it
-// classifies to is), so rows cannot be told apart by it any more; they
-// are told apart by when they were written instead. node:test runs the
-// tests in this file one after another, so everything past the id
-// watermark taken before a test began is that test's own.
+// The rows a test wrote. The User-Agent isn't stored, so rows are found
+// by id instead: the tests in this file run one after another, so every
+// row after the highest id seen before a test started is that test's.
 let lastIdBeforeTest = 0;
 beforeEach(() => {
   lastIdBeforeTest = (
@@ -132,10 +127,8 @@ function newRows(): EventRow[] {
 }
 
 test("stores what the User-Agent classifies to, never the header itself", async () => {
-  // A real browser string, not one of the "test-..." names the other
-  // tests use: those classify to "Other"/"other", which is also what an
-  // empty column reads back as, so they could not tell "classified"
-  // from "stored nothing".
+  // A real browser string: the "test-..." names other tests use become
+  // "Other"/"other", which an empty column would also read as.
   const ua =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   const res = await post(
@@ -151,15 +144,12 @@ test("stores what the User-Agent classifies to, never the header itself", async 
   const [row] = newRows();
   assert.equal(row!.device_type, "desktop");
   assert.equal(row!.browser, "Chrome");
-  // Under any column name: the header is read for the bot check and
-  // the hash, and goes no further than the request.
+  // In no column at all: the header is only used during the request.
   assert.ok(!JSON.stringify(row).includes(ua));
 });
 
-// The Accept-Language header is visitor-written text read back by
-// get_top_languages and usable as a segment condition, so only a
-// locale-shaped token is stored — the header was the one envelope field
-// with no cap at all.
+// The Accept-Language header is sent by the visitor's browser and shown
+// by get_top_languages, so only a language tag is stored.
 test("stores only a locale-shaped Accept-Language token", async () => {
   const body = {
     event: "page_view",
@@ -195,10 +185,9 @@ function rejectedCount(): number {
   ).n;
 }
 
-// The top-line invariant in AGENTS.md: identity and time are the
-// server's to assign. A client that sends them anyway must not be able
-// to choose its own visitor, session, or timestamp — otherwise anyone
-// can forge history or impersonate a visitor by POSTing a chosen id.
+// From AGENTS.md: visitor, session and time are set by the server. A
+// client that sends them must not be able to choose them, or anyone
+// could fake history or pretend to be another visitor.
 test("assigns visitor_id, session_id and ts itself, ignoring the client's", async () => {
   const ua = "test-assign";
   const res = await post(
@@ -227,9 +216,9 @@ test("assigns visitor_id, session_id and ts itself, ignoring the client's", asyn
   assert.equal(res.headers.get("set-cookie"), null);
 });
 
-// The hash must be over the truncated address, or the visitor_id is as
-// precise as the full IP the privacy notice says is never kept. A unit
-// test of truncateIp cannot see the route pass req.ip in untruncated.
+// The hash must use the shortened address, as the privacy notice says.
+// A unit test of truncateIp can't see whether the route passes the full
+// address instead.
 test("gives two addresses in one /24 the same consentless visitor_id", async () => {
   const body = {
     event: "page_view",
@@ -247,8 +236,8 @@ test("gives two addresses in one /24 the same consentless visitor_id", async () 
 });
 
 // One installation may collect for several sites. The same person on
-// two of them must be two visitors, or the hash tracks them across
-// sites; apex and www are one site, so they stay one visitor there.
+// two of them must be two visitors, so they aren't tracked across sites.
+// example.com and www.example.com are one site, so one visitor.
 test("keeps one consentless visitor and session per site, with www folded into the apex", async () => {
   const page = (url: string) => ({
     event: "page_view",
@@ -267,8 +256,8 @@ test("keeps one consentless visitor and session per site, with www folded into t
   assert.notEqual(other!.session_id, apex!.session_id);
 });
 
-// The url is the sender's to write. A host the deployment never listed
-// would become a "site" the host segment offers the agent.
+// The sender writes the url. A host the deployment didn't list would
+// otherwise become a "site" the agent is offered.
 test("refuses a url on a site ALLOWED_ORIGIN does not list", async () => {
   const before = rejectedCount();
   const res = await post(
@@ -290,9 +279,9 @@ test("refuses a url on a site ALLOWED_ORIGIN does not list", async () => {
   });
 });
 
-// A consent cookie is the collector's, not the site's, so it can follow
-// a visitor between two sites on one collector. The visitor stays one
-// (they consented to the cookie), but the session ends at the site.
+// The consent cookie belongs to the collector, not the site, so it can
+// follow a visitor between two sites on one collector. They stay one
+// visitor (they consented), but a new site starts a new session.
 test("starts a new session when a consented visitor moves to another site", async () => {
   const cookie = `genug_vid=${"b".repeat(64)}`;
   const page = (url: string) => ({
@@ -315,11 +304,10 @@ test("starts a new session when a consented visitor moves to another site", asyn
   assert.notEqual(shop!.session_id, blog!.session_id);
 });
 
-// The consentless → consentful transition freezes the hash this visitor
-// already had rather than minting a fresh UUID, which is what merges
-// their earlier same-day history for free. Swap it for randomUUID() and
-// every deployment silently orphans pre-consent events — with nothing
-// on the row to show it happened.
+// When a visitor gives consent, the cookie gets the hash they already
+// had, not a new random id, so their earlier events that day stay
+// theirs. With randomUUID() those events would quietly belong to
+// someone else.
 test("freezes the existing consentless hash into the cookie on consent", async () => {
   const ua = "test-merge";
   await post(
@@ -356,15 +344,14 @@ test("freezes the existing consentless hash into the cookie on consent", async (
   assert.match(setCookie!, /HttpOnly/i);
   assert.match(setCookie!, /Secure/i);
 
-  // Because the id doesn't change, the session carries through the
-  // transition uninterrupted rather than splitting in two.
+  // The id doesn't change, so the session continues instead of
+  // splitting in two.
   assert.equal(rows[1]!.session_id, rows[0]!.session_id);
 });
 
-// isIssuedVisitorId is unit-tested on its own; this pins that it is
-// actually applied to the incoming cookie. Without it, anyone can mint
-// unlimited distinct "visitors" by sending a different value per
-// request, at whatever string length they like.
+// Checks that the route applies isIssuedVisitorId to the cookie. Without
+// it, anyone could create unlimited fake visitors by sending a different
+// value with every request.
 test("ignores a cookie this server never issued", async () => {
   const ua = "test-forged";
   await post(
@@ -383,10 +370,9 @@ test("ignores a cookie this server never issued", async () => {
   assert.match(rows[0]!.visitor_id, HEX_64);
 });
 
-// Multi-cookie header parsing, with a well-formed forgery sitting
-// between two unrelated cookies — the shape a real site's Cookie header
-// actually has. A 64-hex value is the one case isIssuedVisitorId can't
-// distinguish from a real id, so this documents that it is accepted.
+// A Cookie header with several cookies, as real sites send. A made-up
+// value of 64 hex characters can't be told from a real id, so this
+// shows that it is accepted.
 test("reads genug_vid out of a header with other cookies around it", async () => {
   const ua = "test-cookie-parse";
   const forged = "a".repeat(64);
@@ -425,10 +411,9 @@ test("rejects props that don't match the event's schema, and logs why", async ()
     )
     .all() as { reason: string; event: string; detail: string }[];
   assert.equal(rejected.length, 1);
-  // Not just that page_title was named, but that the actual Zod message —
-  // read back verbatim by get_top_rejected_events — survives formatZodError
-  // intact. A change that swaps in a vaguer message, or truncates earlier
-  // than MAX_DETAIL_LENGTH, would still pass a bare /page_title/ match.
+  // Checks the whole Zod message, as get_top_rejected_events shows it,
+  // not only that page_title is named: a vaguer or shorter message would
+  // still match /page_title/.
   assert.equal(
     rejected[0]!.detail,
     "page_title: Invalid input: expected string, received number",
@@ -438,10 +423,9 @@ test("rejects props that don't match the event's schema, and logs why", async ()
 test("rejects an unregistered event type", async () => {
   const ua = "test-unknown";
   const res = await post(
-    // props is required by the envelope even for an event that declares
-    // none, so it has to be present here or this is rejected one step
-    // earlier as invalid_envelope instead. Mixed case, so the stored
-    // name and the error are both seen to use the lowercased form.
+    // props is required even for an event without props; without it,
+    // this would be rejected earlier as invalid_envelope. Mixed case, to
+    // check that the stored name and the error use lowercase.
     { event: "Produt_Added_To_Cart", url: "https://site.example/", props: {} },
     { "user-agent": ua },
   );
@@ -451,7 +435,7 @@ test("rejects an unregistered event type", async () => {
     error: "unknown event type: produt_added_to_cart",
   });
   assert.equal(newRows().length, 0);
-  // A literal name has no validation error to summarise, so no detail.
+  // An unknown name has no validation error, so there is no detail.
   assert.deepEqual(lastRejection(), {
     reason: "unknown_event_type",
     event: "produt_added_to_cart",
@@ -469,10 +453,9 @@ test("rejects an unregistered event type", async () => {
   );
 });
 
-// Every registered event and prop name is enforced lowercase, so a
-// stray-case call is a typo, not a second name — folding both to
-// lowercase before lookup means it still resolves instead of landing in
-// rejected_events over nothing but casing.
+// All event and prop names are lowercase, so different casing is a
+// typo. Names are lowercased before lookup, so the event is still
+// accepted.
 test("matches an event name and prop keys regardless of case", async () => {
   const ua = "test-case-fold";
   const res = await post(
@@ -490,9 +473,8 @@ test("matches an event name and prop keys regardless of case", async () => {
   assert.equal(rows[0]!.event, "page_view");
 });
 
-// Silently, with the same 204 a real event gets: a false positive must
-// not tell the client anything is wrong. The drop is visible to the
-// deployer through get_bot_activity instead.
+// With the same 204 as a real event, so a real visitor mistaken for a
+// bot sees no error. The owner sees the count in get_bot_activity.
 test("drops a bot's request with the same 204 a real event gets", async () => {
   const ua = "Googlebot/2.1 (+http://www.google.com/bot.html)";
   const res = await post(
@@ -508,12 +490,8 @@ test("drops a bot's request with the same 204 a real event gets", async () => {
   assert.equal(newRows().length, 0);
 });
 
-// Single known origin only — never reflected. A wildcard here would let
-// any site on the internet POST events into this deployment from a
-// visitor's browser.
-// /events is public, so the client script stripping these before it
-// sends is not enough on its own — anything POSTing directly arrives
-// with whatever query string it likes.
+// /events is public, so the client script removing these parts isn't
+// enough: a request sent directly can have any query string.
 test("strips non-campaign query parameters from url and referrer", async () => {
   const ua = "test-strip-params";
   await post(
@@ -532,9 +510,8 @@ test("strips non-campaign query parameters from url and referrer", async () => {
   assert.equal(row!.referrer, "https://site.example/inbox");
 });
 
-// Stripping re-serializes the query and percent-encodes what the sender
-// left bare, so a URL under the envelope's cap could come out three
-// times over it and be read back to the agent verbatim.
+// Cleaning the URL percent-encodes characters, so a URL under the length
+// limit can become three times longer. It must still be limited.
 test("rejects a url that stripping pushes over the length cap", async () => {
   const ua = "test-strip-growth";
   const url = "https://site.example/?utm_source=" + "(".repeat(2000) + "&x=1";
@@ -559,9 +536,8 @@ test("rejects a url that stripping pushes over the length cap", async () => {
   });
 });
 
-// The name is kept even though the envelope failed, so the rejection
-// says which integration is broken. It never passed the envelope's cap,
-// which exists because this row is what reaches disk, so it is cut here.
+// The event name is kept although the envelope failed, so the rejection
+// shows what is broken. It wasn't length-checked, so it is cut here.
 test("an invalid envelope stores the sent name, cut to the cap, or none", async () => {
   const ua = "test-invalid-envelope";
   const tooLong = await post(
@@ -586,6 +562,8 @@ test("an invalid envelope stores the sent name, cut to the cap, or none", async 
   assert.deepEqual(newRows(), []);
 });
 
+// Only listed origins get CORS headers, never any origin that asks:
+// otherwise any website could send events here from a visitor's browser.
 test("returns CORS headers only for configured origins", async () => {
   const allowed = await post(
     {
@@ -610,9 +588,8 @@ test("returns CORS headers only for configured origins", async () => {
   );
   assert.equal(other.headers.get("access-control-allow-origin"), null);
 
-  // A second configured origin — one site serving on both an apex and a
-  // `www.` host, or a staging host reporting to the same collector. The
-  // header echoes the origin that actually asked, not a fixed value.
+  // A second configured origin (such as www. or a staging host). The
+  // header names the origin that asked, not a fixed value.
   const second = await post(
     {
       event: "page_view",
@@ -628,10 +605,9 @@ test("returns CORS headers only for configured origins", async () => {
   assert.equal(second.headers.get("vary"), "Origin");
 });
 
-// The beacon sends application/json, which browsers don't safelist, so
-// every single event is preceded by a preflight. Without a Max-Age the
-// default cache is ~5 seconds and a visitor pays two round trips per
-// event rather than one.
+// Events are sent as JSON, so the browser sends a preflight first.
+// Without Max-Age it is only remembered for ~5 seconds, and most events
+// would need two requests.
 test("answers a preflight with the methods, headers and a cache lifetime", async () => {
   const res = await fetch(`http://localhost:${port}/events`, {
     method: "OPTIONS",
@@ -652,12 +628,10 @@ test("answers a preflight with the methods, headers and a cache lifetime", async
   assert.equal(res.headers.get("access-control-max-age"), "86400");
 });
 
-// Withdrawal has to remove the identifier, not just stop using it: the
-// cookie is httpOnly, so the tracked site's own JavaScript cannot
-// delete it and only this response can (Art. 7(3) — withdrawing must be
-// as easy as consenting). This is about an explicit consent: false —
-// see the next test for why omitting the field entirely must not do
-// the same thing.
+// Withdrawing consent must delete the cookie, not just stop using it.
+// It is httpOnly, so only this response can delete it (GDPR Art. 7(3):
+// withdrawing must be as easy as consenting). This is for an explicit
+// consent: false; see the next test for a missing consent field.
 test("clears the visitor cookie when consent is explicitly withdrawn", async () => {
   const ua = "test-withdraw";
   const consented = await post(
@@ -688,20 +662,16 @@ test("clears the visitor cookie when consent is explicitly withdrawn", async () 
   assert.match(setCookie, /genug_vid=;/);
   assert.match(setCookie, /Expires=Thu, 01 Jan 1970/i);
 
-  // Clearing the cookie is half of it: the row written with the
-  // withdrawal is stored as consentless. Its visitor_id may still equal
-  // the cookie's, since that cookie froze the same day's consentless
-  // hash (see "freezes the existing consentless hash" above).
+  // The row sent with the withdrawal is stored without consent. Its
+  // visitor_id may still equal the cookie's, since the cookie holds that
+  // day's hash (see "freezes the existing consentless hash" above).
   assert.equal(newRows()[1]!.consent_mode, "consentless");
 });
 
-// The race this exists to close: a returning, already-consented
-// visitor's automatic page-view can fire before their site's consent
-// manager confirms consent on that particular request — sending no
-// consent field at all, while still carrying the visitor's real
-// cookie. That must not be treated as a rejection: consent omitted is
-// a real third state, distinct from an explicit false, and a cookie
-// already on the request wins regardless.
+// A returning visitor who already consented may send the automatic page
+// view before the consent banner answers, so without a consent field but
+// with their cookie. That is not "no": a missing consent field is
+// different from false, and the existing cookie is used.
 test("keeps recognising a returning visitor when consent hasn't been answered yet", async () => {
   const ua = "test-unanswered";
   const consented = await post(
@@ -745,8 +715,8 @@ test("keeps recognising a returning visitor when consent hasn't been answered ye
     "neither cleared nor extended: only an explicit yes may set it again",
   );
 
-  // The same visitor confirming consent again is what keeps the cookie
-  // alive: a consent manager replaying stored consent on each load.
+  // Confirming consent again extends the cookie, as when a consent
+  // banner repeats the stored consent on every page load.
   const confirmed = await post(
     {
       event: "page_view",
@@ -763,9 +733,8 @@ test("keeps recognising a returning visitor when consent hasn't been answered ye
   assert.doesNotMatch(setCookie, /Expires=Thu, 01 Jan 1970/i);
 });
 
-// A visitor who never consented sends no cookie, so there is nothing to
-// clear — and a Set-Cookie header on every consentless event would be
-// pure noise on the overwhelmingly common path.
+// A visitor who never consented has no cookie, so nothing is cleared
+// and no Set-Cookie header is sent.
 test("sends no cookie header when the request carried none", async () => {
   const ua = "test-no-cookie";
   const res = await post(
@@ -782,10 +751,9 @@ test("sends no cookie header when the request carried none", async () => {
 
 // --- roles instead of names -----------------------------------------
 
-// The client sends a role for the three events it fires itself, and the
-// server decides the name. That is what lets a deployment rename one of
-// them without a cached copy of client.js going on sending a name the
-// registry no longer has.
+// The client sends a role for the three events it sends by itself, and
+// the server decides the name. So a deployment can rename them without an
+// old cached client.js sending a name that no longer exists.
 test("resolves a role to the event this deployment registers", async () => {
   const ua = "test-role-pageview";
   const res = await post(
@@ -840,8 +808,8 @@ test("resolves the outbound-click and file-download roles too", async () => {
   );
 });
 
-// The backstop for a caller that isn't the client script: the clicked
-// link gets the same allowlist as the page URL.
+// For requests not from the client script: the clicked link is cleaned
+// like the page URL.
 test("strips the clicked link's query and fragment on the two link roles", async () => {
   const ua = "test-role-link-urls";
   await post(
@@ -880,9 +848,9 @@ test("strips the clicked link's query and fragment on the two link roles", async
   assert.equal(download!.file_url, "https://files.example/a.pdf");
 });
 
-// Keyed on the event, not on how it was sent: a hand-written track()
-// naming the event gets the same filter, so the prop's description,
-// which the agent reads as fact, holds for every stored row.
+// Based on the event, not on how it was sent: a track() call for the same
+// event is cleaned too, so the prop's description is true for every
+// row.
 test("strips the link URL when the link event is sent by name too", async () => {
   await post(
     {
@@ -904,8 +872,8 @@ test("strips the link URL when the link event is sent by name too", async () => 
   );
 });
 
-// Props are still checked against the resolved event's own schema —
-// resolving a role is not a way past validation.
+// Props are still checked against the event's schema; sending a role
+// doesn't skip validation.
 test("a role's props are validated like any other event's", async () => {
   const ua = "test-role-props";
   const res = await post(
@@ -928,9 +896,8 @@ test("a role's props are validated like any other event's", async () => {
   );
 });
 
-// All three fail the envelope itself. A role that is valid but has no
-// event tagged for it is a different rejection, tested in
-// integration/wiring.test.ts, since every built-in role resolves here.
+// All three fail the envelope check. A valid role without an event is a
+// different rejection, tested in integration/wiring.test.ts.
 test("rejects a role that isn't one, and a body with both or neither of role and name", async () => {
   const ua = "test-role-bad";
   for (const body of [
@@ -950,9 +917,9 @@ test("rejects a role that isn't one, and a body with both or neither of role and
   assert.deepEqual(newRows(), []);
 });
 
-// An opt-out is the one request that is not an event. It exists so the
-// identifier can leave the device — the cookie is httpOnly, so nothing
-// on the tracked site can delete it — and it must never become a row.
+// An opt-out isn't an event. It exists so the cookie can be deleted
+// (it is httpOnly, so the site can't delete it), and it is never
+// stored.
 test("an opt-out clears the visitor cookie and stores nothing", async () => {
   const ua = "test-optout";
   const before = rejectedCount();
@@ -980,8 +947,8 @@ test("an opt-out from a visitor who had no cookie is still accepted", async () =
   assert.equal(res.headers.get("set-cookie"), null, "nothing to clear");
 });
 
-// The short-circuit runs before the envelope is parsed, so it has to be
-// impossible to smuggle an event past it by adding the flag.
+// The opt-out check runs before the envelope check, so adding the flag
+// to an event must not let it skip validation.
 test("an event body carrying optOut is recorded as an event, not an opt-out", async () => {
   const ua = "test-optout-smuggle";
   const res = await post(
@@ -994,10 +961,9 @@ test("an event body carrying optOut is recorded as an event, not an opt-out", as
     { "user-agent": ua },
   );
 
-  // The envelope ignores keys it does not know, so this is recorded as
-  // the ordinary event it is. What matters is the direction: an event
-  // cannot smuggle an opt-out past the check and clear a cookie, which
-  // is what the strict schema on the short-circuit buys.
+  // The envelope ignores unknown keys, so this is stored as a normal
+  // event. What matters: an event can't pass as an opt-out and clear a
+  // cookie, because the opt-out schema is strict.
   assert.equal(res.status, 204);
   assert.equal(newRows().length, 1);
   assert.equal(

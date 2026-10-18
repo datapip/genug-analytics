@@ -9,8 +9,8 @@ export function requireEnv(
   return value;
 }
 
-// Fails fast on a bad value rather than silently listening on NaN/an
-// out-of-range port — same reasoning as retention.ts's parseRetentionDays.
+// A bad value stops the server at startup instead of listening on an
+// invalid port.
 export function parsePort(value: string | undefined): number {
   if (value === undefined) return 3000;
   const port = Number(value);
@@ -22,16 +22,15 @@ export function parsePort(value: string | undefined): number {
   return port;
 }
 
-// How many reverse proxies sit in front of this server. X-Forwarded-For
-// is just text the sender writes, so trusting it without a proxy in
-// front lets anyone forge a different req.ip per request — and req.ip is
-// what every rate limiter counts, the cockpit's password lockout
-// included. Defaults to 0 (believe nobody) so the exposed-port case is
-// safe by default and proxying is the thing you opt into.
+// How many reverse proxies sit in front of this server. The
+// X-Forwarded-For header is just text the sender writes, so trusting it
+// without a proxy would let anyone fake a different req.ip on every
+// request and get around every rate limit, including the cockpit's
+// password lockout. The default, 0, trusts nobody, which is safe when the
+// port is reachable directly.
 export function parseTrustProxy(value: string | undefined): number {
-  // Explicitly, not by relying on Number("") being 0: a compose file
-  // with a bare `TRUST_PROXY=` means unset, and the coincidence that
-  // lands on the right answer is not worth depending on.
+  // An empty value (`TRUST_PROXY=` in a compose file) means unset. Checked
+  // explicitly rather than relying on Number("") being 0.
   if (value === undefined || value === "") return 0;
   const hops = Number(value);
   if (!Number.isInteger(hops) || hops < 0 || hops > 10) {
@@ -42,12 +41,11 @@ export function parseTrustProxy(value: string | undefined): number {
   return hops;
 }
 
-// A deployment whose credentials are public — the product page's demo
-// instance, where anyone can read the MCP key off the page — needs
-// every write closed, or the first visitor with an opinion erases the
-// demo. Off unless set exactly to "true"; any other value throws, the
-// same as LOCAL_BACKUPS, because a misspelt "ture" that quietly meant
-// "no" would leave the delete tool live on a public key.
+// For a deployment whose MCP key is public, like the demo on the product
+// website: every write is turned off, so no visitor can delete the
+// demo's data. Unset or "false" is off, "true" is on, and anything else
+// stops the server: a typo like "ture" that quietly meant "off" would
+// leave the delete tool open on a public key.
 export function parseReadOnly(value: string | undefined): boolean {
   if (value === undefined || value === "") return false;
   if (value === "true") return true;
@@ -55,12 +53,11 @@ export function parseReadOnly(value: string | undefined): boolean {
   throw new Error(`READ_ONLY must be "true" or "false", got: ${value}`);
 }
 
-// With no lockout on /mcp (lib/mcpAuth.ts), the key's length is what
-// makes guessing it hopeless. Length is not randomness, but it catches
-// the "password" and "dev-key" kind. A warning, not a refusal: the
-// owner decided an update must not stop a running deployment over a
-// key that has worked so far. A READ_ONLY key is published on purpose,
-// so there is nothing to guess and no warning.
+// /mcp has no lockout (lib/mcpAuth.ts), so a long key is what makes
+// guessing it impossible. Length doesn't prove randomness, but it catches
+// keys like "password" or "dev-key". Only a warning: an update must not
+// stop a running deployment over a key that has worked so far. A
+// READ_ONLY key is public on purpose, so there is no warning for it.
 export const MIN_MCP_API_KEY_LENGTH = 32;
 
 export function shortMcpApiKeyWarning(
@@ -74,13 +71,12 @@ export function shortMcpApiKeyWarning(
   );
 }
 
-// The zone every day and hour boundary is cut in (lib/timezone.ts).
-// Required, with no default: a missing zone would quietly mean UTC,
-// which is the very plausible-while-wrong bucketing this setting exists
-// to end. Only named IANA zones pass. Intl also accepts a fixed offset
-// like "+01:00", but that is wrong for half the year wherever clocks
-// change — so it is refused here rather than obeyed. Returns the
-// canonical spelling, since Intl also takes "europe/berlin".
+// The time zone that decides where days and hours start
+// (lib/timezone.ts). Required, with no default: defaulting to UTC would
+// quietly put events on the wrong day. Only named zones such as
+// "Europe/Berlin" are accepted. A fixed offset like "+01:00" is refused,
+// because it is wrong for half the year wherever clocks change. Returns
+// the standard spelling, since "europe/berlin" is accepted too.
 export function parseTimezone(value: string): string {
   let canonical: string;
   try {
@@ -105,10 +101,10 @@ export function parseTimezone(value: string): string {
 export const TIMEZONE_LIST_URL =
   "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
 
-// The likely mistake is a city without its region ("Berlin", "new
-// york"), so match on the city part, ignoring case, spaces and
-// underscores. Only a single match is offered: a guess among several
-// could send someone to the wrong zone without a second look.
+// The usual mistake is a city without its region ("Berlin", "new york"),
+// so match the city part, ignoring case, spaces and underscores. A
+// suggestion is only made when exactly one zone matches, so it can't
+// point someone to the wrong one.
 function suggestTimezone(
   value: string,
   zones: readonly string[],
@@ -122,12 +118,10 @@ function suggestTimezone(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-// One outbound GET a day to GitHub's tags API (lib/updateCheck.ts), to
-// tell the cockpit a newer version exists. Default on, like
-// LOCAL_BACKUPS — for a deployment with no outbound access at all this
-// just fails silently and the pill never shows, but an explicit off
-// switch belongs beside every other behaviour toggle here rather than
-// making someone firewall it to opt out.
+// One request a day to GitHub's tags API (lib/updateCheck.ts), so the
+// cockpit can say when a newer version exists. On by default. Without
+// internet access it just fails quietly, but this switch lets an owner
+// turn it off without a firewall rule.
 export function parseUpdateCheckEnabled(value: string | undefined): boolean {
   if (value === undefined || value === "") return true;
   if (value === "true") return true;
@@ -135,10 +129,10 @@ export function parseUpdateCheckEnabled(value: string | undefined): boolean {
   throw new Error(`UPDATE_CHECK must be "true" or "false", got: ${value}`);
 }
 
-// Off unless set to "true": turning it on stores something a
-// deployment's privacy notice has to mention (docs/privacy.md), so an
-// upgrade must never start it unasked. A misspelling throws, like
-// READ_ONLY, rather than quietly meaning either answer.
+// Off unless set to "true": it stores something the site's privacy
+// notice has to mention (docs/privacy.md), so an update must never turn
+// it on by itself. A misspelled value stops the server, as for
+// READ_ONLY.
 export function parseCountryLookup(value: string | undefined): boolean {
   if (value === undefined || value === "") return false;
   if (value === "true") return true;

@@ -90,8 +90,8 @@ test("writes a file the loader accepts", () => {
   assert.equal(file.plan_example, "pro");
 });
 
-// The point of the whole design: the browser sends a type and two
-// booleans, and the rule string is composed here.
+// The browser sends a type and two checkboxes; the rule string is built
+// here.
 test("composes each rule string from the type and the checkboxes", () => {
   const dir = directory();
   const result = createEventFile(
@@ -184,8 +184,8 @@ test("refuses a name that could not be a file", () => {
   }
 });
 
-// Valid as filenames, but every plain object already has them, so the
-// loader would never register the event the form just wrote.
+// Valid file names, but every JavaScript object already has them, so the
+// event would never be registered.
 test("refuses the names every object already has", () => {
   for (const name of ["__proto__", "constructor", "prototype"]) {
     const dir = directory();
@@ -237,8 +237,8 @@ test("refuses an example that is not the type the prop declares", () => {
   assert.deepEqual(readdirSync(dir), [], "nothing should be written");
 });
 
-// checkEvent owns rules this function does not know about. It runs
-// before the write, so a rejected creation costs nothing.
+// checkEvent has rules this function doesn't know. It runs before
+// writing, so a rejected event leaves nothing behind.
 test("refuses what the checker rejects, before anything reaches disk", () => {
   const dir = directory();
   const result = createEventFile(

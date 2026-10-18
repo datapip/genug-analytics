@@ -45,8 +45,8 @@ function event(overrides: {
 
 test("getTopLanguages ranks by sessions, not raw event count", () => {
   const db = setupDb();
-  // One chatty en-US session firing 5 events, against two quieter de-DE
-  // sessions — the larger audience should win despite fewer events.
+  // One busy en-US session with 5 events against two quieter de-DE
+  // sessions: the larger audience must rank first.
   for (let i = 0; i < 5; i++) {
     insertEvent(
       db,
@@ -80,15 +80,9 @@ test("getTopLanguages ranks by sessions, not raw event count", () => {
   ]);
 });
 
-// A request with no Accept-Language header at all is genuinely unknown,
-// not some "unknown" locale — same explicit-null convention as
-// getTopReferrers' direct-traffic bucket.
-// Found by pointing the tool at real traffic: the locale is stored per
-// event, not per session, so counting distinct sessions per language
-// put one session in two buckets. The total then exceeded the number of
-// sessions that existed, and shares taken off it came to more than
-// 100% — while the tool's own description promises it is the same unit
-// as get_device_breakdown.
+// The language is stored per event, so one session can have two.
+// Counting distinct sessions per language would count it twice, and the
+// shares would add up to more than 100%.
 test("getTopLanguages counts a session once, under the locale it began with", () => {
   const db = setupDb();
   for (const [ts, language] of [
@@ -115,6 +109,7 @@ test("getTopLanguages counts a session once, under the locale it began with", ()
   assert.equal(ranked.total, 2, "two sessions exist, so the total is two");
 });
 
+// No Accept-Language header means the language is unknown: null.
 test("getTopLanguages reports a missing Accept-Language as null", () => {
   const db = setupDb();
   insertEvent(db, event({ visitorId: "v1", ts: "2026-01-01T10:00:00.000Z" }));
@@ -192,8 +187,8 @@ test("getConsentBreakdown counts events and visitors per mode", () => {
   });
 });
 
-// An event that says nothing about consent is consentless, matching the
-// envelope's own `consent: false` default — there is no third state.
+// A stored row without a consent mode counts as consentless (the
+// column's default).
 test("getConsentBreakdown counts an unspecified consent mode as consentless", () => {
   const db = setupDb();
   insertEvent(db, event({ visitorId: "v1", ts: "2026-01-01T10:00:00.000Z" }));
@@ -267,8 +262,8 @@ test("getNewVsReturningVisitors returns zeroes for a period with no events", () 
   assert.deepEqual(result, { newVisitors: 0, returningVisitors: 0 });
 });
 
-// Both tools used to take no segment, and the SDK drops an unknown
-// argument, so a segmented question got whole-site numbers back.
+// Both tools take a segment. (The SDK ignores unknown arguments, so a
+// tool without one would quietly return whole-site numbers.)
 test("getConsentBreakdown and getNewVsReturningVisitors apply a segment", () => {
   const db = setupDb();
   // m1: mobile, consentful, visited before the period — returning.
@@ -280,8 +275,8 @@ test("getConsentBreakdown and getNewVsReturningVisitors apply a segment", () => 
     ["d1", "desktop", "consentful", true],
   ] as const) {
     if (earlier) {
-      // On desktop even for m1: the segment picks who is counted, not
-      // which earlier visits make them returning.
+      // m1's earlier visit was on desktop: the segment decides who is
+      // counted, not which earlier visits make them returning.
       insertEvent(db, {
         ...event({ visitorId: visitor, ts: "2025-12-01T10:00:00.000Z" }),
         sessionId: `old-${visitor}`,
@@ -370,9 +365,8 @@ test("getBrowserBreakdown groups by browser + device type, counted in sessions",
 
 test("getDeviceTypeBreakdown totals a device type across browsers", () => {
   const db = setupDb();
-  // Three browsers, two of them on desktop. Crossed, desktop is two
-  // separate rows; as a device type it has to be one row of 3 — the
-  // whole reason the cockpit asks for this shape.
+  // Three browsers, two of them on desktop. By device type, desktop must
+  // be one row of 3, not split by browser.
   const agents = [
     CHROME_WINDOWS,
     CHROME_WINDOWS,
@@ -400,8 +394,8 @@ test("getDeviceTypeBreakdown totals a device type across browsers", () => {
 
 test("getDeviceTypeBreakdown counts a busy session once, not once per event", () => {
   const db = setupDb();
-  // The inflation this exists to avoid: one desktop visitor reading ten
-  // pages must not outweigh three separate phone visits.
+  // One desktop visitor reading ten pages must not outweigh three phone
+  // visits.
   for (let i = 0; i < 10; i++) {
     insertEvent(db, {
       event: "page_view",
@@ -433,8 +427,7 @@ test("getDeviceTypeBreakdown counts a busy session once, not once per event", ()
 
 test("getDeviceTypeBreakdown reports an unrecognised device as its own type", () => {
   const db = setupDb();
-  // Not silently folded into desktop: a smart TV is a real answer, and
-  // a wrong one here would look exactly like a right one.
+  // Not counted as desktop: a smart TV is "other".
   const agents = [CHROME_WINDOWS, CHROME_WINDOWS, ROKU_TV];
   agents.forEach((userAgent, i) => {
     insertEvent(db, {
@@ -454,9 +447,8 @@ test("getDeviceTypeBreakdown reports an unrecognised device as its own type", ()
   ]);
 });
 
-// Sessions, not visitors: a consentless visitor_id rotates daily, so
-// counted in visitors one German reader over a month was thirty
-// "visitors" while the device breakdown next to it counted sessions.
+// Sessions, not visitors: without consent the visitor_id changes daily,
+// so over a month one reader would count up to thirty times.
 test("getTopLanguages counts sessions, so a visitor whose id rotated still counts one session per visit", () => {
   const db = setupDb();
   insertEvent(
@@ -492,8 +484,8 @@ test("getTopLanguages counts sessions, so a visitor whose id rotated still count
   ]);
 });
 
-// The half of "did they come back" that is answerable: consentful ids
-// persist, consentless ones rotate daily and can never be seen again.
+// Only visitors with consent can be recognised later; without consent
+// the id changes daily.
 test("getCohortReturn counts who came back, and how many could have", () => {
   const db = setupDb();
   const cohort = {
@@ -581,10 +573,10 @@ test("getCohortReturn is all zeros for an empty cohort", () => {
   );
 });
 
-// Consent freezes the consentless hash into the cookie (routes/events.ts),
-// so a visitor consentless in the cohort who consents on a later visit
-// keeps that day's id and can return without ever counting as
-// consentful in the cohort — consentfulVisitors is a floor, not a cap.
+// Giving consent keeps the day's hash as the cookie id
+// (routes/events.ts), so a visitor without consent in the cohort who
+// consents later keeps the same id and can return. So consentfulVisitors
+// is a minimum, not a maximum.
 test("getCohortReturn can see a consentless cohort visitor return once they consented later", () => {
   const db = setupDb();
   insertEvent(
@@ -619,9 +611,8 @@ test("getCohortReturn can see a consentless cohort visitor return once they cons
   );
 });
 
-// "Not looked up" (null) and "looked up, no match" (ZZ) are different
-// answers and must stay two rows; a session lands in one row only, by
-// its first event, however its later events were looked up.
+// "Not looked up" (null) and "looked up, not found" (ZZ) are different
+// and stay apart. A session counts once, under its first event.
 test("getTopCountries counts sessions by their first event, keeping not-looked-up and ZZ apart", () => {
   const db = setupDb();
   insertEvent(
@@ -653,8 +644,8 @@ test("getTopCountries counts sessions by their first event, keeping not-looked-u
   });
 });
 
-// As a row, the not-looked-up sessions could fall below the limit and
-// vanish while still inside total, and no share read off it is right.
+// Sessions without a lookup are counted separately, not as a row, which
+// could be cut off by the limit while still counting in the total.
 test("getTopCountries keeps the not-looked-up count whatever the limit", () => {
   const db = setupDb();
   for (let i = 0; i < 3; i++) {
