@@ -89,7 +89,7 @@ test("reports zero when nothing was ever stored under the name", () => {
 });
 
 // The whole point of this function's design: it does not know or care
-// whether an event carries a role tag. routes/cockpit.ts is what checks
+// whether an event carries a role tag. routes/cockpit/events.ts is what checks
 // the consequence, via the real registry loader, and calls restore()
 // if that loader refuses the result — see the wiring tests for the
 // end-to-end version of that (a real collision, a real 409, a real

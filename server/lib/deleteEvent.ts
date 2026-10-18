@@ -31,7 +31,7 @@ import { writeFileAtomic } from "./atomicWrite.js";
 // something this directory-scoped function can predict on its own
 // without reimplementing buildRegistry() here. So it does not try:
 // it deletes and hands the caller a `restore` closure, and
-// routes/cockpit.ts's DELETE handler is what actually asks
+// The DELETE handler in routes/cockpit/events.ts is what actually asks
 // reloadEvents() and calls `restore()` if the real loader refuses the
 // result — the same "write it, let the checker decide" principle
 // lib/editEvent.ts and lib/createEvent.ts use before their own

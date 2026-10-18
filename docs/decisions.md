@@ -61,7 +61,10 @@ hop between them, no separate deploys, one port.
   /client           - mini JS snippet, sends events to the server
   /schema-registry  - shared Zod schemas for envelope + event definitions
 /server              - the one app: Express + MCP, single process
-  index.ts           - starts Express, mounts routes + MCP transport,
+  index.ts           - startup: reads every setting once (lib/config.ts),
+                       opens the database, calls createApp, schedules
+                       the background jobs, listens
+  app.ts             - createApp: mounts routes + MCP transport,
                        serves the built client script at /client.js
                        and /apps/cockpit's static files at /cockpit
   routes/events.ts   - POST /events ("collector" logic)
@@ -83,10 +86,12 @@ hop between them, no separate deploys, one port.
                        result helpers, and registry/traffic/content/
                        events/audience/diagnostics/admin the tools
   db/                - SQLite connection + raw SQL queries
-  routes/cockpit.ts  - small read-only JSON route for the cockpit below
+  routes/cockpit.ts  - the cockpit's JSON router; its routes are in
+                       routes/cockpit/ (data, events, context, danger,
+                       and the guards they share)
   integration/       - tests that spawn the compiled dist/index.js as a
                        real subprocess, for the startup/shutdown wiring
-                       index.ts does that has no function to unit-test
+                       index.ts does around createApp
 /apps
   /cockpit           - static page, no framework/build step: previews
                        collected data + the schema registry, via
@@ -5452,3 +5457,43 @@ Anyone can post to `/events`, so a verdict can be manufactured. The
 description says so and points the agent at `get_top_referrers` and
 `get_top_pages` on both periods. A built-in concentration check is the
 next step if that turns out not to be enough.
+
+
+### Settings read once, routers built by functions
+
+The review that asked for this found the server hard going for a new
+developer for one reason above the others: importing a route module did
+things. `routes/events.ts` read `ALLOWED_ORIGIN` and `TIMEZONE`, opened
+the database through `db/index.ts` and started the daily salt's timer,
+so its test had to set `process.env` and then load the module with a
+dynamic `import()`. `routes/cockpit.ts` and `routes/mcp.ts` each parsed
+`READ_ONLY` and `TIMEZONE` for themselves.
+
+**Now `index.ts` is the only place that reads a setting.** `loadConfig`
+(`lib/config.ts`) reads and checks every one, with the same messages as
+before. `index.ts` opens the database with `openDatabase(dbPath)` and
+hands both to `createApp` (`app.ts`), which builds the routers with
+`createEventsRouter`, `createMcpRouter` and `createCockpitRouter`. A test
+builds the router it needs with ordinary imports.
+
+**Where the line is.** The database is passed in, because only the four
+route and startup modules used the shared one; everything in `lib/` and
+`mcp/` already took it as a parameter. Left as module values, on
+purpose: `EVENTS_PATH` and the registry, whose loaded events are live
+bindings that `reloadEvents()` replaces (handing them to a factory
+would freeze them at startup, and no test would fail); `CONTEXT_PATH`;
+the kept URL parts; the version; and the cockpit password limiter and
+session-revocation state in `lib/cockpitAuth.ts`, which the sign-in and
+the danger zone share. Moving only half of that state would quietly
+break "five wrong passwords sign every session out".
+
+**`routes/cockpit.ts` is split by concern** into `routes/cockpit/`:
+data, events, context, danger, and the guards they share. They register
+on the one router `routes/cockpit.ts` creates, rather than each making
+its own, so the no-store header and the read-only refusal stay at the
+top of that router and cannot be skipped by mounting a piece elsewhere.
+
+**One behaviour change.** `createApp` builds the MCP tool manifest at
+startup. `requireSegment` and the annotation check used to run only on
+the first `/mcp` request or cockpit load, so "the server refuses to
+start" was true only of the tests. It is now true of the server.

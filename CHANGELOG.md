@@ -54,6 +54,11 @@ how a version is cut.
   `delete_visitor_data` is marked as destructive and `add_history_note`
   as writing, so a client can ask you before calling them. Every other
   tool is marked read-only.
+- **If you added your own MCP tool**, a mistake in it now stops the
+  server at startup, with the same message as before. Before, it
+  surfaced on the first `/mcp` request or cockpit load. Settings are
+  now read in one place, `server/lib/config.ts`, and the server is
+  assembled in `server/app.ts`.
 - **The cockpit shows when the last event arrived**, beside the time
   it was updated, and says what the chosen period counts ("7 full days
   before today: …") instead of only in a tooltip. It remembers the

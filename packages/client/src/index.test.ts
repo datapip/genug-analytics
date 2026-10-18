@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
 // Reads the *compiled* output, not src/index.ts — this is the exact
-// artifact server/index.ts serves at /client.js, so the test exercises
+// artifact server/app.ts serves at /client.js, so the test exercises
 // what actually ships, not a separate transpilation of it.
 const clientScriptSource = readFileSync(
   fileURLToPath(new URL("./index.js", import.meta.url)),

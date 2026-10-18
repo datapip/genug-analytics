@@ -14,8 +14,7 @@ import {
   MAX_EVENT_NAME_LENGTH,
   MAX_URL_LENGTH,
 } from "@genug/schema-registry";
-import { dirname, join } from "node:path";
-import { db, dbPath } from "../db/index.js";
+import type Database from "better-sqlite3";
 import { insertEvent, findLastEventForVisitor } from "../db/events.js";
 import {
   insertRejectedEvent,
@@ -24,14 +23,13 @@ import {
 import { resolveVisitorIdentity } from "../lib/identity.js";
 import { truncateIp } from "../lib/ip.js";
 import { resolveSessionId } from "../lib/session.js";
-import { parseTimezone, requireEnv } from "../lib/env.js";
 import { isBotUserAgent } from "../lib/bots.js";
 import { classifyUserAgent } from "../lib/userAgent.js";
 import { stripUnknownParams } from "../lib/url.js";
 import { recordBotHit, botActivityCounter } from "../lib/botActivity.js";
 import { parseCookies } from "../lib/cookies.js";
-import { createDailySalt, startRotation } from "../lib/dailySalt.js";
-import { createDiskGuard } from "../lib/diskSpace.js";
+import type { DailySalt } from "../lib/dailySalt.js";
+import type { DiskGuard } from "../lib/diskSpace.js";
 
 const VISITOR_ID_COOKIE = "genug_vid";
 // 13 months — the ceiling CNIL treats as the maximum life for an
@@ -48,40 +46,6 @@ const VISITOR_ID_COOKIE_OPTIONS = {
   secure: true,
   sameSite: "lax",
 } as const;
-
-// A comma-separated list, because one site legitimately has more than
-// one origin: an apex plus a `www.` host that doesn't redirect, or a
-// staging host reporting to the same collector. Every entry still has to
-// match exactly — this widens the set of known origins, it never relaxes
-// into a wildcard or an echo-anything policy.
-//
-// Fail-fast on an empty result, same spirit as parsePort: requireEnv only
-// proves the variable is set, not that it holds an origin. It matters
-// more here than elsewhere because an unlisted origin fails inside the
-// browser, which leaves no trace in this server's logs at all.
-//
-// requireEnv always returns a plain `string` (never `string | undefined`),
-// so — unlike a local `if (!x) throw` guard — this is safe to read from
-// `cors`, a hoisted function declared below.
-const allowedOrigins = new Set(
-  requireEnv("ALLOWED_ORIGIN")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0),
-);
-if (allowedOrigins.size === 0) {
-  throw new Error(
-    "ALLOWED_ORIGIN must name at least one origin (comma-separated for more than one)",
-  );
-}
-const dailySalt = createDailySalt(
-  join(dirname(dbPath), "daily-salt.json"),
-  parseTimezone(requireEnv("TIMEZONE")),
-);
-startRotation(dailySalt);
-
-// Stops storing a little before the volume is full (see lib/diskSpace.ts).
-const diskGuard = createDiskGuard(dirname(dbPath));
 
 // How each role is written in an event file, so a deployment reading the
 // rejection knows exactly which key to add. Kept here rather than
@@ -148,7 +112,12 @@ function parsePrimaryLanguage(
 // than a fixed configured value, because with more than one allowed
 // origin the header has to name the one actually asking — which is also
 // what makes `Vary: Origin` below load-bearing rather than tidiness.
-function cors(req: Request, res: Response, next: NextFunction): void {
+function cors(
+  allowedOrigins: ReadonlySet<string>,
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   const origin = req.headers.origin;
   if (origin !== undefined && allowedOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -175,9 +144,15 @@ function cors(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-export const eventsRouter: Router = Router();
-
-eventsRouter.use(cors);
+// What the route needs from the server that runs it. The daily salt is
+// rotated by whoever made it (startRotation); this router only reads it.
+export interface EventsRouterDeps {
+  db: Database.Database;
+  allowedOrigins: ReadonlySet<string>;
+  dailySalt: DailySalt;
+  // Stops storing a little before the volume is full (lib/diskSpace.ts).
+  diskGuard: DiskGuard;
+}
 
 // express.json() defaults to a 100KB body, which is far more than any
 // real event needs and enough to make storage abuse cheap. This is the
@@ -215,7 +190,20 @@ interface ValidEvent {
   props: Record<string, unknown>;
 }
 
-eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
+// POST /events, the public, unauthenticated route every tracked page
+// sends to. Mounted behind the per-address rate limit (app.ts).
+export function createEventsRouter(deps: EventsRouterDeps): Router {
+  const router = Router();
+  router.use((req, res, next) => cors(deps.allowedOrigins, req, res, next));
+  router.post("/", parseBody, (req, res) => receiveEvent(deps, req, res));
+  return router;
+}
+
+function receiveEvent(
+  deps: EventsRouterDeps,
+  req: Request,
+  res: Response,
+): void {
   // Stamped once, up front, and reused everywhere below (a rejected
   // request's ts, a real event's ts, the daily salt): one reading of the
   // clock per request, not a slightly different one at each call site.
@@ -250,7 +238,7 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   // cookie; before the envelope, because a rejected event is a row too.
   // A 503 rather than the bot path's quiet 204: the event is lost, and
   // a browser's network panel is one more place that says so.
-  if (!diskGuard.hasRoom(now.getTime())) {
+  if (!deps.diskGuard.hasRoom(now.getTime())) {
     res.set("Retry-After", "60");
     res.status(503).json({ error: "server disk is full" });
     return;
@@ -259,18 +247,18 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
   const checked = checkEvent(req.body);
   if (!checked.ok) {
     const { reason, event, detail, error } = checked.rejection;
-    insertRejectedEvent(db, reason, now.toISOString(), event, detail);
+    insertRejectedEvent(deps.db, reason, now.toISOString(), event, detail);
     res.status(400).json({ error });
     return;
   }
 
-  storeEvent(req, res, checked.value, now);
+  storeEvent(deps, req, res, checked.value, now);
 
   // A deduped duplicate still gets the same 204 a real event does — the
   // client can't tell the difference, same as the bot-drop above, so a
   // refreshed confirmation page never sees an error to retry or surface.
   res.status(204).end();
-});
+}
 
 // Every check a body goes through before it may become a row, in order.
 // Each step refuses with the reason the cockpit then counts it under.
@@ -434,6 +422,7 @@ function reject(rejection: Rejection): { ok: false; rejection: Rejection } {
 // Who sent it, which session it belongs to, and the row itself. Also
 // sets or clears the visitor cookie, which is why it takes the response.
 function storeEvent(
+  { db, dailySalt }: EventsRouterDeps,
   req: Request,
   res: Response,
   event: ValidEvent,

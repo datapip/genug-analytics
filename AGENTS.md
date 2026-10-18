@@ -29,10 +29,14 @@ than this file's details.
 packages/schema-registry/  The envelope's Zod schema; events/ is one JSON file each
 packages/client/           The browser snippet (classic script, no imports)
 server/
+  index.ts                 Startup: loadConfig, open the db, createApp, jobs, listen
+  app.ts                   createApp: every route, in order
   routes/events.ts         POST /events — validate, identify, store
   routes/mcp.ts            MCP transport + API key check
-  routes/cockpit.ts        JSON for the cockpit page, and its event edits
+  routes/cockpit.ts        The cockpit's JSON router; routes/cockpit/ holds
+                           its data, event-edit, context and danger-zone routes
   lib/                     Query layer: one module per kind of question
+  lib/config.ts            Every setting, read from the environment once
   mcp/                     MCP tools, grouped to match lib/
   db/                      Connection, migrations, raw SQL
 apps/cockpit/              Static page: index.html + cockpit.css + cockpit.js
@@ -167,7 +171,7 @@ visibly broken, which is the failure mode this project cares most about.
   `unknown_event_type`, visibly. `_pageView` is the one case that needs
   a real check, because `buildRegistry()` can throw instead of falling
   back to its stand-in (see "Events are read from one directory" above)
-  — so `routes/cockpit.ts`'s DELETE handler deletes, asks
+  — so the DELETE handler in `routes/cockpit/events.ts` deletes, asks
   `reloadEvents()`, and restores the file if the real loader refuses the
   result, rather than guessing in advance. Deleting or renaming a _prop_
   stays a file edit — either one reproduces the exact silent-rejection
@@ -257,7 +261,9 @@ false` and a `destructiveHint`), so a client knows to ask before
   `lib/orphanedEvents.ts` finds them; the cockpit and
   `get_orphaned_events` report them. Anything else that can strand rows
   needs the same treatment.
-- Missing required config fails at startup, loudly. Follow `requireEnv`.
+- Missing required config fails at startup, loudly. A new setting goes
+  in `loadConfig` (`lib/config.ts`) and is handed to what needs it;
+  nothing else reads `process.env` for it.
 
 **Cockpit**
 

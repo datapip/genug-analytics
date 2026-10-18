@@ -26,7 +26,7 @@ const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 
 // One budget for every place the cockpit password is typed: the sign-in
-// here and the two danger-zone confirmations in routes/cockpit.ts. A
+// here and the two danger-zone confirmations in routes/cockpit/danger.ts. A
 // session cookie is not the password, so without this a stolen cookie
 // could test guesses at full speed against a confirmation box and come
 // away with the password itself. Shared, so ten wrong guesses anywhere
@@ -149,8 +149,8 @@ export interface CockpitAuth {
 // `password` is required rather than optional, so there is no way to end
 // up with an open cockpit: it serves recent event URLs and raw props —
 // where order ids and other business data live — at an entirely
-// predictable hostname. server/index.ts fails fast at startup when
-// COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
+// predictable hostname. loadConfig (lib/config.ts) fails fast at
+// startup when COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
 export function createCockpitAuth(
   password: string,
   sessionSalt: Buffer,

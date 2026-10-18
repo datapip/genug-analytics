@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderClientScript } from "./clientScript.js";
 
-// The real compiled client, as server/index.ts reads it, so a rename of
+// The real compiled client, as server/app.ts reads it, so a rename of
 // the placeholder on either side fails here rather than at startup.
 const compiled = readFileSync(
   fileURLToPath(

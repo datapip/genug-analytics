@@ -1,13 +1,5 @@
 import Database from "better-sqlite3";
 
-// `/data` is the container path this project's Docker/Coolify docs
-// tell the operator to mount a persistent volume at (see README's
-// "Configuration") — defaulting to a fixed path under it means most
-// deployments never need to set DB_PATH at all. Still overridable
-// (e.g. local dev/testing running outside Docker, see docs/manual-testing.md),
-// since it's just a filesystem path, not a secret.
-export const dbPath: string = process.env.DB_PATH ?? "/data/genug.db";
-
 // Wrapped so the most likely deployment failure explains itself.
 // better-sqlite3 throws a bare "SQLITE_CANTOPEN: unable to open database
 // file", which says nothing about the actual cause — and since the
@@ -18,7 +10,7 @@ export const dbPath: string = process.env.DB_PATH ?? "/data/genug.db";
 // Note this needs the *directory* to be writable, not just the file:
 // WAL mode creates -wal/-shm files alongside the database, and
 // LOCAL_BACKUPS writes a backups/ folder there.
-function openDatabase(path: string): Database.Database {
+function open(path: string): Database.Database {
   try {
     return new Database(path);
   } catch (error) {
@@ -36,38 +28,43 @@ function openDatabase(path: string): Database.Database {
   }
 }
 
-export const db: Database.Database = openDatabase(dbPath);
+// The connection the server runs on, with the settings below. Not
+// migrated: db/index.ts's openDatabase is what the server calls.
+export function openConnection(path: string): Database.Database {
+  const db = open(path);
 
-// One writer (the events route), many readers (MCP tool queries) in a
-// single process — WAL lets them proceed without blocking each other.
-db.pragma("journal_mode = WAL");
+  // One writer (the events route), many readers (MCP tool queries) in a
+  // single process — WAL lets them proceed without blocking each other.
+  db.pragma("journal_mode = WAL");
 
-// SQLite's default is FULL: an fsync per commit, so every single event
-// waits for the platter before the request completes. Measured on the
-// real schema that is ~1.4 ms per event and caps ingestion near 700
-// events/sec — and because better-sqlite3 is synchronous, each of those
-// milliseconds blocks the event loop. NORMAL hands the write to the OS
-// instead and reaches ~9,000/sec on the same hardware.
-//
-// Safe here specifically because of the WAL above it: the write-ahead
-// log is append-only and checksummed, so a recovering reader stops at
-// the first record that doesn't verify. A hard kill (power loss, kernel
-// panic) can cost the last fraction of a second of events; it cannot
-// leave a torn or corrupt database. In the old rollback-journal mode
-// NORMAL really could corrupt, which is where its reputation comes from
-// — that hazard doesn't exist in WAL. A crash of this process alone
-// loses nothing at all, since the OS buffer outlives it.
-//
-// The trade is deliberate: pageview counts are not a ledger, and paying
-// an fsync per view forever to protect a handful of them from a power
-// cut is the wrong side of it. See docs/decisions.md.
-db.pragma("synchronous = NORMAL");
+  // SQLite's default is FULL: an fsync per commit, so every single event
+  // waits for the platter before the request completes. Measured on the
+  // real schema that is ~1.4 ms per event and caps ingestion near 700
+  // events/sec — and because better-sqlite3 is synchronous, each of those
+  // milliseconds blocks the event loop. NORMAL hands the write to the OS
+  // instead and reaches ~9,000/sec on the same hardware.
+  //
+  // Safe here specifically because of the WAL above it: the write-ahead
+  // log is append-only and checksummed, so a recovering reader stops at
+  // the first record that doesn't verify. A hard kill (power loss, kernel
+  // panic) can cost the last fraction of a second of events; it cannot
+  // leave a torn or corrupt database. In the old rollback-journal mode
+  // NORMAL really could corrupt, which is where its reputation comes from
+  // — that hazard doesn't exist in WAL. A crash of this process alone
+  // loses nothing at all, since the OS buffer outlives it.
+  //
+  // The trade is deliberate: pageview counts are not a ledger, and paying
+  // an fsync per view forever to protect a handful of them from a power
+  // cut is the wrong side of it. See docs/decisions.md.
+  db.pragma("synchronous = NORMAL");
 
-// A DELETE in SQLite only unlinks a row: its bytes stay in the page
-// until something reuses it, readable by anyone holding the file or a
-// copy of it. That makes delete_visitor_data an erasure in name only, so
-// freed content is overwritten with zeros instead. It costs a write per
-// freed page, which the daily retention prune and the rare erasure can
-// afford. The WAL still holds the old pages until a checkpoint, which is
-// why lib/retention.ts's deleteVisitorData runs one.
-db.pragma("secure_delete = ON");
+  // A DELETE in SQLite only unlinks a row: its bytes stay in the page
+  // until something reuses it, readable by anyone holding the file or a
+  // copy of it. That makes delete_visitor_data an erasure in name only, so
+  // freed content is overwritten with zeros instead. It costs a write per
+  // freed page, which the daily retention prune and the rare erasure can
+  // afford. The WAL still holds the old pages until a checkpoint, which is
+  // why lib/retention.ts's deleteVisitorData runs one.
+  db.pragma("secure_delete = ON");
+  return db;
+}

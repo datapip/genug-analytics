@@ -20,18 +20,14 @@ import { insertEvent } from "../db/events.js";
 import { MAX_PROSE_FIELD_BYTES } from "../lib/context.js";
 
 // These tests spawn the real compiled server (dist/index.js) as a
-// subprocess instead of importing index.ts directly — its startup logic
-// is a side-effecting top-level script (routes mounted, background jobs
-// scheduled, app.listen called), not something with an exported function
-// to call. Rewriting it into one just to unit-test it would risk
-// introducing a bug into code that's already been manually verified
-// multiple times — this project's own style already leans toward
-// integration-realism over mocking (real SQLite everywhere, no ORM), so
-// a real subprocess against a real temp database fits that better than
-// a refactor would. The cost: these are slower than this project's other
-// (in-process) tests, and — unlike the setInterval-scheduled recurring
-// runs — can only observe what happens at startup/shutdown, not a job
-// firing again hours or a day later.
+// subprocess. createApp (app.ts) could be built in-process, but what
+// these check is the whole start: settings read from the environment,
+// the startup log, background jobs scheduled, the port listened on and
+// the signal handled — the parts index.ts does around createApp, and
+// the parts an operator actually sees. The cost: these are slower than
+// this project's other (in-process) tests, and — unlike the
+// setInterval-scheduled recurring runs — can only observe what happens
+// at startup/shutdown, not a job firing again hours or a day later.
 const indexJsPath = fileURLToPath(new URL("../index.js", import.meta.url));
 
 interface LogLine {
@@ -283,7 +279,7 @@ test("starts, logs a structured ready message, and responds to /healthz", async 
 
 // cockpitAuth and requireApiKey are thoroughly unit-tested on their own,
 // but nothing asserted they are actually mounted in front of the things
-// they guard. Reordering two lines in index.ts — an ordinary edit when
+// they guard. Reordering two lines in app.ts — an ordinary edit when
 // adding a route — would leave every one of those unit tests green while
 // /cockpit/data served raw event URLs and props, and /mcp exposed every
 // query tool plus delete_visitor_data, at a predictable public hostname.
@@ -1123,7 +1119,7 @@ test("registers a stand-in page-view event when nothing carries the tag", async 
   );
 });
 
-// The claim in routes/cockpit.ts is that a failed rebuild is discarded
+// The claim in routes/cockpit/events.ts is that a failed rebuild is discarded
 // whole and the running registry keeps collecting. Nothing checked the
 // second half, which is the half that matters to a live site.
 test("keeps collecting when a reload fails", async (t) => {

@@ -1549,7 +1549,7 @@
       const actions = [editButton, addPropButton];
 
       // Deleting a role-tagged event is not disabled here: the server
-      // (routes/cockpit.ts's DELETE handler) deletes, then asks the
+      // (the DELETE handler in routes/cockpit/events.ts) deletes, then asks the
       // real registry loader via reloadEvents() and restores the file
       // if that loader refuses the result — the one case that needs
       // care, and it needs the whole directory to decide, which this

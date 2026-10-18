@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate } from "../db/migrations.js";
+import { openConnection } from "../db/connection.js";
 import { insertEvent } from "../db/events.js";
 import { insertRejectedEvent } from "../db/rejectedEvents.js";
 import { insertBotActivity } from "../db/botActivity.js";
@@ -210,14 +211,11 @@ test("deleteVisitorData leaves the erased rows in neither the file nor the log",
 
 // The test above sets secure_delete itself, so it would still pass if
 // db/connection.ts stopped setting it. This checks the connection the
-// server actually opens. node:test runs each file in its own process,
-// so pointing DB_PATH at a scratch file here reaches no other test.
-test("the server's own connection overwrites what it deletes", async () => {
-  process.env.DB_PATH = join(
-    mkdtempSync(join(tmpdir(), "genug-connection-")),
-    "genug.db",
+// server actually opens.
+test("the server's own connection overwrites what it deletes", () => {
+  const db = openConnection(
+    join(mkdtempSync(join(tmpdir(), "genug-connection-")), "genug.db"),
   );
-  const { db } = await import("../db/connection.js");
   assert.equal(db.pragma("secure_delete", { simple: true }), 1);
   db.close();
 });

@@ -1,27 +1,17 @@
 import { Router, json, type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { db } from "../db/index.js";
+import type Database from "better-sqlite3";
 import { createMcpServer } from "../mcp/tools.js";
-import {
-  parseReadOnly,
-  parseTimezone,
-  requireEnv,
-  shortMcpApiKeyWarning,
-} from "../lib/env.js";
 import { createMcpAuthMiddleware } from "../lib/mcpAuth.js";
-import { logError, logInfo } from "../lib/logger.js";
+import { logError } from "../lib/logger.js";
 
-// Read at module scope. Every module that needs it parses the same
-// variable itself; whichever is imported first is the one whose throw
-// stops startup, which is enough — a bad value cannot reach a listening
-// server through any of them.
-const readOnly = parseReadOnly(process.env.READ_ONLY);
-const mcpApiKey = requireEnv("MCP_API_KEY");
-const keyWarning = shortMcpApiKeyWarning(mcpApiKey, readOnly);
-if (keyWarning) logInfo(keyWarning);
-const timezone = parseTimezone(requireEnv("TIMEZONE"));
-
-const requireApiKey = createMcpAuthMiddleware(mcpApiKey);
+export interface McpRouterDeps {
+  db: Database.Database;
+  mcpApiKey: string;
+  // Leaves the writing tools and get_recent_events unregistered.
+  readOnly: boolean;
+  timezone: string;
+}
 
 function methodNotAllowed(req: Request, res: Response): void {
   res.status(405).json({
@@ -31,11 +21,18 @@ function methodNotAllowed(req: Request, res: Response): void {
   });
 }
 
-export const mcpRouter: Router = Router();
-
-// Checks the key and the per-address limits in one step, so a flood is
-// bounded whether or not it carries the key. See lib/mcpAuth.ts.
-mcpRouter.use(requireApiKey);
+export function createMcpRouter(deps: McpRouterDeps): Router {
+  const router = Router();
+  // Checks the key and the per-address limits in one step, so a flood is
+  // bounded whether or not it carries the key. See lib/mcpAuth.ts.
+  router.use(createMcpAuthMiddleware(deps.mcpApiKey));
+  router.post("/", parseMcpBody, (req, res) =>
+    handleMcpRequest(deps, req, res),
+  );
+  router.get("/", methodNotAllowed);
+  router.delete("/", methodNotAllowed);
+  return router;
+}
 
 // One JSON-RPC message per request, at 16kb. Express's default body
 // limit is 100kb, and the transport accepts an *array* of messages in
@@ -60,7 +57,11 @@ function refusesBatch(req: Request, res: Response): boolean {
   return true;
 }
 
-mcpRouter.post("/", parseMcpBody, async (req: Request, res: Response) => {
+async function handleMcpRequest(
+  { db, readOnly, timezone }: McpRouterDeps,
+  req: Request,
+  res: Response,
+): Promise<void> {
   if (refusesBatch(req, res)) return;
 
   // Stateless mode (see mcp/tools.ts): a fresh server + transport per
@@ -87,7 +88,4 @@ mcpRouter.post("/", parseMcpBody, async (req: Request, res: Response) => {
       });
     }
   }
-});
-
-mcpRouter.get("/", methodNotAllowed);
-mcpRouter.delete("/", methodNotAllowed);
+}

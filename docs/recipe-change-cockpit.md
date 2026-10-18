@@ -132,8 +132,9 @@ fetch a font from someone else's server.
 
 Say you want your top products on the page.
 
-**1. Return the data** from `server/routes/cockpit.ts`, inside the
-`res.json({ ... })` call — it may use any function from `server/lib/`:
+**1. Return the data** from `server/routes/cockpit/data.ts`, in the
+object `cockpitData` returns — it may use any function from
+`server/lib/`:
 
 ```ts
 topProducts: getEventsByProperty(db, "order_completed", "product_id", period, 5)

@@ -5,25 +5,33 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { MAX_EVENT_NAME_LENGTH } from "@genug/schema-registry";
+import { createEventsRouter } from "./events.js";
+import { openDatabase } from "../db/index.js";
+import { createDailySalt } from "../lib/dailySalt.js";
+import { createDiskGuard } from "../lib/diskSpace.js";
 
-// The route reads ALLOWED_ORIGIN through requireEnv at
-// module scope, and db/index.ts opens the database on import — so env
-// has to be in place before either module is loaded, which is why these
-// are dynamic imports rather than ordinary ones at the top of the file.
+// A real database file rather than :memory:, so the connection is the
+// one the server opens, with its WAL and secure_delete settings.
 const tmpDir = mkdtempSync(join(tmpdir(), "genug-events-"));
-process.env.DB_PATH = join(tmpDir, "test.db");
-process.env.ALLOWED_ORIGIN = "https://site.example, https://www.site.example";
-process.env.TIMEZONE = "UTC";
-
-const { eventsRouter } = await import("./events.js");
-const { MAX_EVENT_NAME_LENGTH } = await import("@genug/schema-registry");
-const { db } = await import("../db/index.js");
+const db = openDatabase(join(tmpDir, "test.db"));
 
 const app = express();
 // Lets a test choose its address through X-Forwarded-For. Without the
 // header req.ip is still the loopback address, as for every other test.
 app.set("trust proxy", true);
-app.use("/events", eventsRouter);
+app.use(
+  "/events",
+  createEventsRouter({
+    db,
+    allowedOrigins: new Set([
+      "https://site.example",
+      "https://www.site.example",
+    ]),
+    dailySalt: createDailySalt(join(tmpDir, "daily-salt.json"), "UTC"),
+    diskGuard: createDiskGuard(tmpDir),
+  }),
+);
 const server = app.listen(0);
 const { port } = server.address() as AddressInfo;
 
