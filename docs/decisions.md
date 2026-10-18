@@ -1621,6 +1621,23 @@ still gets the ordinary ephemeral hash and nothing is set, exactly as
 before — the only visitor this changes anything for is one who already
 had a reason to be trusted.
 
+**Reading is not renewing.** Until 0.12.x the omitted-consent path also
+set the cookie again, so every event extended its 13 months whether or
+not anything on it consented. Setting a cookie is storing on the
+device (§ 25(1) TDDDG), and a request with no consent signal is not a
+basis for that, so only an explicit `true` sets it now. The read stays:
+it is what the race fix above needs, and it rests on the earlier
+consent. The cost lands on a consent manager that reports only the
+accept click and never replays stored consent: its returning visitors
+lose the cookie 13 months after the click and come back as new. That
+is the honest result — the consent behind the cookie is that old too —
+and the fix is the one client.md already gives, sending `consent: true`
+on every load where consent is stored. Cookies already in browsers keep
+the expiry they were given. Still open for a lawyer: a consent manager
+whose own consent lapses sooner than 13 months leaves a cookie that is
+still read after the consent behind it is gone, unless the site sends
+`consent: false` when it lapses.
+
 **Consentless → consentful transition:** when a request has
 `consent: true` but no existing visitor_id cookie yet, the server does
 NOT mint a fresh random UUID. It computes the same hash that request

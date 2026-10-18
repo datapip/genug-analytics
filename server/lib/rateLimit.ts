@@ -30,6 +30,13 @@ export const MCP_MAX_PER_WINDOW = 60;
 // the key on every call, and only an auth-discovery probe arrives
 // without one.
 export const MCP_KEYLESS_MAX_PER_WINDOW = 10;
+// Cockpit requests per address per window: the page, its scripts and
+// styles and one data load are about six, so this is twenty reloads a
+// minute. It is not there for the owner. The data route runs its
+// queries synchronously, and on a deployment whose password is public
+// (READ_ONLY, the demo) a stranger holding refresh would otherwise
+// stall collection behind them.
+export const COCKPIT_MAX_PER_WINDOW = 120;
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 interface WindowState {
@@ -144,6 +151,11 @@ export function createRequestLimiter(
 export const rateLimitEvents = createRequestLimiter(
   EVENTS_MAX_PER_WINDOW,
   "/events",
+);
+
+export const rateLimitCockpit = createRequestLimiter(
+  COCKPIT_MAX_PER_WINDOW,
+  "/cockpit",
 );
 
 // Without this, a map would grow by one entry per distinct IP ever seen

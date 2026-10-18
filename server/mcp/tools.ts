@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type Database from "better-sqlite3";
 import {
   invertedPeriodError,
@@ -108,6 +109,42 @@ function requireSegment(
   );
 }
 
+// What a tool tells the client about itself, so a client that asks
+// before a write (Claude does) knows which calls to ask about. Visitor
+// text reaches the agent through most of these tools, and text that
+// talks it into erasing a visitor is exactly the call a client should
+// stop for. The read side is filled in below rather than written into
+// thirty-odd configs; the write side must be spelled out in admin.ts,
+// because a writing tool that inherited "read-only" would be told to
+// the client as safe to call unasked.
+const READ_TOOL_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: true,
+  // Every tool answers from this deployment's own database and files.
+  openWorldHint: false,
+};
+
+function annotate(
+  name: string,
+  config: { annotations?: ToolAnnotations },
+  writes: boolean,
+): ToolAnnotations {
+  const given = config.annotations;
+  if (writes) {
+    if (given?.readOnlyHint !== false || given.destructiveHint === undefined) {
+      throw new Error(
+        `MCP tool "${name}" is registered as a writing tool but does not say so. Give it annotations with readOnlyHint: false and an explicit destructiveHint.`,
+      );
+    }
+    return given;
+  }
+  if (given?.readOnlyHint === false) {
+    throw new Error(
+      `MCP tool "${name}" says it writes, but is not in a writing module. Move it to mcp/admin.ts, which READ_ONLY=true leaves unregistered.`,
+    );
+  }
+  return { ...READ_TOOL_ANNOTATIONS, ...given };
+}
+
 export interface ToolSummary {
   name: string;
   description: string;
@@ -158,29 +195,44 @@ export function createMcpServer(
   // name and config unchanged, so it's correct by construction even
   // though the type system can't see that.
   const manifest: ToolSummary[] = [];
+  // Which group the loop below is registering, read by the wrapper so a
+  // module's tools are annotated by where they live (see annotate).
+  let registeringWrites = false;
   const originalRegisterTool = server.registerTool.bind(server);
   server.registerTool = ((
     name: string,
-    config: { description?: string; inputSchema?: Record<string, unknown> },
+    config: {
+      description?: string;
+      inputSchema?: Record<string, unknown>;
+      annotations?: ToolAnnotations;
+    },
     handler: (
       args: Record<string, unknown>,
       extra: unknown,
     ) => Promise<unknown>,
   ) => {
     requireSegment(name, config);
+    const annotations = annotate(name, config, registeringWrites);
     manifest.push({ name, description: config.description ?? "" });
     return (
       originalRegisterTool as unknown as (
         ...args: unknown[]
       ) => ReturnType<typeof originalRegisterTool>
-    )(name, config, guardPeriod(config, handler));
+    )(name, { ...config, annotations }, guardPeriod(config, handler));
   }) as typeof server.registerTool;
 
-  const modules = readOnly
-    ? toolModules
-    : [...toolModules, ...writingToolModules, ...rawDataToolModules];
-  for (const registerTools of modules) {
-    registerTools(server, db, { timezone });
+  const groups: [ToolRegistrar[], boolean][] = readOnly
+    ? [[toolModules, false]]
+    : [
+        [toolModules, false],
+        [writingToolModules, true],
+        [rawDataToolModules, false],
+      ];
+  for (const [modules, writes] of groups) {
+    registeringWrites = writes;
+    for (const registerTools of modules) {
+      registerTools(server, db, { timezone });
+    }
   }
 
   manifests.set(manifestKey(readOnly, timezone), manifest);

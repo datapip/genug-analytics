@@ -1,10 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   contextPath,
   BUSINESS_CONTEXT_FILE,
   MAX_PROSE_FIELD_BYTES,
 } from "./context.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // The cockpit's only write to about.md — same shape as
 // lib/writeGroundRules.ts (whole-file overwrite, refused rather than
@@ -32,7 +33,7 @@ export function writeBusinessContext(
 
   try {
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, BUSINESS_CONTEXT_FILE), text, "utf8");
+    writeFileAtomic(join(directory, BUSINESS_CONTEXT_FILE), text);
     return { ok: true };
   } catch (cause) {
     return {

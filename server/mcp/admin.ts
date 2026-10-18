@@ -24,6 +24,14 @@ export const registerAdminTools: ToolRegistrar = (server, db) => {
             "Must be explicitly true to actually delete; false (or omitted) only previews the count",
           ),
       },
+      // Tells a client that asks before risky calls to ask here. Without
+      // confirm it only counts, but the hint is per tool, not per call.
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ visitor_id, confirm }) => {
       // MCP tools are one-shot request/response calls, so there's no
@@ -84,6 +92,14 @@ export const registerAdminTools: ToolRegistrar = (server, db) => {
           .describe(
             "What happened, in one or two plain sentences, as the person described it. This text is read by an agent months later with no other context, so name the thing itself ('the tracking script was missing from all product pages') rather than referring to this conversation.",
           ),
+      },
+      // Appends and never overwrites, so not destructive — but a second
+      // call is a second note, and every later session reads it.
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
     },
     async ({ date, end_date, note }) => {

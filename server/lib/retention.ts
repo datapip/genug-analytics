@@ -107,5 +107,12 @@ export function deleteVisitorData(
   const result = db
     .prepare(`DELETE FROM events WHERE visitor_id = ?`)
     .run(visitorId);
+  // secure_delete (db/connection.ts) zeroes the rows in the database
+  // file, but the write-ahead log still holds the pages as they were
+  // until a checkpoint copies it back. TRUNCATE also empties the log
+  // file, so the erased rows are in neither once this returns. A backup
+  // running at that moment can hold the checkpoint off; the next
+  // automatic one finishes it.
+  if (result.changes > 0) db.pragma("wal_checkpoint(TRUNCATE)");
   return result.changes;
 }

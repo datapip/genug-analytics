@@ -586,10 +586,27 @@ test("keeps recognising a returning visitor when consent hasn't been answered ye
     "identified via a real persistent cookie, so this row is consentful even though this request didn't itself confirm consent",
   );
 
-  const setCookie = res.headers.get("set-cookie");
-  assert.ok(setCookie, "the cookie is refreshed, not cleared");
+  assert.equal(
+    res.headers.get("set-cookie"),
+    null,
+    "neither cleared nor extended: only an explicit yes may set it again",
+  );
+
+  // The same visitor confirming consent again is what keeps the cookie
+  // alive: a consent manager replaying stored consent on each load.
+  const confirmed = await post(
+    {
+      event: "page_view",
+      consent: true,
+      url: "https://site.example/",
+      props: { page_title: "Home", document_language: "en" },
+    },
+    { "user-agent": ua, cookie: `genug_vid=${issued}` },
+  );
+  const setCookie = confirmed.headers.get("set-cookie");
+  assert.ok(setCookie, "an explicit yes extends the cookie");
   assert.match(setCookie, new RegExp(`genug_vid=${issued};`));
-  assert.match(setCookie, /Max-Age=/, "a refresh, not a clear");
+  assert.match(setCookie, /Max-Age=/, "an extension, not a clear");
   assert.doesNotMatch(setCookie, /Expires=Thu, 01 Jan 1970/i);
 });
 

@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import {
@@ -7,6 +7,7 @@ import {
   isValidEventName,
 } from "@genug/schema-registry";
 import { countStored } from "./events.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // Creates one event file from the cockpit's New event form.
 //
@@ -129,7 +130,7 @@ export function createEventFile(
     return failed(`Not created — ${checked.errors.join("; ")}`);
   }
 
-  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
 
   // Rows may already be stored under this name, orphaned by an earlier
   // rename or deletion. Creating the event hands them back to it, which

@@ -27,12 +27,14 @@ import { stripUnknownParams } from "../lib/url.js";
 import { recordBotHit, botActivityCounter } from "../lib/botActivity.js";
 import { parseCookies } from "../lib/cookies.js";
 import { createDailySalt, startRotation } from "../lib/dailySalt.js";
+import { createDiskGuard } from "../lib/diskSpace.js";
 
 const VISITOR_ID_COOKIE = "genug_vid";
-// 13 months — the ceiling EU data-protection authorities (CNIL, and the
-// German DSK following it) treat as the maximum life for an analytics
-// identifier. Chrome would allow 400 days; the shorter one is what's
-// defensible for the EU deployments this is built for.
+// 13 months — the ceiling CNIL treats as the maximum life for an
+// analytics identifier. Chrome would allow 400 days; the shorter one is
+// what's defensible for the EU deployments this is built for. Counted
+// from the last explicit consent, since only that sets it again
+// (lib/identity.ts).
 const VISITOR_ID_COOKIE_MAX_AGE_MS = 396 * 24 * 60 * 60 * 1000;
 // One object for setting and for clearing: a clear only removes the
 // cookie the browser actually holds if its attributes match the ones it
@@ -73,6 +75,9 @@ const dailySalt = createDailySalt(
   parseTimezone(requireEnv("TIMEZONE")),
 );
 startRotation(dailySalt);
+
+// Stops storing a little before the volume is full (see lib/diskSpace.ts).
+const diskGuard = createDiskGuard(dirname(dbPath));
 
 // Plain boolean, not a type predicate: event names come from JSON files
 // read at startup, so `EventType` is `string` and narrowing to it would
@@ -214,6 +219,16 @@ eventsRouter.post("/", parseBody, (req: Request, res: Response) => {
       res.clearCookie(VISITOR_ID_COOKIE, VISITOR_ID_COOKIE_OPTIONS);
     }
     res.status(204).end();
+    return;
+  }
+
+  // After the opt-out, which writes nothing and must still reach the
+  // cookie; before the envelope, because a rejected event is a row too.
+  // A 503 rather than the bot path's quiet 204: the event is lost, and
+  // a browser's network panel is one more place that says so.
+  if (!diskGuard.hasRoom(now.getTime())) {
+    res.set("Retry-After", "60");
+    res.status(503).json({ error: "server disk is full" });
     return;
   }
 

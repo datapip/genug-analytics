@@ -1,10 +1,10 @@
-import { writeFileSync } from "node:fs";
 import {
   checkEvent,
   isValidEventName,
   readLoadableEventFile,
 } from "@genug/schema-registry";
 import { composeRule, parseExample, type PropSpec } from "./createEvent.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // Adds one prop to an event that already has traffic — the one shape
 // change the cockpit is allowed to make to a live event.
@@ -75,6 +75,6 @@ export function addEventProp(
     return failed(`Not saved — ${after.errors.join("; ")}`);
   }
 
-  writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+  writeFileAtomic(path, `${JSON.stringify(updated, null, 2)}\n`);
   return { ok: true };
 }

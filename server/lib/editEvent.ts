@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import {
@@ -9,6 +9,7 @@ import {
   type PropRule,
 } from "@genug/schema-registry";
 import { countStored } from "./events.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // Applies an edit made in the cockpit to one event file.
 //
@@ -136,7 +137,7 @@ export function editEventFile(
     }
   }
 
-  writeFileSync(targetPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+  writeFileAtomic(targetPath, `${JSON.stringify(updated, null, 2)}\n`);
   if (renaming) unlinkSync(currentPath);
 
   // After the file, never before. A rename that moved the rows and then

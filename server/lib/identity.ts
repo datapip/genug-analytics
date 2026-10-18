@@ -99,6 +99,18 @@ export function resolveVisitorIdentity(input: {
   // said yes gets a fresh persistent cookie frozen from today's hash
   // rather than a random UUID (see "Consentless → consentful
   // transition").
+  //
+  // Only an explicit yes writes the cookie, so only an explicit yes
+  // extends its 13 months. An unanswered request still reads it — that
+  // is the race above — but setting it again would store an identifier
+  // on the device again with nothing on this request consenting to it
+  // (§ 25(1) TDDDG). A consent manager that replays stored consent on
+  // every page load keeps a regular visitor's cookie alive; one that
+  // reports only the accept click lets it run out 13 months later.
   const consentful = existingCookie !== undefined || consent === true;
-  return { visitorId, consentful, cookie: consentful ? "set" : "none" };
+  return {
+    visitorId,
+    consentful,
+    cookie: consent === true ? "set" : "none",
+  };
 }

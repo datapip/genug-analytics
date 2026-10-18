@@ -29,6 +29,42 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   }
 }
 
+// A copy that would fill the disk leaves the live database no room to
+// write, so it is skipped with a reason, and nothing half-written is
+// left behind to fill it anyway.
+test("runBackup skips a copy the disk has no room for", async () => {
+  await withTempDir(async (dir) => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const backupDir = join(dir, "backups");
+
+    await assert.rejects(
+      runBackup(db, backupDir, undefined, undefined, () => 0),
+      /Skipped/,
+    );
+    assert.deepEqual(await readdir(backupDir), []);
+  });
+});
+
+// The other half of that: expired copies still go when today's is
+// skipped. Pruning only after a successful copy would keep a full disk
+// full, its oldest week never freed.
+test("runBackup prunes expired copies even when it skips today's", async () => {
+  await withTempDir(async (dir) => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await writeFile(join(dir, "genug-2020-01-01.db"), "old");
+    await utimes(join(dir, "genug-2020-01-01.db"), old, old);
+
+    await assert.rejects(
+      runBackup(db, dir, undefined, undefined, () => 0),
+      /Skipped/,
+    );
+    assert.deepEqual(await readdir(dir), []);
+  });
+});
+
 test("runBackup writes a queryable backup file, creating the directory if needed", async () => {
   await withTempDir(async (dir) => {
     const db = new Database(":memory:");

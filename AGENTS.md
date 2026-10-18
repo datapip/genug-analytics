@@ -185,7 +185,12 @@ visibly broken, which is the failure mode this project cares most about.
 - A tool that writes goes in `mcp/admin.ts`, which `READ_ONLY=true`
   leaves unregistered (`writingToolModules` in `mcp/tools.ts`). A
   writing tool put anywhere else stays live on a deployment whose key
-  is public. The cockpit side of the same promise is a router-level
+  is public. It also spells out its MCP `annotations` (`readOnlyHint:
+false` and a `destructiveHint`), so a client knows to ask before
+  calling it; every other tool is marked read-only for you, and the
+  server refuses to start if either side is wrong. That marking goes by
+  module, not by what the handler does, so a writing tool left in a
+  read module is announced to clients as safe to call unasked. The cockpit side of the same promise is a router-level
   refusal of every non-GET request, so a cockpit write must not be a
   GET. `get_recent_events` gets the same treatment
   (`rawDataToolModules`) though it writes nothing — it is the one tool

@@ -1,5 +1,6 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // Things that happened to the site or its tracking, written down by its
 // owner: an outage, a campaign, a redesign. The agent reads them as
@@ -183,10 +184,8 @@ export function appendHistoryEntry(
   }
 
   const items = [...existing.items, checked.data];
-  const temporary = `${path}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(items, null, 2)}\n`, "utf8");
-    renameSync(temporary, path);
+    writeFileAtomic(path, `${JSON.stringify(items, null, 2)}\n`);
   } catch (cause) {
     return { ok: false, error: `could not be written: ${describe(cause)}` };
   }

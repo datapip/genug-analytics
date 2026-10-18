@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { isValidEventName } from "@genug/schema-registry";
 import { countStored } from "./events.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // Deletes one event's file from the cockpit's Schema registry card — a
 // scoped version of the danger zone's whole-directory Reset. Rows
@@ -70,6 +71,6 @@ export function deleteEventFile(
     // Writes back the exact bytes that were here, not a re-serialized
     // JSON.stringify, so a restore is indistinguishable from the
     // delete never having happened.
-    restore: () => writeFileSync(path, original, "utf8"),
+    restore: () => writeFileAtomic(path, original),
   };
 }

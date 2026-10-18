@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { migrate } from "../db/migrations.js";
 import { insertEvent } from "../db/events.js";
@@ -163,4 +166,58 @@ test("countEventsForVisitor and deleteVisitorData only affect the given visitor"
   assert.equal(deleted, 2);
   assert.equal(countEventsForVisitor(db, "v1"), 0);
   assert.equal(countEventsForVisitor(db, "v2"), 1);
+});
+
+// An erasure has to reach the bytes, not just the index: without
+// secure_delete the row stays readable in the freed page, and without
+// the checkpoint it stays in the write-ahead log. A file database with
+// db/connection.ts's two pragmas, since neither applies in memory.
+test("deleteVisitorData leaves the erased rows in neither the file nor the log", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "genug-erase-")), "genug.db");
+  const db = new Database(path);
+  db.pragma("journal_mode = WAL");
+  db.pragma("secure_delete = ON");
+  migrate(db);
+  const marker = "erase-me-7f3c91";
+  insertEvent(db, {
+    event: "page_view",
+    visitorId: "v1",
+    sessionId: "s1",
+    ts: "2026-01-01T00:00:00.000Z",
+    url: `https://example.com/${marker}`,
+    props: {},
+  });
+  insertEvent(db, {
+    event: "page_view",
+    visitorId: "v2",
+    sessionId: "s2",
+    ts: "2026-01-01T00:00:00.000Z",
+    url: "https://example.com/",
+    props: {},
+  });
+  const onDisk = () =>
+    [path, `${path}-wal`]
+      .filter((file) => existsSync(file))
+      .some((file) => readFileSync(file).includes(marker));
+  assert.ok(onDisk(), "sanity: the row is on disk before the erasure");
+
+  assert.equal(deleteVisitorData(db, "v1"), 1);
+
+  assert.equal(onDisk(), false);
+  assert.equal(countEventsForVisitor(db, "v2"), 1);
+  db.close();
+});
+
+// The test above sets secure_delete itself, so it would still pass if
+// db/connection.ts stopped setting it. This checks the connection the
+// server actually opens. node:test runs each file in its own process,
+// so pointing DB_PATH at a scratch file here reaches no other test.
+test("the server's own connection overwrites what it deletes", async () => {
+  process.env.DB_PATH = join(
+    mkdtempSync(join(tmpdir(), "genug-connection-")),
+    "genug.db",
+  );
+  const { db } = await import("../db/connection.js");
+  assert.equal(db.pragma("secure_delete", { simple: true }), 1);
+  db.close();
 });

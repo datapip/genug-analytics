@@ -2123,6 +2123,67 @@ test("READ_ONLY=true unregisters the delete tool and closes every cockpit write"
   };
   assert.equal(after.trafficSummary.visitors, 1);
   assert.deepEqual(after.recentEvents, []);
+
+  // Briefly cached in this mode, so a public demo's viewers holding
+  // refresh run its queries once per range, not once each: a second
+  // visitor inside the window is not counted yet.
+  const second = await fetch(`${base}/events`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: `http://localhost:${port}`,
+      "user-agent": "a-second-visitor",
+    },
+    body: JSON.stringify({
+      auto: "pageView",
+      url: "https://example.com/",
+      props: { page_title: "Home", document_language: "en" },
+    }),
+  });
+  assert.equal(second.status, 204);
+  const cached = (await (
+    await fetch(`${base}/cockpit/data?range=24h`, {
+      headers: { cookie: auth },
+    })
+  ).json()) as { trafficSummary: { visitors: number } };
+  assert.equal(cached.trafficSummary.visitors, 1);
+
+  // And the cache is the only reason: the row was stored, and an
+  // uncached read already counts it.
+  const day = (offset: number) =>
+    new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const summaryText = (
+    await (
+      await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          authorization: "Bearer test-key-0123456789abcdef0123456789",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "get_traffic_summary",
+            arguments: { from: day(-1), to: day(1) },
+          },
+        }),
+      })
+    ).text()
+  )
+    .split("\n")
+    .find((line) => line.startsWith("data: "));
+  assert.ok(summaryText, "expected a data: line in the MCP response");
+  const summary = JSON.parse(
+    (
+      JSON.parse(summaryText.slice("data: ".length)) as {
+        result: { content: { text: string }[] };
+      }
+    ).result.content[0]!.text,
+  ) as { visitors: number };
+  assert.equal(summary.visitors, 2);
 });
 
 test("refuses to start on a READ_ONLY value that is neither true nor false", async (t) => {

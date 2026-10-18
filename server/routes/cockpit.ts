@@ -147,15 +147,39 @@ cockpitRouter.use((req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+// A read-only deployment is the public demo, whose password is
+// published, and this route runs some twenty queries synchronously: a
+// few viewers holding refresh would stall /events behind them. In that
+// mode every viewer gets the same answer — nothing on it depends on who
+// asked, and nothing can change it from here — so one answer per range
+// is kept briefly. Not in normal mode, where an owner's own edit must
+// show on the next load.
+const READ_ONLY_DATA_CACHE_MS = 30 * 1000;
+const readOnlyDataCache = new Map<string, { at: number; body: unknown }>();
+
 cockpitRouter.get("/data", (req: Request, res: Response) => {
   const parsed = parseWindowRange(req.query);
   if (!parsed.ok) {
     res.status(400).json({ ok: false, error: parsed.error });
     return;
   }
-  const period = windowPeriod(parsed.range, new Date(), timezone);
+  const now = new Date();
+  if (readOnly) {
+    const cached = readOnlyDataCache.get(parsed.range);
+    if (cached && now.getTime() - cached.at < READ_ONLY_DATA_CACHE_MS) {
+      res.json(cached.body);
+      return;
+    }
+  }
+  const body = cockpitData(windowPeriod(parsed.range, now, timezone));
+  if (readOnly) {
+    readOnlyDataCache.set(parsed.range, { at: now.getTime(), body });
+  }
+  res.json(body);
+});
 
-  res.json({
+function cockpitData(period: ReturnType<typeof windowPeriod>) {
+  return {
     period,
     // The zone every day and hour on the page is in. The page formats
     // its labels in it and says which it is, since the viewer's
@@ -258,8 +282,8 @@ cockpitRouter.get("/data", (req: Request, res: Response) => {
     businessContext: businessContextForCockpit(),
     proseFieldMaxBytes: MAX_PROSE_FIELD_BYTES,
     history: historyForCockpit(),
-  });
-});
+  };
+}
 
 // The raw text an owner can edit and save unchanged, not the agent's
 // rendered "## Ground rules" section — see lib/context.ts's

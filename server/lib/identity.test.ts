@@ -134,11 +134,13 @@ test("consenting freezes today's hash into a cookie", () => {
 // The race: an automatic page-view that fires before the site's consent
 // manager answers sends no consent field, but does carry the visitor's
 // real cookie. Treating that as a rejection is what used to lose them.
+// It reads the cookie but does not set it again: re-setting is what
+// extends the 13 months, and nothing on this request consented to that.
 test("an unanswered request keeps a returning visitor's cookie id", () => {
   assert.deepEqual(resolve(undefined, issuedCookie), {
     visitorId: issuedCookie,
     consentful: true,
-    cookie: "set",
+    cookie: "none",
   });
 });
 

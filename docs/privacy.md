@@ -36,7 +36,11 @@ returning visitor is recognised across days. It holds the visitor ID
 and nothing else. Its value is that day's hash, so the visitor's
 earlier events from the same day join the same ID. It is
 `HttpOnly; Secure; SameSite=Lax`, and it expires 13 months after the
-visitor's last event, so a regular visitor keeps it. Only the server
+last event that confirmed consent (`consent: true` or
+`setConsent(true)`). If your consent manager passes stored consent on
+every page load, as in [the client guide](client.md#loading-only-after-consent),
+a regular visitor keeps it. If it only reports the accept click, the
+cookie expires 13 months after that click. Only the server
 can delete it. That happens with the next event sent after
 `setConsent(false)`, usually the next page view, or at once on
 `optOut()`. `optOut()` also stops all counting in that browser, so use
@@ -211,14 +215,15 @@ apply, and have your lawyer add the legal basis and check the rest.
 > new ones. It holds an identifier, computed on the day you consent
 > from your shortened IP address and your browser's identification
 > string. Events from earlier that day are then linked to it. It
-> expires 13 months after your last visit. You can withdraw your
-> consent at any time in [link to cookie settings]; the cookie is then
+> expires 13 months after your consent was last confirmed to us [, in
+> practice after your last visit with consent given]. You can withdraw
+> your consent at any time in [link to cookie settings]; the cookie is then
 > deleted [at once / with the next page you view].]
 >
 > **Retention.** Records are deleted automatically after [13 months]
 > [, and from backups up to 7 days later].
-> [The `genug_vid` cookie lasts 13 months after your last visit.] The
-> `genug_optout` cookie lasts 400 days.
+> [The `genug_vid` cookie lasts 13 months after your consent was last
+> confirmed.] The `genug_optout` cookie lasts 400 days.
 >
 > **Opting out.** You can opt out at any time: [opt-out link]. We then
 > store a cookie named `genug_optout` in your browser, which says only
@@ -263,7 +268,9 @@ Notes on the brackets:
 - **The consent paragraph.** Only if your banner calls `setConsent`.
   If you [load the script only after consent](client.md#loading-only-after-consent),
   remove the first sentence of "How we tell visits apart" and replace
-  "Opting out" with how to withdraw consent.
+  "Opting out" with how to withdraw consent. Keep "in practice after
+  your last visit with consent given" only if your consent manager
+  passes stored consent to Genug on every page load.
 - **The opt-out link.** A button that calls
   `window.genugAnalytics.optOut()`. An inline `onclick` works only if
   your site's CSP allows inline handlers.

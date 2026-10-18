@@ -62,3 +62,12 @@ db.pragma("journal_mode = WAL");
 // an fsync per view forever to protect a handful of them from a power
 // cut is the wrong side of it. See docs/decisions.md.
 db.pragma("synchronous = NORMAL");
+
+// A DELETE in SQLite only unlinks a row: its bytes stay in the page
+// until something reuses it, readable by anyone holding the file or a
+// copy of it. That makes delete_visitor_data an erasure in name only, so
+// freed content is overwritten with zeros instead. It costs a write per
+// freed page, which the daily retention prune and the rare erasure can
+// afford. The WAL still holds the old pages until a checkpoint, which is
+// why lib/retention.ts's deleteVisitorData runs one.
+db.pragma("secure_delete = ON");

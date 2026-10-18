@@ -29,7 +29,7 @@ import {
   baseSecurityHeaders,
   cockpitSecurityHeaders,
 } from "./lib/securityHeaders.js";
-import { rateLimitEvents } from "./lib/rateLimit.js";
+import { rateLimitCockpit, rateLimitEvents } from "./lib/rateLimit.js";
 import { drainBotHits, botActivityCounter } from "./lib/botActivity.js";
 import { insertBotActivity } from "./db/botActivity.js";
 import { logInfo, logError } from "./lib/logger.js";
@@ -74,7 +74,7 @@ app.use("/mcp", mcpRouter);
 // ever decides whether to log.
 if (parseReadOnly(process.env.READ_ONLY)) {
   logInfo(
-    "READ_ONLY is set — the writing tools (delete_visitor_data, add_history_note) are not registered and the cockpit refuses every edit, reload and reset. Collection on /events continues.",
+    "READ_ONLY is set — the writing tools (delete_visitor_data, add_history_note) and get_recent_events are not registered, and the cockpit refuses every edit, reload and reset. Collection on /events continues.",
   );
 }
 
@@ -143,12 +143,18 @@ app.get("/client.js", (req, res) => {
 // is the one setting that must not have an insecure default.
 //
 // Three layers, and the order is the point. Headers first, so even the
-// login page and a 401 carry the CSP. Then the sign-in and sign-out
+// login page and a 401 carry the CSP. The request limiter beside them
+// counts every request, signed in or not. Then the sign-in and sign-out
 // routes, which have to be reachable without a session by definition.
 // Then the gate, which everything below it — the JSON router and the
 // static files alike — sits behind.
 const cockpitAuth = createCockpitAuth(requireEnv("COCKPIT_PASSWORD"));
-app.use("/cockpit", cockpitSecurityHeaders, cockpitAuth.router);
+app.use(
+  "/cockpit",
+  cockpitSecurityHeaders,
+  rateLimitCockpit,
+  cockpitAuth.router,
+);
 app.use("/cockpit", cockpitAuth.requireSession);
 app.use("/cockpit", cockpitRouter);
 

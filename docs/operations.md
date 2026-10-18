@@ -25,6 +25,24 @@ Most agent questions take well under a second. Asking for a whole year
 is the slow case: several seconds on a large database. If you only
 look at recent weeks, a lower `RETENTION_DAYS` keeps everything fast.
 
+### When the disk fills up
+
+`/events` is public. The per-address limit stops one runaway client,
+but not many addresses sending together, and each daily backup is a
+full copy of the database. So Genug keeps a floor: **with less than
+512 MB free on the data volume, `/events` answers `503` and stores
+nothing**, and the daily backup is skipped. The log says when either
+happens, and the agent's collection-health check reports the silence.
+Collection resumes within seconds once there is room again.
+
+To stop a flood before it reaches the server, put a rate limit in
+front. On Cloudflare (proxied, [see above](deploying.md#if-you-must-proxy-through-cloudflare)):
+**Security → WAF → Rate limiting rules**, matching
+`http.request.uri.path eq "/events"` and
+`http.request.method eq "POST"`, counted per IP. Set the threshold well
+above your real traffic, for example 300 requests per minute, with the
+action **Block**. Any proxy with a per-path limit works the same way.
+
 ### What server to rent
 
 **2 vCPUs and 2 GB of RAM is comfortable; 1 GB works.** Genug uses one
@@ -80,6 +98,13 @@ the disk limits how fast events are written. Run
 
   How to answer an access or erasure request you can't match is a
   question for your lawyer.
+
+  On the live database the rows are overwritten, not just unlinked, and
+  the write-ahead log is emptied after the delete. So they are gone
+  from both files once the tool returns, unless a backup is running at
+  that moment; then the log is cleared at its next checkpoint. Rows
+  that retention removes are overwritten in the database file too, and
+  leave the log at its next checkpoint.
 
   Deleting doesn't reach the backups: the daily snapshots keep the rows
   for up to 7 more days, and an off-host copy keeps them as long as you

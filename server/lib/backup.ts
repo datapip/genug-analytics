@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { freeBytes, MIN_FREE_BYTES } from "./diskSpace.js";
 
 // Fixed, not configurable — this is a "keep a week of safety nets"
 // default, distinct from RETENTION_DAYS (which governs event data, not
@@ -43,9 +44,24 @@ export async function runBackup(
   dir: string,
   eventsDir?: string,
   contextDir?: string,
+  // Swapped in tests, which cannot fill a real disk to see the skip.
+  freeSpace: (directory: string) => number | undefined = freeBytes,
 ): Promise<void> {
   const now = new Date();
   await mkdir(dir, { recursive: true });
+  // Expired copies go first, so the space they free counts below.
+  await pruneOldBackups(dir);
+  // A copy is as big as the database, and a disk filled by one leaves
+  // the live database no room to write. Skipped rather than attempted,
+  // so the floor /events stops at (lib/diskSpace.ts) holds for this too.
+  // The error reaches the caller's log; the copies already kept stay.
+  const size = db.memory ? 0 : (await stat(db.name)).size;
+  const free = freeSpace(dir);
+  if (free !== undefined && free - size < MIN_FREE_BYTES) {
+    throw new Error(
+      `Skipped: a ${size}-byte copy would leave less than ${MIN_FREE_BYTES} bytes free in ${dir} (${free} free).`,
+    );
+  }
   await db.backup(join(dir, backupFileName(now)));
   // The deployment's own event schemas, if it has any. They are tiny,
   // this job already runs daily, and without them a volume loss brings
@@ -66,7 +82,6 @@ export async function runBackup(
       recursive: true,
     });
   }
-  await pruneOldBackups(dir);
 }
 
 export async function pruneOldBackups(dir: string): Promise<void> {

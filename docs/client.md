@@ -25,7 +25,10 @@ The config options:
   tracking across days. Leave it unset until your consent manager has
   answered. Set `true` on accept, and `false` only on an explicit
   decline or withdrawal, because `false` deletes an existing
-  `genug_vid` cookie. Unset leaves a returning visitor's cookie alone.
+  `genug_vid` cookie. Unset leaves a returning visitor's cookie alone
+  but does not extend it: the cookie lasts 13 months from the last
+  `true`, so pass stored consent as `true` on every page load, not only
+  on the accept click.
   To switch without a reload, call
   `window.genugAnalytics.setConsent(true)` from your banner's callback.
   `setConsent(false)` deletes the cookie only with the next event sent,

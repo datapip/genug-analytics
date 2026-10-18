@@ -1,10 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   contextPath,
   GROUND_RULES_FILE,
   MAX_PROSE_FIELD_BYTES,
 } from "./context.js";
+import { writeFileAtomic } from "./atomicWrite.js";
 
 // The cockpit's only write to ground-rules.md: a whole-file overwrite,
 // because the file is free prose with no shape to merge against (see
@@ -32,7 +33,7 @@ export function writeGroundRules(
 
   try {
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, GROUND_RULES_FILE), text, "utf8");
+    writeFileAtomic(join(directory, GROUND_RULES_FILE), text);
     return { ok: true };
   } catch (cause) {
     return {

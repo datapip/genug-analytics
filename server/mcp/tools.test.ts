@@ -163,6 +163,31 @@ test("the manifest matches what is actually registered", async () => {
   await client.close();
 });
 
+// A client that asks before a risky call decides from these hints alone,
+// and visitor text can try to talk an agent into the erasure tool. So
+// every read says it reads, and the two writers say they write — the
+// delete as destructive.
+test("every tool says whether it writes, and the delete says it destroys", async () => {
+  const { client } = await connect();
+  const { tools } = await client.listTools();
+  const writers = new Set(["delete_visitor_data", "add_history_note"]);
+
+  for (const tool of tools) {
+    const writes = writers.has(tool.name);
+    assert.equal(
+      tool.annotations?.readOnlyHint,
+      !writes,
+      `${tool.name} must say readOnlyHint: ${!writes}`,
+    );
+    assert.equal(tool.annotations?.openWorldHint, false, tool.name);
+  }
+  const erase = tools.find((tool) => tool.name === "delete_visitor_data");
+  assert.equal(erase?.annotations?.destructiveHint, true);
+  const note = tools.find((tool) => tool.name === "add_history_note");
+  assert.equal(note?.annotations?.destructiveHint, false);
+  await client.close();
+});
+
 // The read-only promise is that nothing behind a public key can write.
 // Checked through the protocol, because "not registered" is the whole
 // mechanism: a tool that is absent from tools/list cannot be called at
