@@ -3937,6 +3937,11 @@ immediately and binds from the first real deployment onward.)
     ten-failures lockout is irrelevant. A stolen cookie would have been
     worth the password itself rather than twelve hours. scrypt is slow
     and memory-hard on purpose, and the cost is paid once at startup.
+    Its salt was a fixed string at first, the same on every install, so
+    one precomputed table would have covered every cockpit. It is now
+    random per install (`cockpit-session-salt` beside the database),
+    behind the same fixed prefix for domain separation; the change
+    signed everyone out once.
   - **The redirect-or-401 decision reads `Sec-Fetch-Dest`, not
     `Accept`.** `Accept` is the obvious test and the wrong one: `fetch`
     sends `*/*`, which matches `text/html`, so every JSON call in the

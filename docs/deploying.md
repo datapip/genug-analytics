@@ -10,6 +10,11 @@ and not on a shared one like `something.fly.dev`. The consent cookie is
 only sent back when both share a domain. Get this wrong and nothing
 looks broken, but consenting visitors are counted as new every day.
 
+**Give it a hostname of its own.** Genug tells browsers to use only
+HTTPS for this hostname, for a year, on every port. Anything else you
+reach on it over plain http, such as a dashboard on `:8000`, stops
+opening in a browser that has visited the cockpit.
+
 **Avoid `analytics.`, `stats.` and `tracking.`** as the label. Ad
 blockers match those names, and a blocked collector fails just as
 silently.

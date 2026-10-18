@@ -275,6 +275,10 @@ test("starts, logs a structured ready message, and responds to /healthz", async 
 
   const res = await fetch(`http://localhost:${port}/healthz`);
   assert.equal(res.status, 200);
+  assert.equal(
+    res.headers.get("strict-transport-security"),
+    "max-age=31536000",
+  );
 });
 
 // cockpitAuth and requireApiKey are thoroughly unit-tested on their own,
@@ -649,6 +653,29 @@ test("a restart on the same day keeps each visitor's id", async (t) => {
   // 0600 is covered in lib/dailySalt.test.ts; here only that it sits
   // beside the database, where the deployment docs say it is.
   assert.ok(existsSync(join(dir, "daily-salt.json")));
+});
+
+// The session key is derived from the password and a salt kept beside
+// the database. A salt made fresh on every start would pass every unit
+// test and sign the owner out on every deploy.
+test("a cockpit sign-in survives a restart", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "genug-wiring-"));
+  const port = 4236;
+  const env = baseEnv(join(dir, "test.db"), port);
+
+  const first = spawnServer(env);
+  await first.waitForLog((line) => line.msg === "genug server listening");
+  const cookie = await signInToCockpit(port);
+  await first.stop();
+
+  const second = spawnServer(env);
+  stopAndCleanUp(t, dir, second);
+  await second.waitForLog((line) => line.msg === "genug server listening");
+  const res = await fetch(`http://localhost:${port}/cockpit/data?range=24h`, {
+    headers: { cookie },
+  });
+  assert.equal(res.status, 200);
+  assert.ok(existsSync(join(dir, "cockpit-session-salt")));
 });
 
 // The container runs as an unprivileged user, so the most likely

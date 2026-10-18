@@ -3,6 +3,17 @@ import type { Request, Response, NextFunction } from "express";
 // Applied to every response. Cheap, and correct regardless of route:
 // nothing this server serves should ever be content-type-sniffed, and
 // nothing should leak its URL as a referrer to another origin.
+//
+// HSTS too, so that after one visit a browser never tries this host over
+// plain http, where someone on the same network could keep it there and
+// read the cockpit password as it is typed. Sent on every response
+// rather than only when req.secure says https, which is only as true as
+// TRUST_PROXY: browsers ignore the header over http, so the only place it
+// takes effect is the https it describes. This host only — no
+// includeSubDomains, since the rest of the deployer's domain is not ours
+// to pin — and no preload, which is a list a deployment opts into itself.
+const HSTS = "max-age=31536000";
+
 export function baseSecurityHeaders(
   req: Request,
   res: Response,
@@ -10,6 +21,7 @@ export function baseSecurityHeaders(
 ): void {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Strict-Transport-Security", HSTS);
   next();
 }
 

@@ -103,6 +103,20 @@ test("stripUnknownParams drops everything else", () => {
   );
 });
 
+test("stripUnknownParams drops a username and password", () => {
+  assert.equal(
+    stripUnknownParams(
+      "https://admin:hunter2@example.com/pricing?utm_source=n",
+      DEFAULTS,
+    ),
+    "https://example.com/pricing?utm_source=n",
+  );
+  assert.equal(
+    stripUnknownParams("https://admin@example.com/", DEFAULTS),
+    "https://example.com/",
+  );
+});
+
 test("stripUnknownParams leaves a URL with no query string alone", () => {
   assert.equal(
     stripUnknownParams("https://example.com/pricing"),

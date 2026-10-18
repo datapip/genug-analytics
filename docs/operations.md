@@ -132,6 +132,12 @@ the disk limits how fast events are written. Run
   for a long time, delete that file. Nothing is lost: a new one is
   made on start.
 
+- **Cockpit session salt**: `cockpit-session-salt` beside the database
+  is made on the first start and keeps cockpit sign-ins valid across
+  restarts. It is not sensitive on its own, but keep it as private as
+  the database. It is not backed up: if it is lost, a new one is made
+  and every browser signs in again once.
+
 - **Update check**: once a day the server asks GitHub whether a newer
   version exists, so the cockpit can say so. `UPDATE_CHECK=false` turns
   it off.

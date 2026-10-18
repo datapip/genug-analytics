@@ -7,10 +7,16 @@ import { renameSync, rmSync, writeFileSync } from "node:fs";
 // and renamed over it instead: a rename within one directory is atomic,
 // so a reader sees the old file or the new one. The `.tmp` suffix keeps
 // a leftover out of everything that reads only `.json` files.
-export function writeFileAtomic(path: string, data: string): void {
+//
+// `mode` applies to the file as written; the rename keeps it.
+export function writeFileAtomic(
+  path: string,
+  data: string,
+  mode?: number,
+): void {
   const temporary = `${path}.tmp`;
   try {
-    writeFileSync(temporary, data, "utf8");
+    writeFileSync(temporary, data, { encoding: "utf8", mode });
     renameSync(temporary, path);
   } catch (error) {
     // The write's own error is the one worth reporting; a leftover that

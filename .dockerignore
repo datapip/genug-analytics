@@ -15,6 +15,8 @@ local-demo
 # and published with it. These can hold real data: local backups of a
 # database, cockpit screenshots, and an agent's local notes and settings.
 backups
+daily-salt.json
+cockpit-session-salt
 .claude
 CLAUDE.local.md
 .playwright-mcp

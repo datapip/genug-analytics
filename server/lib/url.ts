@@ -154,6 +154,11 @@ export function stripUnknownParams(
     if (!isKeptQueryParam(key, parts)) url.searchParams.delete(key);
   }
   if (!keeps(parts.hashes, url.hash.slice(1))) url.hash = "";
+  // A `user:pass@` part is a credential, not a page. Browsers strip it
+  // from document.referrer and rarely leave it in location.href, but a
+  // direct POST can carry one, and nothing reads it back.
+  url.username = "";
+  url.password = "";
   return url.toString();
 }
 

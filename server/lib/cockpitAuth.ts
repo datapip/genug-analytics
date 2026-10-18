@@ -153,9 +153,10 @@ export interface CockpitAuth {
 // COCKPIT_PASSWORD is unset, the same as MCP_API_KEY.
 export function createCockpitAuth(
   password: string,
+  sessionSalt: Buffer,
   limiter: FailedAttemptLimiter = cockpitPasswordLimiter,
 ): CockpitAuth {
-  const key = deriveSessionKey(password);
+  const key = deriveSessionKey(password, sessionSalt);
   const router = Router();
 
   // 1 KB. This is the only unauthenticated POST this server has outside

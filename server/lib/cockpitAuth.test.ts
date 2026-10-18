@@ -15,6 +15,7 @@ import { createFailedAttemptLimiter } from "./rateLimit.js";
 // hand-rolled mock response would be asserting against my own idea of
 // what Express does rather than what it does.
 const PASSWORD = "hunter2";
+const SALT = Buffer.alloc(16, 1);
 
 const servers: ReturnType<express.Express["listen"]>[] = [];
 after(() => {
@@ -24,8 +25,9 @@ after(() => {
 function mountCockpit(
   limiter = createFailedAttemptLimiter(10, 60_000),
   password = PASSWORD,
+  salt = SALT,
 ) {
-  const auth = createCockpitAuth(password, limiter);
+  const auth = createCockpitAuth(password, salt, limiter);
   const app = express();
   app.use("/cockpit", auth.router);
   app.use("/cockpit", auth.requireSession);
@@ -121,6 +123,19 @@ test("the cockpit is reachable with the cookie and not without it", async () => 
   const cookie = cookieFrom(await signIn(base));
   const withCookie = await get(`${base}/cockpit/data`, { cookie });
   assert.equal(withCookie.status, 200);
+});
+
+// The install's salt has to reach the key that signs the cookie, or two
+// cockpits with the same password accept each other's sessions again.
+test("a session from another install with the same password is refused", async () => {
+  const elsewhere = mountCockpit(undefined, PASSWORD, Buffer.alloc(16, 2));
+
+  const cookie = cookieFrom(await signIn(base));
+  assert.equal((await get(`${base}/cockpit/data`, { cookie })).status, 200);
+  assert.equal(
+    (await get(`${elsewhere}/cockpit/data`, { cookie })).status,
+    401,
+  );
 });
 
 // The failure that would have made every JSON call in the cockpit

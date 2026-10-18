@@ -13,6 +13,10 @@ dist/
 # copied beside it are not, and they are a deployment's own files.
 backups/
 
+# Written beside the database too. Neither belongs to the code.
+daily-salt.json
+cockpit-session-salt
+
 .env
 .env.*
 !.env.example

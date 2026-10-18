@@ -18,9 +18,9 @@ export const COCKPIT_SESSION_COOKIE = "genug_cockpit_session";
 export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 // Domain separation, so the key can never collide with another use of
-// the same password. Doubles as scrypt's salt: its real job is stopping
-// one precomputed table from covering many targets, and with a single
-// password on a single deployment a fixed string does that well enough.
+// the same password. Prefixed to the install's own random salt
+// (lib/cockpitSessionSalt.ts), which is what stops one precomputed
+// table from covering every deployment.
 const KEY_CONTEXT = "genug-cockpit-session";
 const KEY_BYTES = 32;
 
@@ -38,8 +38,12 @@ const KEY_BYTES = 32;
 //
 // Called once at startup, so the cost is paid on a path where nobody is
 // waiting.
-export function deriveSessionKey(password: string): Buffer {
-  return scryptSync(password, KEY_CONTEXT, KEY_BYTES);
+export function deriveSessionKey(password: string, salt: Buffer): Buffer {
+  return scryptSync(
+    password,
+    Buffer.concat([Buffer.from(KEY_CONTEXT), salt]),
+    KEY_BYTES,
+  );
 }
 
 export function issueSessionToken(

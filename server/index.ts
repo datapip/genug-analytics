@@ -8,6 +8,10 @@ import { eventsRouter } from "./routes/events.js";
 import { mcpRouter } from "./routes/mcp.js";
 import { cockpitRouter } from "./routes/cockpit.js";
 import { createCockpitAuth } from "./lib/cockpitAuth.js";
+import {
+  SESSION_SALT_FILE,
+  loadSessionSalt,
+} from "./lib/cockpitSessionSalt.js";
 import { renderCockpitPage, type CockpitPage } from "./lib/cockpitPage.js";
 import {
   parseRetentionDays,
@@ -148,7 +152,10 @@ app.get("/client.js", (req, res) => {
 // routes, which have to be reachable without a session by definition.
 // Then the gate, which everything below it — the JSON router and the
 // static files alike — sits behind.
-const cockpitAuth = createCockpitAuth(requireEnv("COCKPIT_PASSWORD"));
+const cockpitAuth = createCockpitAuth(
+  requireEnv("COCKPIT_PASSWORD"),
+  loadSessionSalt(join(dirname(dbPath), SESSION_SALT_FILE)),
+);
 app.use(
   "/cockpit",
   cockpitSecurityHeaders,

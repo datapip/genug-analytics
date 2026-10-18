@@ -11,8 +11,9 @@ import {
 // scrypt is deliberately slow (that is the point — see the comment on
 // deriveSessionKey), so the keys are derived once for the whole file
 // rather than per test.
-const key = deriveSessionKey("hunter2");
-const otherKey = deriveSessionKey("hunter3");
+const salt = Buffer.alloc(16, 1);
+const key = deriveSessionKey("hunter2", salt);
+const otherKey = deriveSessionKey("hunter3", salt);
 
 test("a freshly issued token verifies", () => {
   assert.ok(verifySessionToken(issueSessionToken(key), key));
@@ -29,7 +30,20 @@ test("rotating the password invalidates a session that was already open", () => 
   const openSession = issueSessionToken(key);
 
   assert.equal(
-    verifySessionToken(openSession, deriveSessionKey("a-new-password")),
+    verifySessionToken(openSession, deriveSessionKey("a-new-password", salt)),
+    undefined,
+  );
+});
+
+// What the per-install salt is for: the same password on two
+// deployments gives two keys, so neither a token nor a precomputed
+// table carries over from one to the other.
+test("the same password on another install signs with another key", () => {
+  const elsewhere = deriveSessionKey("hunter2", Buffer.alloc(16, 2));
+
+  assert.notDeepEqual(elsewhere, key);
+  assert.equal(
+    verifySessionToken(issueSessionToken(key), elsewhere),
     undefined,
   );
 });
