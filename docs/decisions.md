@@ -5678,3 +5678,48 @@ instructions already reach the agent before its first call.
 
 **Not done.** Merging existing installations into one is a data copy
 nothing here does.
+
+### Bots that run a real browser
+
+The User-Agent check (`lib/bots.ts`) caught little on the live sites:
+23 dropped requests against 802 page views in 30 days on one of them.
+That is expected. Most crawlers never run JavaScript, so they never
+reach `/events`. The ones that do run a real browser engine, and those
+are exactly the ones a User-Agent list misses when they fake it. Three
+cheap changes target them. Each is a few lines; none needs a
+dependency or stores anything new.
+
+**The client marks automated browsers.** Puppeteer, Playwright and
+Selenium set `navigator.webdriver`, even with a faked User-Agent. The
+client adds `automated: true` to the body, and `routes/events.ts`
+drops it with the same 204 and counts it in `get_bot_activity`. It
+sends the event instead of staying quiet so the drop is still counted;
+a client that sent nothing would bring back the "left no trace" gap the
+bot counter was built to close. Anyone can send the mark, but it only
+gets their own event dropped. Stealth setups that hide the flag still
+get through. Chasing them means fingerprinting the visitor, which is
+the opposite of consentless.
+
+**A prerendered page waits until it is shown.** Chrome loads pages in
+the background before the visitor opens them: an address-bar guess, or
+the site's speculation rules. The client counted those as page views,
+including pages nobody ever opened. `send()` now waits for
+`prerenderingchange` while `document.prerendering` is true, so every
+event waits, not only the page view. A page that is never shown sends
+nothing. These are not bots, but the effect is the same: a page view
+with no human.
+
+**The User-Agent list gained three groups.** Page-speed testers
+(Lighthouse, so PageSpeed Insights, plus GTmetrix and WebPageTest's
+`PTST`) run a real browser and counted as a mobile visit on every run,
+the site owner's own runs included. `headless` replaces
+`headlesschrome`. HTTP libraries and command-line tools (`curl`,
+`wget`, `python-`, `go-http-client`, `okhttp`, `axios`, `node-fetch`,
+`java/`) never run the client script, so a request from one was posted
+to `/events` directly. None of these strings appears in a browser's
+User-Agent.
+
+**Not done.** Datacenter IP lists need a dependency or upkeep. A
+missing `Accept-Language` is too weak a signal on its own. Scoring
+sessions by behaviour costs far more than sites this size need. The
+bot count is still one number, not split by which check fired.

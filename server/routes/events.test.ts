@@ -10,6 +10,7 @@ import { createEventsRouter } from "./events.js";
 import { openDatabase } from "../db/index.js";
 import { createDailySalt } from "../lib/dailySalt.js";
 import { createDiskGuard } from "../lib/diskSpace.js";
+import { botActivityCounter } from "../lib/botActivity.js";
 
 // A real database file, not :memory:, so the connection has the same
 // settings as the server's (WAL, secure_delete).
@@ -477,6 +478,7 @@ test("matches an event name and prop keys regardless of case", async () => {
 // bot sees no error. The owner sees the count in get_bot_activity.
 test("drops a bot's request with the same 204 a real event gets", async () => {
   const ua = "Googlebot/2.1 (+http://www.google.com/bot.html)";
+  const botsBefore = botActivityCounter.count;
   const res = await post(
     {
       event: "page_view",
@@ -487,7 +489,54 @@ test("drops a bot's request with the same 204 a real event gets", async () => {
   );
 
   assert.equal(res.status, 204);
+  assert.equal(botActivityCounter.count, botsBefore + 1, "counted as a bot");
   assert.equal(newRows().length, 0);
+});
+
+// The client script marks events from a browser a program drives, which
+// catches automation that fakes a real User-Agent.
+test("drops an event the client marked automated, like any other bot", async () => {
+  const botsBefore = botActivityCounter.count;
+  const res = await post(
+    {
+      event: "page_view",
+      url: "https://site.example/",
+      props: { page_title: "Home", document_language: "en" },
+      automated: true,
+    },
+    { "user-agent": "test-automated" },
+  );
+
+  assert.equal(res.status, 204);
+  assert.equal(
+    botActivityCounter.count,
+    botsBefore + 1,
+    "counted as a bot, so the drop leaves a trace",
+  );
+  assert.equal(newRows().length, 0);
+});
+
+// Only the literal true counts. Anything else is an ordinary body, and
+// the envelope drops the unknown key.
+test("an automated key that isn't true leaves the event stored", async () => {
+  const botsBefore = botActivityCounter.count;
+  const res = await post(
+    {
+      event: "page_view",
+      url: "https://site.example/",
+      props: { page_title: "Home", document_language: "en" },
+      automated: "yes",
+    },
+    { "user-agent": "test-automated-not-true" },
+  );
+
+  assert.equal(res.status, 204);
+  assert.equal(
+    botActivityCounter.count,
+    botsBefore + 0,
+    "not counted as a bot",
+  );
+  assert.equal(newRows().length, 1);
 });
 
 // /events is public, so the client script removing these parts isn't
@@ -933,6 +982,22 @@ test("an opt-out clears the visitor cookie and stores nothing", async () => {
   assert.equal(newRows().length, 0, "an opt-out is not an event");
   assert.equal(rejectedCount(), before, "and not a rejected one either");
 
+  const cleared = res.headers.get("set-cookie");
+  assert.ok(
+    cleared?.includes("genug_vid=;"),
+    `expected a cleared cookie, got ${cleared}`,
+  );
+});
+
+// A cookie set before a User-Agent joined the bot list must still be
+// removable, so the opt-out runs before the bot check.
+test("an opt-out from a User-Agent on the bot list still clears the cookie", async () => {
+  const res = await post(
+    { optOut: true },
+    { "user-agent": "curl/8.5.0", cookie: `genug_vid=${"a".repeat(64)}` },
+  );
+
+  assert.equal(res.status, 204);
   const cleared = res.headers.get("set-cookie");
   assert.ok(
     cleared?.includes("genug_vid=;"),

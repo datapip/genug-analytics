@@ -158,6 +158,13 @@ const parseBody = json({ limit: "16kb" });
 // that also has an event name is an event, not an opt-out.
 const optOutSchema = z.strictObject({ optOut: z.literal(true) });
 
+// The client script adds `automated: true` when a program drives the
+// browser (navigator.webdriver). That catches Puppeteer, Playwright and
+// Selenium even when they fake a normal User-Agent. Not strict: the mark
+// sits on an ordinary event body. Anyone can send it, but all it does is
+// get their own event dropped.
+const automatedSchema = z.object({ automated: z.literal(true) });
+
 // Records a refused event in rejected_events, so the cockpit and
 // get_top_rejected_events can show why, and answers 400.
 interface Rejection {
@@ -195,21 +202,15 @@ function receiveEvent(
   // Read the clock once and use the same time everywhere below.
   const now = new Date();
 
-  // Bots are dropped with the same 204 a real event gets, so a real
-  // visitor mistaken for a bot never sees an error. See lib/bots.ts.
-  if (isBotUserAgent(req.headers["user-agent"])) {
-    recordBotHit(botActivityCounter);
-    res.status(204).end();
-    return;
-  }
-
   // An opt-out is not an event and is never stored. It exists so the
   // visitor cookie can be deleted: the cookie is httpOnly, so the site's
   // JavaScript can't delete it, only a response from here. The client
   // sets its own opt-out cookie and then sends nothing more.
   //
   // Checked before the envelope, because an opt-out has no event name or
-  // role and would otherwise be rejected.
+  // role and would otherwise be rejected. And before the bot check, so
+  // the cookie is cleared whatever the User-Agent says: a cookie set
+  // before a User-Agent joined the bot list must still be removable.
   if (optOutSchema.safeParse(req.body).success) {
     if (parseCookies(req.headers.cookie)[VISITOR_ID_COOKIE]) {
       res.clearCookie(VISITOR_ID_COOKIE, VISITOR_ID_COOKIE_OPTIONS);
@@ -218,9 +219,21 @@ function receiveEvent(
     return;
   }
 
+  // Bots are dropped with the same 204 a real event gets, so a real
+  // visitor mistaken for a bot never sees an error. See lib/bots.ts.
+  // Before the disk guard, since a dropped request writes nothing.
+  if (
+    isBotUserAgent(req.headers["user-agent"]) ||
+    automatedSchema.safeParse(req.body).success
+  ) {
+    recordBotHit(botActivityCounter);
+    res.status(204).end();
+    return;
+  }
+
   // After the opt-out, which writes nothing and must still clear the
-  // cookie; before the envelope, because a rejected event is written too.
-  // A 503 rather than a quiet 204: the event is lost, and the browser's
+  // cookie, and after the bot check; before the envelope, because a
+  // rejected event is written too. A 503 rather than a quiet 204: the event is lost, and the browser's
   // network panel should show it.
   if (!deps.diskGuard.hasRoom(now.getTime())) {
     res.set("Retry-After", "60");

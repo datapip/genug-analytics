@@ -206,6 +206,16 @@ Nothing fires on page load by default. Two ways to turn it on:
    with the page title and language. It is ignored if the attribute
    above is present, so a page never fires both.
 
+A page Chrome prerenders in the background sends nothing until the
+visitor opens it, and nothing at all if they never do. This applies to
+every event, `track()` calls included. Events from a browser a program
+drives (Puppeteer, Playwright, Selenium) are counted as bots, not
+stored. So a test run with one of those tools shows up in
+`get_bot_activity`, not in your traffic. So is anything posted to `/events` by
+an HTTP library's default User-Agent (`okhttp`, `curl`, `axios` and
+others, see `server/lib/bots.ts`). A native app that posts events
+itself must send its own User-Agent, or every event is dropped.
+
 ### Tracking single-page-app route changes
 
 In a single-page app, page loads fire only once. Add

@@ -11,7 +11,12 @@ nothing on the visitor's device: no `localStorage` or
 `sessionStorage`, and no fingerprinting (no canvas, screen, font or
 hardware probing). The script reads the page URL, title and
 `<html lang>`, the referrer, its own opt-out cookie, and clicked links
-once `enableAutoLinkTracking` is on. The visitor ID is a hash of four things:
+once `enableAutoLinkTracking` is on. It also checks two browser flags
+and stores neither. `navigator.webdriver` is set when a program such
+as Puppeteer or Selenium drives the browser; such a request is dropped
+and only counted as bot traffic. `document.prerendering` is true while
+Chrome loads a page in the background; the script sends nothing until
+the page is shown. The visitor ID is a hash of four things:
 
 - the visitor's address, cut to its network block (IPv4 to `/24`, IPv6
   to `/48`: `203.0.113.47` becomes `203.0.113.0`);

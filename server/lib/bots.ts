@@ -1,10 +1,19 @@
 // Catches crawlers and automation tools that name themselves in the
-// User-Agent, which most do. A bot pretending to be a real browser gets
-// through; that is a known limit (see "Bot/spam filtering" in
-// docs/decisions.md). A missing User-Agent counts as a bot too, since
-// real browsers always send one.
+// User-Agent, which most do. A bot faking a real browser's User-Agent
+// gets through here; the client script's `automated` mark
+// (routes/events.ts) catches the common automation tools that do that.
+// A missing User-Agent counts as a bot too, since real browsers always
+// send one.
+//
+// Besides crawlers, three groups real visitors never match:
+// - page-speed testers that run a real browser: Lighthouse (PageSpeed
+//   Insights), GTmetrix, WebPageTest ("PTST"). Each run would otherwise
+//   count as a visit.
+// - headless browsers in general, not only HeadlessChrome.
+// - HTTP libraries and command-line tools. They don't run the client
+//   script, so a request from one was posted to /events directly.
 const BOT_USER_AGENT_PATTERN =
-  /bot|spider|crawl|slurp|facebookexternalhit|mediapartners|ia_archiver|headlesschrome|phantomjs|selenium/i;
+  /bot|spider|crawl|slurp|facebookexternalhit|mediapartners|ia_archiver|headless|phantomjs|selenium|lighthouse|gtmetrix|ptst|curl|wget|python-|go-http-client|okhttp|axios|node-fetch|java\//i;
 
 // Real devices whose model name contains one of the patterns above.
 // CUBOT is an Android phone brand, and `bot` matches inside

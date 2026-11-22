@@ -116,7 +116,7 @@ export const registerDiagnosticTools: ToolRegistrar = (
     "get_bot_activity",
     {
       description:
-        "Get how many requests to /events were dropped as bot/crawler traffic in a given time period, as { requests }. Best-effort only (see lib/bots.ts): catches bots that identify themselves honestly, not one deliberately spoofing a real browser's User-Agent. A rough volume signal, not a precise count — e.g. to notice an unusual crawler surge — not something to build alerting logic on top of.",
+        "Get how many requests to /events were dropped as bot/crawler traffic in a given time period, as { requests }. Counts requests whose User-Agent names a crawler, speed tester (Lighthouse, GTmetrix, WebPageTest), headless browser or HTTP library, has none, or that the client script marked as sent by an automated browser (navigator.webdriver: Puppeteer, Playwright, Selenium). Best-effort: a bot that hides the webdriver flag and fakes a browser User-Agent is counted as a visitor instead. Not the site's total crawler traffic either: most crawlers don't run JavaScript, so they never call /events and appear nowhere here. Anyone can raise this number with hand-made requests, so a spike is not proof of a crawler. A rough volume signal, not a precise count — e.g. to notice an unusual crawler surge — not something to build alerting logic on top of.",
       inputSchema: period,
     },
     async ({ from, to }) => {

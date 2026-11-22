@@ -32,6 +32,13 @@ type QueuedCall = [method: string, args: unknown[]];
 // This file is compiled as a script, not a module (see tsconfig), so a
 // top-level interface adds to the global Window type directly, without
 // `declare global`.
+// Not in TypeScript's DOM types yet. Only Chromium browsers have it, so
+// it is undefined (falsy) everywhere else.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- global augmentation, not a local type
+interface Document {
+  prerendering?: boolean;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- global augmentation, not a local type
 interface Window {
   genugAnalytics?: GenugAnalyticsApi;
@@ -195,6 +202,23 @@ interface Window {
     props: Record<string, unknown> = {},
     idempotencyKey?: string,
   ): void {
+    // Chrome can load a page in the background before the visitor opens
+    // it: a guess from the address bar, or the site's speculation rules.
+    // Nobody has seen that page yet, and maybe nobody ever will. So the
+    // event waits until the page is shown, and is never sent if it isn't.
+    // The props are copied now: a caller that changes its object after
+    // track() must not change what is sent. Props are flat (the schema
+    // allows no nested object), so a shallow copy is a full one.
+    if (document.prerendering) {
+      const propsNow = { ...props };
+      document.addEventListener(
+        "prerenderingchange",
+        () => send(identity, propsNow, idempotencyKey),
+        { once: true },
+      );
+      return;
+    }
+
     // Every event passes through here (track(), automatic page views,
     // link clicks, route changes), so checking the opt-out once here
     // covers all of them.
@@ -213,6 +237,11 @@ interface Window {
       referrer: document.referrer ? strippedUrl(document.referrer) : "",
       idempotencyKey,
       props,
+      // Puppeteer, Playwright and Selenium set navigator.webdriver, even
+      // when they fake a normal User-Agent. The event is still sent, so
+      // the server can count it as a bot instead of it vanishing without
+      // a trace. Left out for a real visitor, like idempotencyKey above.
+      automated: navigator.webdriver === true ? true : undefined,
     });
     const blob = new Blob([body], { type: "application/json" });
     post(blob);

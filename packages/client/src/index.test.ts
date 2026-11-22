@@ -58,6 +58,13 @@ function loadClient(
     queued?: [string, unknown[]][];
     // The lists the server writes in; null leaves the placeholder.
     keptUrlParts?: KeptUrlParts | null;
+    // What navigator.webdriver says: true when a program (Puppeteer,
+    // Playwright, Selenium) drives the browser.
+    webdriver?: boolean;
+    // Loads the page as Chrome does in the background, before the
+    // visitor opens it. document.prerendering is then true until the
+    // test shows the page with activatePrerender().
+    prerendering?: boolean;
   } = {},
 ) {
   const html = `<!doctype html><html ${options.htmlAttrs ?? ""}><head></head><body></body></html>`;
@@ -92,6 +99,27 @@ function loadClient(
     });
   }
 
+  if (options.webdriver !== undefined) {
+    Object.defineProperty(window.navigator, "webdriver", {
+      configurable: true,
+      get: () => options.webdriver,
+    });
+  }
+
+  // Shows a prerendered page: the flag turns false, then the event fires,
+  // in the order Chrome does it.
+  let prerendering = options.prerendering ?? false;
+  if (options.prerendering) {
+    Object.defineProperty(window.document, "prerendering", {
+      configurable: true,
+      get: () => prerendering,
+    });
+  }
+  const activatePrerender = (): void => {
+    prerendering = false;
+    window.document.dispatchEvent(new window.Event("prerenderingchange"));
+  };
+
   if (options.inlineScript) {
     const inline = window.document.createElement("script");
     window.document.head.append(inline);
@@ -123,7 +151,7 @@ function loadClient(
         ),
   );
 
-  return { window, beaconCalls, fetchCalls, warnings };
+  return { window, beaconCalls, fetchCalls, warnings, activatePrerender };
 }
 
 async function beaconBodies(beaconCalls: BeaconCall[]): Promise<unknown[]> {
@@ -200,6 +228,115 @@ test("track() with an idempotencyKey includes it in the beacon body", async () =
     idempotencyKey: "ORD-1001",
     props: { value: 49.9 },
   });
+});
+
+// The server drops a marked event and counts it as a bot. Without the
+// webdriver flag the key is left out entirely; the deepEqual in the
+// tests above checks that.
+test("an event from a browser a program drives is marked automated", async () => {
+  const { window, beaconCalls } = loadClient({ webdriver: true });
+
+  (
+    window as unknown as {
+      genugAnalytics: { track: (e: string, p?: object) => void };
+    }
+  ).genugAnalytics.track("custom_event");
+
+  const [body] = await beaconBodies(beaconCalls);
+  assert.equal((body as { automated?: unknown }).automated, true);
+});
+
+test("navigator.webdriver set to false adds no automated key", async () => {
+  const { window, beaconCalls } = loadClient({ webdriver: false });
+
+  (
+    window as unknown as {
+      genugAnalytics: { track: (e: string, p?: object) => void };
+    }
+  ).genugAnalytics.track("custom_event");
+
+  const [body] = await beaconBodies(beaconCalls);
+  assert.equal("automated" in (body as object), false);
+});
+
+// A prerendered page may never be opened. Its page view must wait until
+// it is shown, or every guess Chrome makes counts as a visit.
+test("a prerendered page sends its page view only once it is shown", async () => {
+  const { beaconCalls, activatePrerender } = loadClient({
+    prerendering: true,
+    config: { enableAutoPageTracking: true },
+  });
+
+  assert.equal(beaconCalls.length, 0);
+
+  activatePrerender();
+
+  assert.equal(beaconCalls.length, 1);
+  const [body] = await beaconBodies(beaconCalls);
+  assert.equal((body as { auto?: unknown }).auto, "pageView");
+});
+
+test("track() during prerendering waits too, and sends once", async () => {
+  const { window, beaconCalls, activatePrerender } = loadClient({
+    prerendering: true,
+  });
+  const props = { foo: "bar" };
+
+  (
+    window as unknown as {
+      genugAnalytics: { track: (e: string, p?: object) => void };
+    }
+  ).genugAnalytics.track("custom_event", props);
+  assert.equal(beaconCalls.length, 0);
+  // Sent as they were when track() was called, not as they are later.
+  props.foo = "changed";
+
+  activatePrerender();
+  // The listener is { once: true }: a second event must not resend.
+  window.document.dispatchEvent(new window.Event("prerenderingchange"));
+
+  assert.equal(beaconCalls.length, 1);
+  const [body] = await beaconBodies(beaconCalls);
+  assert.deepEqual((body as { props?: unknown }).props, { foo: "bar" });
+});
+
+// A consent banner can replay a stored choice while the page is still
+// prerendering. The choice made by then must apply when the page is
+// shown, so the deferred event is built at that moment, not before.
+test("an opt-out during prerendering stops the deferred page view", async () => {
+  const { window, beaconCalls, activatePrerender } = loadClient({
+    prerendering: true,
+    config: { enableAutoPageTracking: true },
+  });
+
+  (
+    window as unknown as { genugAnalytics: { optOut: () => void } }
+  ).genugAnalytics.optOut();
+  activatePrerender();
+
+  const bodies = (await beaconBodies(beaconCalls)) as Record<string, unknown>[];
+  assert.equal(
+    bodies.some((b) => "auto" in b || "event" in b),
+    false,
+    "only the opt-out request itself may be sent",
+  );
+});
+
+test("setConsent during prerendering applies to the deferred page view", async () => {
+  const { window, beaconCalls, activatePrerender } = loadClient({
+    prerendering: true,
+    config: { enableAutoPageTracking: true },
+  });
+
+  (
+    window as unknown as {
+      genugAnalytics: { setConsent: (c: boolean) => void };
+    }
+  ).genugAnalytics.setConsent(true);
+  activatePrerender();
+
+  const [body] = await beaconBodies(beaconCalls);
+  assert.equal((body as { consent?: unknown }).consent, true);
 });
 
 test("setConsent() changes consent on subsequent track() calls without a reload", async () => {
